@@ -1,0 +1,26 @@
+appId: com.boku.app
+productName: Boku
+
+directories:
+  output: release
+
+files:
+  - main/dist/**
+  - preload/dist/**
+  - renderer/dist/**
+  - package.json
+
+asar: true
+
+win:
+  target:
+    - nsis
+
+mac:
+  target:
+    - dmg
+  category: public.app-category.productivity
+
+linux:
+  target:
+    - AppImage

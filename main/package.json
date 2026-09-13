@@ -1,0 +1,18 @@
+{
+  "name": "@boku/desktop-main",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.cjs",
+  "scripts": {
+    "build": "vp build",
+    "dev": "vp build --watch"
+  },
+  "dependencies": {
+    "@boku/desktop-shared": "workspace:*"
+  },
+  "devDependencies": {
+    "electron": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}
