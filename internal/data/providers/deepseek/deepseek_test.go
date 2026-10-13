@@ -123,6 +123,14 @@ func TestDescriptor(t *testing.T) {
 	if descriptor.DocsURL == "" {
 		t.Error("the descriptor does not say where to get a key")
 	}
+	// The page the panel's headline opens is the provider's own account
+	// page, and it is https: the interface hands it to the system to open.
+	if descriptor.UsageURL != deepseekdomain.UsageURL {
+		t.Errorf("UsageURL = %q, want %q", descriptor.UsageURL, deepseekdomain.UsageURL)
+	}
+	if !strings.HasPrefix(descriptor.UsageURL, "https://") {
+		t.Errorf("UsageURL = %q, want an https address", descriptor.UsageURL)
+	}
 	if !strings.HasSuffix(descriptor.Endpoint, balancePath) {
 		t.Errorf("Endpoint = %q, want the balance address", descriptor.Endpoint)
 	}

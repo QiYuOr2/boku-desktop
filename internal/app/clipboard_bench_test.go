@@ -18,16 +18,19 @@ func BenchmarkHistoryFrame(b *testing.B) {
 	state := clipboardState(b, device, &testToolStore{
 		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
 	})
+	// A full record range, so the frame is measured at the size the user can
+	// ask for.
+	size := state.clipboardHistorySize()
 	ctx := context.Background()
-	for i := 0; i < historyPage; i++ {
+	for i := 0; i < size; i++ {
 		device.set(domain.ClipContent{
 			Kind: domain.ClipKindText,
 			Text: fmt.Sprintf("第 %d 条复制的内容，这是一行比较长的文字用来撑开宽度", i),
 		})
 		state.clipboard.Read(ctx)
 	}
-	if got := len(state.clipboardHistory()); got != historyPage {
-		b.Fatalf("the history holds %d entries, want %d", got, historyPage)
+	if got := len(state.clipboardHistory()); got != size {
+		b.Fatalf("the history holds %d entries, want %d", got, size)
 	}
 
 	b.ReportAllocs()
@@ -60,7 +63,7 @@ func BenchmarkHistoryRead(b *testing.B) {
 		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
 	})
 	ctx := context.Background()
-	for i := 0; i < historyPage; i++ {
+	for i := 0; i < state.clipboardHistorySize(); i++ {
 		device.set(domain.ClipContent{Kind: domain.ClipKindText, Text: fmt.Sprintf("copy %d", i)})
 		state.clipboard.Read(ctx)
 	}

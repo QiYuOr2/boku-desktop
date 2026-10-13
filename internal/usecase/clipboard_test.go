@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -598,6 +599,89 @@ func TestSwitchesSurviveASaveFailure(t *testing.T) {
 	}
 	if !clipboard.Settings().ClipboardMonitoring {
 		t.Error("the switch the user flipped was dropped")
+	}
+}
+
+// The record range bounds the history: it is the user's choice, shortening it
+// drops what no longer fits at once, and it is written down for the next
+// start.
+func TestRecordRangeBoundsTheHistory(t *testing.T) {
+	tools := &fakeTools{settings: domain.ToolSettings{
+		ClipboardRegionVisible: true,
+		ClipboardMonitoring:    true,
+		ClipboardHistorySize:   domain.ClipboardMaxHistorySize,
+	}}
+	clipboard, device, store, _ := newTestClipboard(t, ClipboardOptions{Tools: tools})
+	if got := clipboard.Settings().HistorySize(); got != domain.ClipboardMaxHistorySize {
+		t.Fatalf("the range starts at %d, want %d", got, domain.ClipboardMaxHistorySize)
+	}
+	ctx := context.Background()
+	total := domain.ClipboardMaxHistorySize + 2
+	for i := 0; i < total; i++ {
+		device.set(textReading(fmt.Sprintf("copy %d", i)))
+		clipboard.Read(ctx)
+	}
+	if got := len(clipboard.History(0)); got != domain.ClipboardMaxHistorySize {
+		t.Fatalf("the history holds %d entries, want the range %d", got, domain.ClipboardMaxHistorySize)
+	}
+
+	if err := clipboard.SetHistorySize(ctx, domain.ClipboardMinHistorySize); err != nil {
+		t.Fatalf("SetHistorySize failed: %v", err)
+	}
+	if got := len(clipboard.History(0)); got != domain.ClipboardMinHistorySize {
+		t.Errorf("the history holds %d entries after the range was shortened, want %d",
+			got, domain.ClipboardMinHistorySize)
+	}
+	waitFor(t, "the pruned history to be written", func() bool {
+		return len(store.stored()) == domain.ClipboardMinHistorySize
+	})
+	if got := tools.settings.HistorySize(); got != domain.ClipboardMinHistorySize {
+		t.Errorf("the saved range is %d, want %d", got, domain.ClipboardMinHistorySize)
+	}
+
+	// A number the settings form cannot offer is the default, not a bound of
+	// its own.
+	if err := clipboard.SetHistorySize(ctx, 7); err != nil {
+		t.Fatalf("SetHistorySize(7) failed: %v", err)
+	}
+	if got := clipboard.Settings().HistorySize(); got != domain.ClipboardDefaultHistorySize {
+		t.Errorf("a range of 7 became %d, want the default %d", got, domain.ClipboardDefaultHistorySize)
+	}
+}
+
+// Starting again honors the range the last session saved, and it prunes what
+// it read before anything is shown.
+func TestRecordRangeIsReadAtStart(t *testing.T) {
+	base := time.Date(2026, 2, 3, 9, 0, 0, 0, time.UTC)
+	entries := make([]domain.ClipboardEntry, 0, domain.ClipboardMaxHistorySize)
+	for i := 0; i < domain.ClipboardMaxHistorySize; i++ {
+		entries = append(entries, domain.ClipboardEntry{
+			ID:          fmt.Sprintf("entry-%02d", i),
+			Content:     fmt.Sprintf("copy %d", i),
+			ContentHash: fmt.Sprintf("sha256:%d", i),
+			Kind:        domain.ClipKindText,
+			CopiedAt:    base.Add(time.Duration(i) * time.Minute),
+			CreatedAt:   base,
+		})
+	}
+	tools := &fakeTools{settings: domain.ToolSettings{ClipboardHistorySize: domain.ClipboardMinHistorySize}}
+	clipboard, err := NewClipboard(ClipboardOptions{
+		Device: &fakeDevice{},
+		Store:  &fakeStore{entries: entries},
+		Tools:  tools,
+	})
+	if err != nil {
+		t.Fatalf("NewClipboard failed: %v", err)
+	}
+	t.Cleanup(clipboard.Stop)
+	history := clipboard.History(0)
+	if len(history) != domain.ClipboardMinHistorySize {
+		t.Fatalf("the history starts with %d entries, want the saved range %d",
+			len(history), domain.ClipboardMinHistorySize)
+	}
+	// The newest of the entries are the ones kept.
+	if want := fmt.Sprintf("copy %d", domain.ClipboardMaxHistorySize-1); history[0].Content != want {
+		t.Errorf("the history starts with %q, want the newest copy %q", history[0].Content, want)
 	}
 }
 

@@ -41,6 +41,11 @@ const (
 // shown in USD.
 const PreferCurrency = "CNY"
 
+// UsageURL is DeepSeek's own page for the account: what the balance of the
+// panel is a summary of. The panel's headline opens it, so it belongs with
+// the rest of what this provider's panel is, next to its keys and titles.
+const UsageURL = "https://platform.deepseek.com/usage"
+
 // Panel returns the balance panel.
 func Panel() domain.Panel {
 	return domain.Panel{

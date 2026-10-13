@@ -41,6 +41,13 @@ var deepseekSVG []byte
 //go:embed clipboard.svg
 var clipboardSVG []byte
 
+// refreshSVG is the mark of the quick window's refresh action: fetching a
+// panel again. It is an SVG because the caller turns it while a fetch runs,
+// and a vector stays sharp at every angle.
+//
+//go:embed refresh.svg
+var refreshSVG []byte
+
 // DeepSeek returns the DeepSeek mark as the SVG document it is. The caller
 // parses it once and keeps the result: parsing belongs to the framework,
 // and this package depends on the standard library alone.
@@ -48,6 +55,9 @@ func DeepSeek() []byte { return deepseekSVG }
 
 // Clipboard returns the clipboard mark as the SVG document it is.
 func Clipboard() []byte { return clipboardSVG }
+
+// Refresh returns the refresh mark as the SVG document it is.
+func Refresh() []byte { return refreshSVG }
 
 // Icon returns the application icon as a PNG, scaled to size×size pixels.
 //

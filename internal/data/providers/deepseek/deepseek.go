@@ -52,6 +52,7 @@ func (p *Provider) Descriptor() domain.ProviderDescriptor {
 		DisplayName:       "DeepSeek",
 		CredentialKeys:    []string{deepseekdomain.APIKeyCredential},
 		DocsURL:           docsURL,
+		UsageURL:          deepseekdomain.UsageURL,
 		Endpoint:          p.baseURL + balancePath,
 		MinRefreshSeconds: minRefreshSeconds,
 	}

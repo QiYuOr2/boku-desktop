@@ -66,13 +66,14 @@ type Clipboard struct {
 type ClipboardOptions struct {
 	Device domain.ClipboardDevice
 	Store  domain.ClipboardStore
-	// Tools stores the two switches, including the poll interval. A nil
-	// store keeps them in memory, which is what a test wants and what an
-	// assembly without a settings file must still survive.
+	// Tools stores the switches, including the poll interval and the record
+	// range. A nil store keeps them in memory, which is what a test wants
+	// and what an assembly without a settings file must still survive.
 	Tools domain.ToolStore
 	Clock Clock
 	Emit  func()
-	Keep  int
+	// Keep overrides the record range the settings hold.
+	Keep int
 	// PollIn overrides the interval the settings hold.
 	PollIn time.Duration
 }
@@ -89,17 +90,16 @@ func NewClipboard(opts ClipboardOptions) (*Clipboard, error) {
 	if clock == nil {
 		clock = SystemClock{}
 	}
-	keep := opts.Keep
-	if keep <= 0 {
-		keep = domain.ClipboardHistoryLimit
-	}
 	clipboard := &Clipboard{
 		device: opts.Device,
 		store:  opts.Store,
 		tools:  opts.Tools,
 		now:    clock.Now,
 		emit:   opts.Emit,
-		keep:   keep,
+		// An option overrides the record range the settings hold, which is
+		// what a test wants; load fills it in from the settings otherwise,
+		// and prunes the stored history to it as it reads it.
+		keep: opts.Keep,
 	}
 	if err := clipboard.load(context.Background()); err != nil {
 		return nil, err
@@ -121,6 +121,9 @@ func NewClipboard(opts ClipboardOptions) (*Clipboard, error) {
 // than not starting. A history file that cannot be read is not: it is a
 // convenience, and it is kept as the last error so a test can see it. A
 // corrupt history must never cost the user their switches.
+//
+// The history is pruned as it is read, so a record range the user shortened
+// while the application was not running is honored before anything is shown.
 func (c *Clipboard) load(ctx context.Context) error {
 	if c.tools != nil {
 		settings, err := c.tools.Load(ctx)
@@ -130,6 +133,9 @@ func (c *Clipboard) load(ctx context.Context) error {
 		c.settings = settings.Normalize()
 	} else {
 		c.settings = domain.ToolSettings{}.Normalize()
+	}
+	if c.keep <= 0 {
+		c.keep = c.settings.HistorySize()
 	}
 	entries, err := c.store.LoadEntries(ctx)
 	if err != nil {
@@ -196,6 +202,38 @@ func (c *Clipboard) saveSettings(ctx context.Context, settings domain.ToolSettin
 		return nil
 	}
 	return c.tools.Save(ctx, settings)
+}
+
+// SetHistorySize chooses how many of the most recent copies are kept, and
+// therefore how many the history page lists.
+//
+// The history is pruned to the new bound here rather than at the next
+// reading: a user who asked for the last ten copies should not keep the
+// longer list on disk until something else is copied. The entries that go are
+// gone — the range is what the file holds, not what the page shows — so the
+// settings form says so before the choice is made.
+func (c *Clipboard) SetHistorySize(ctx context.Context, size int) error {
+	if !domain.ValidClipboardHistorySize(size) {
+		size = domain.ClipboardDefaultHistorySize
+	}
+	c.mu.Lock()
+	if c.settings.ClipboardHistorySize == size {
+		c.mu.Unlock()
+		return nil
+	}
+	c.settings.ClipboardHistorySize = size
+	settings := c.settings
+	c.keep = size
+	c.history = c.prune(c.history)
+	emit := c.emit
+	c.mu.Unlock()
+
+	err := c.saveSettings(ctx, settings)
+	c.persist()
+	if emit != nil {
+		emit()
+	}
+	return err
 }
 
 // Start begins monitoring when the settings say so. main.go calls it once

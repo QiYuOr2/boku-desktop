@@ -18,6 +18,10 @@ import (
 type PanelDef struct {
 	Panel   domain.Panel
 	Metrics []domain.Metric
+	// UsageURL is where the provider keeps the account this panel reads, in
+	// full. It is left empty by an assembly that names none, and then the
+	// provider's own descriptor decides.
+	UsageURL string
 }
 
 // Panels reads provider-backed panels: it keeps the last good snapshot of
@@ -56,6 +60,10 @@ type inflight struct {
 type View struct {
 	Panel   domain.Panel
 	Metrics []domain.Metric
+	// UsageURL is where the provider keeps this account in full, or empty
+	// when the provider names no such page. It is resolved once, when the
+	// panel is added, so a frame does not look it up.
+	UsageURL string
 	// Snapshot is the last good one; HasSnapshot says whether there is one.
 	// A failed refresh leaves it in place, marked stale, rather than
 	// showing 0.
@@ -146,6 +154,12 @@ func (p *Panels) add(def PanelDef) error {
 				domain.ErrInvalidArgument, def.Panel.ID, every, def.Panel.ProviderID, floor)
 		}
 	}
+	// The link a panel's headline opens is the provider's to name: an
+	// assembly may write one down, and otherwise the descriptor is asked,
+	// which keeps the address beside the provider that owns it.
+	if strings.TrimSpace(def.UsageURL) == "" {
+		def.UsageURL = provider.Descriptor().UsageURL
+	}
 	p.defs = append(p.defs, def)
 	p.byID[def.Panel.ID] = def
 	return nil
@@ -199,7 +213,11 @@ func (p *Panels) View(panelID string) View {
 	if !ok {
 		return View{}
 	}
-	view := View{Panel: def.Panel, Metrics: append([]domain.Metric(nil), def.Metrics...)}
+	view := View{
+		Panel:    def.Panel,
+		Metrics:  append([]domain.Metric(nil), def.Metrics...),
+		UsageURL: def.UsageURL,
+	}
 	if entry, ok := p.cache[panelID]; ok {
 		view.Snapshot = entry.snapshot
 		view.HasSnapshot = true

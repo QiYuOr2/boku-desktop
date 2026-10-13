@@ -23,8 +23,6 @@ import (
 const (
 	historyWidth  = 420
 	historyHeight = 420
-	// historyPage is how many copies the history window lists.
-	historyPage = domain.ClipboardHistoryPageSize
 )
 
 // clipboardRegion is the line under the panels: the mark, the content, and
@@ -77,12 +75,22 @@ func (s *State) clipboardLatest() (domain.ClipRecord, bool) {
 	return s.clipboard.Latest()
 }
 
-// clipboardHistory is the recorded copies, newest first, at most a page.
+// clipboardHistorySize is the record range the user chose: the history keeps
+// that many entries, so it is also all the page has to list.
+func (s *State) clipboardHistorySize() int {
+	if s.clipboard == nil {
+		return domain.ClipboardDefaultHistorySize
+	}
+	return s.clipboard.Settings().HistorySize()
+}
+
+// clipboardHistory is the recorded copies, newest first, at most the record
+// range the user chose.
 func (s *State) clipboardHistory() []domain.ClipboardEntry {
 	if s.clipboard == nil {
 		return nil
 	}
-	return s.clipboard.History(historyPage)
+	return s.clipboard.History(s.clipboardHistorySize())
 }
 
 // clipboardHistoryError is why the stored history could not be read, if it
@@ -156,7 +164,7 @@ func (s *State) historyView(c *ui.Context) {
 				return
 			}
 			entries := s.clipboardHistory()
-			block(c, "最近 "+strconv.Itoa(historyPage)+" 条", func() {
+			block(c, "最近 "+strconv.Itoa(s.clipboardHistorySize())+" 条", func() {
 				if len(entries) == 0 {
 					ui.Text(c, "还没有记录。").
 						FontSize(t.Rem(0.85)).

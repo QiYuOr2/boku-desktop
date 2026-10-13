@@ -165,6 +165,31 @@ func (s *State) clipboardBody(c *ui.Context) {
 			FontSize(t.Rem(0.82)).
 			OnClick(func() { s.setClipboardRegionVisible(visible) })
 
+		// The record range: how much of what was copied is kept. It is a
+		// choice among three rather than a number, and the line under it
+		// says what shortening it costs, because the entries that no longer
+		// fit are dropped rather than hidden.
+		sizes := domain.ClipboardHistorySizes()
+		selected := 0
+		for index, size := range sizes {
+			if size == settings.HistorySize() {
+				selected = index
+			}
+		}
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+			ui.Text(c, "记录范围").FontSize(t.Rem(0.82))
+			ui.Spacer(c)
+			picker := ui.Segmented(c, &selected, historySizeLabels(sizes)...).Label("记录范围")
+			if picker.Changed() {
+				s.setClipboardHistorySize(sizes[selected])
+			}
+		})
+		ui.Text(c, "只保留最近 "+strconv.Itoa(settings.HistorySize())+
+			" 条；缩短范围会立刻丢弃更早的记录。").
+			FontSize(t.Rem(0.75)).
+			TextColor(t.TextMuted).
+			Wrap()
+
 		if !settings.ClipboardMonitoring {
 			ui.Text(c, "关闭监听后不再读取剪贴板，历史里已有的记录仍然保留。").
 				FontSize(t.Rem(0.72)).
@@ -221,6 +246,35 @@ func (s *State) setClipboardRegionVisible(visible bool) {
 		s.clipboardStatus = "快捷窗口底部会显示剪贴板内容。"
 	default:
 		s.clipboardStatus = "快捷窗口底部不再显示剪贴板内容。"
+	}
+	s.Refresh()
+}
+
+// historySizeLabels names the record ranges the way the segments read.
+func historySizeLabels(sizes []int) []string {
+	labels := make([]string, 0, len(sizes))
+	for _, size := range sizes {
+		labels = append(labels, strconv.Itoa(size)+" 条")
+	}
+	return labels
+}
+
+// setClipboardHistorySize chooses the record range and says what it cost:
+// what no longer fits is dropped here, not at the next copy.
+func (s *State) setClipboardHistorySize(size int) {
+	if s.clipboard == nil {
+		return
+	}
+	before := len(s.clipboard.History(0))
+	err := s.clipboard.SetHistorySize(context.Background(), size)
+	settings := s.clipboard.Settings()
+	if err != nil {
+		s.clipboardStatus = "没能写进设置文件：" + friendlyError(err) + "（本次运行内已生效）"
+	} else {
+		s.clipboardStatus = "只保留最近 " + strconv.Itoa(settings.HistorySize()) + " 条剪贴板记录。"
+	}
+	if after := len(s.clipboard.History(0)); after < before {
+		s.clipboardStatus += "丢弃了 " + strconv.Itoa(before-after) + " 条更早的记录。"
 	}
 	s.Refresh()
 }

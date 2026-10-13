@@ -55,16 +55,53 @@ func (s *State) cardTitle(c *ui.Context, view usecase.View) {
 		freshness(c, view)
 		// One action: fetching a panel that failed and fetching a panel
 		// that is merely old are the same request.
-		if view.Err != nil && view.HasSnapshot {
-			if retry := textButton(c, "重试"); retry.Clicked() {
-				s.refreshAsync(true)
-			}
-			return
-		}
-		if button := textButton(c, "刷新"); button.Clicked() && !view.Loading {
+		if button := s.refreshButton(c, view); button.Clicked() && !view.Loading {
 			s.refreshAsync(true)
 		}
 	})
+}
+
+// spinPeriod is how long the refresh mark takes to turn once, and spinKey
+// tells its animation apart from any other on the element.
+const (
+	spinPeriod = 900 * time.Millisecond
+	spinKey    = "refresh"
+)
+
+// refreshButton is the panel's one action, drawn as the mark for fetching
+// again rather than as a word: the line it sits on is already carrying the
+// age of the numbers, and a mark says "fetch this again" without taking a
+// corner of the line for it. What it is, for a pointer that rests on it and
+// for assistive technology, is its label.
+//
+// While a fetch is running the mark turns. That is the whole of what the
+// click answers with: the numbers stay as they are until an answer arrives,
+// and a still mark beside them would leave the user wondering whether the
+// click landed.
+func (s *State) refreshButton(c *ui.Context, view usecase.View) ui.Element {
+	t := c.Theme()
+	label := "刷新"
+	if view.Err != nil && view.HasSnapshot {
+		// One action, two situations: the reason the last attempt failed is
+		// written under the numbers, and this is what trying again is
+		// called when there is something to try again about.
+		label = "重试"
+	}
+	button := ui.ButtonBase(c).Label(label).Tooltip(label).Cursor(ui.CursorPointer).
+		Radius(t.Radius).
+		Padding(t.Space(0.5))
+	button.Children(func() {
+		mark := ui.Icon(c, s.refreshMark).Size(t.Space(4), t.Space(4)).Shrink(0)
+		if button.Hovered() || button.Focused() {
+			mark.TextColor(t.Text)
+		} else {
+			mark.TextColor(t.TextMuted)
+		}
+		if view.Loading {
+			mark.Rotate(mark.Loop(spinKey, spinPeriod, ui.Linear) * 360)
+		}
+	})
+	return button
 }
 
 // cardNumbers draws what the card knows, and nothing it does not. An empty
@@ -189,6 +226,12 @@ func turn(open bool) float32 {
 // balanceHeadline is the panel's big number: what it is called, and at the
 // end of that line the control that opens the rest, when there is a rest to
 // open.
+//
+// The number itself is the way to the provider's own detail page, when the
+// provider names one: a balance is worth seeing in full where it is kept,
+// and the number is the thing the user is looking at when that thought
+// arrives. It wears a pointer and the accent color under the pointer, so
+// that it is not a hidden action.
 func balanceHeadline(c *ui.Context, view usecase.View, headline domain.Metric, detailsOpen *bool) {
 	t := c.Theme()
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
@@ -198,7 +241,30 @@ func balanceHeadline(c *ui.Context, view usecase.View, headline domain.Metric, d
 			disclosure(c, "明细", detailsOpen)
 		}
 	})
-	ui.Text(c, formatMetric(view.Snapshot, headline)).FontSize(t.Rem(1.8)).Bold()
+	number := formatMetric(view.Snapshot, headline)
+	if view.UsageURL == "" {
+		ui.Text(c, number).FontSize(t.Rem(1.8)).Bold()
+		return
+	}
+	// The number is its own row, so that the column does not stretch the
+	// link across the window: the click target is the number, not the line.
+	ui.Row(c).FillWidth().Children(func() {
+		button := ui.ButtonBase(c).
+			Label("查看" + headline.Label + "明细").
+			Tooltip("在官网查看明细").
+			Cursor(ui.CursorPointer)
+		button.Children(func() {
+			text := ui.Text(c, number).FontSize(t.Rem(1.8)).Bold()
+			if button.Hovered() || button.Focused() {
+				text.TextColor(t.Accent)
+			}
+		})
+		if button.Clicked() {
+			// The system opens the link; nothing here waits for it, and a
+			// browser that does not open is not this window's failure.
+			c.OpenURL(view.UsageURL)
+		}
+	})
 }
 
 // disclosureArrow draws a chevron: pointing right, turned by deg degrees

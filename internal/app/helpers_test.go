@@ -111,6 +111,7 @@ func newTestProvider() *testProvider {
 			DisplayName:       "DeepSeek",
 			CredentialKeys:    []string{deepseek.APIKeyCredential},
 			DocsURL:           "https://platform.deepseek.com/api_keys",
+			UsageURL:          deepseek.UsageURL,
 			Endpoint:          "https://api.deepseek.com/user/balance",
 			MinRefreshSeconds: 60,
 		},

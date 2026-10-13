@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"fmt"
+	"image"
 	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -29,9 +31,8 @@ func TestRenderScreensForInspection(t *testing.T) {
 		t.Skip("set BOKU_RENDER_DIR to write the screens")
 	}
 
-	write := func(name string, view func(*ui.Context), width, height int) {
+	writeImage := func(name string, img *image.RGBA) {
 		t.Helper()
-		img := ui.Render(view, width, height, 2)
 		file, err := os.Create(filepath.Join(dir, name))
 		if err != nil {
 			t.Fatalf("create %s: %v", name, err)
@@ -40,6 +41,10 @@ func TestRenderScreensForInspection(t *testing.T) {
 		if err := png.Encode(file, img); err != nil {
 			t.Fatalf("encode %s: %v", name, err)
 		}
+	}
+	write := func(name string, view func(*ui.Context), width, height int) {
+		t.Helper()
+		writeImage(name, ui.Render(view, width, height, 2))
 	}
 
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
@@ -64,6 +69,24 @@ func TestRenderScreensForInspection(t *testing.T) {
 	failing.fail(domain.ErrProviderTimeout)
 	_, _ = stale.panelService.Refresh(context.Background(), deepseek.PanelID)
 	write("flyout-stale.png", stale.View, panelWidth, panelHeight)
+
+	// The quick window while a fetch runs: the refresh mark turns, and one
+	// frame shows it at the angle it was drawn at. The frame is taken
+	// through a tester after a moment, so it is not the angle at t = 0 that
+	// every ui.Render frame shows.
+	held := newTestProvider()
+	fetching := testState(t, held, withCredential(newTestStore()), "0.1.0")
+	loaded(t, fetching)
+	gate := held.hold()
+	go func() { _, _ = fetching.panelService.Refresh(context.Background(), deepseek.PanelID) }()
+	for deadline := time.Now().Add(2 * time.Second); held.count() < 2 && time.Now().Before(deadline); {
+		time.Sleep(time.Millisecond)
+	}
+	turning := ui.NewTester(fetching.View, panelWidth, panelHeight)
+	time.Sleep(spinPeriod / 8)
+	turning.Frame()
+	writeImage("flyout-refreshing.png", turning.Image())
+	close(gate)
 
 	// The settings window with a credential already stored.
 	write("settings-stored.png", state.settingsView, settingsWidth, settingsHeight)

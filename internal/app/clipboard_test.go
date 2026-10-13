@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"strings"
 	"testing"
@@ -330,7 +331,11 @@ func TestClipboardRegionSitsBetweenTheContentAndTheFooter(t *testing.T) {
 func TestHistoryWindowListsAndCopiesBack(t *testing.T) {
 	device := &testDevice{}
 	state := clipboardState(t, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{
+			ClipboardRegionVisible: true,
+			ClipboardMonitoring:    true,
+			ClipboardHistorySize:   domain.ClipboardMinHistorySize,
+		},
 	})
 	ctx := context.Background()
 	for _, text := range []string{"first copy", "second copy", "third copy"} {
@@ -339,6 +344,8 @@ func TestHistoryWindowListsAndCopiesBack(t *testing.T) {
 	}
 
 	tt := ui.NewTester(state.historyView, historyWidth, historyHeight)
+	// The heading is the record range the user chose, which is also all the
+	// page can list.
 	for _, want := range []string{"最近 10 条", "first copy", "second copy", "third copy", "点击一条即复制回剪贴板。"} {
 		if !tt.HasText(want) {
 			t.Errorf("the history does not show %q; it shows %q", want, tt.Texts())
@@ -378,6 +385,80 @@ func TestHistoryWindowSaysWhenThereIsNothingYet(t *testing.T) {
 	tt := ui.NewTester(state.historyView, historyWidth, historyHeight)
 	if !tt.HasText("还没有记录。") {
 		t.Errorf("an empty history does not say so: %q", tt.Texts())
+	}
+}
+
+// The page lists what the record range keeps — the range is the bound on the
+// history, not a separate page size — and it names that range.
+func TestHistoryPageFollowsTheRecordRange(t *testing.T) {
+	device := &testDevice{}
+	state := clipboardState(t, device, &testToolStore{
+		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+	})
+	ctx := context.Background()
+	total := domain.ClipboardMinHistorySize + 2
+	for i := 0; i < total; i++ {
+		device.set(domain.ClipContent{Kind: domain.ClipKindText, Text: fmt.Sprintf("copy %d", i)})
+		state.clipboard.Read(ctx)
+	}
+	if got := len(state.clipboardHistory()); got != total {
+		t.Fatalf("the default range lists %d entries, want %d", got, total)
+	}
+	tt := ui.NewTester(state.historyView, historyWidth, historyHeight)
+	if !tt.HasText(fmt.Sprintf("最近 %d 条", domain.ClipboardDefaultHistorySize)) {
+		t.Errorf("the page does not name its range: %q", tt.Texts())
+	}
+
+	if err := state.clipboard.SetHistorySize(ctx, domain.ClipboardMinHistorySize); err != nil {
+		t.Fatalf("SetHistorySize failed: %v", err)
+	}
+	tt = ui.NewTester(state.historyView, historyWidth, historyHeight)
+	if !tt.HasText("最近 10 条") {
+		t.Errorf("the page still shows the old range: %q", tt.Texts())
+	}
+	if got := len(state.clipboardHistory()); got != domain.ClipboardMinHistorySize {
+		t.Errorf("the page lists %d entries, want %d", got, domain.ClipboardMinHistorySize)
+	}
+}
+
+// The clipboard settings offer the record range, and choosing one applies it
+// at once: the entries that no longer fit are dropped, and the form says so
+// before the choice is made.
+func TestSettingsChooseTheRecordRange(t *testing.T) {
+	device := &testDevice{}
+	state := clipboardState(t, device, &testToolStore{
+		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+	})
+	ctx := context.Background()
+	for i := 0; i < domain.ClipboardDefaultHistorySize+2; i++ {
+		device.set(domain.ClipContent{Kind: domain.ClipKindText, Text: fmt.Sprintf("copy %d", i)})
+		state.clipboard.Read(ctx)
+	}
+	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
+	for _, want := range []string{
+		"记录范围", "10 条", "30 条", "50 条",
+		"只保留最近 30 条；缩短范围会立刻丢弃更早的记录。",
+	} {
+		if !tt.HasText(want) {
+			t.Errorf("the clipboard settings do not show %q: %q", want, tt.Texts())
+		}
+	}
+
+	if err := tt.Click("10 条"); err != nil {
+		t.Fatalf("click the shortest range: %v", err)
+	}
+	tt.Frame()
+	if got := state.clipboard.Settings().HistorySize(); got != domain.ClipboardMinHistorySize {
+		t.Fatalf("the record range is %d after the click, want %d", got, domain.ClipboardMinHistorySize)
+	}
+	if got := len(state.clipboard.History(0)); got != domain.ClipboardMinHistorySize {
+		t.Errorf("the history holds %d entries, want %d", got, domain.ClipboardMinHistorySize)
+	}
+	if !tt.HasText("只保留最近 10 条；缩短范围会立刻丢弃更早的记录。") {
+		t.Errorf("the settings do not show the new range: %q", tt.Texts())
+	}
+	if text := state.clipboardStatusLine(); !strings.Contains(text, "丢弃") {
+		t.Errorf("the settings do not say what shortening the range cost: %q", text)
 	}
 }
 

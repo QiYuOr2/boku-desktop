@@ -44,6 +44,15 @@ func TestServicesAssembleTheDeepSeekPanel(t *testing.T) {
 	if descriptor.CredentialKeys[0] != paneldeepseek.APIKeyCredential {
 		t.Errorf("credential keys = %v", descriptor.CredentialKeys)
 	}
+	if descriptor.UsageURL != paneldeepseek.UsageURL {
+		t.Errorf("descriptor usage link = %q, want %q", descriptor.UsageURL, paneldeepseek.UsageURL)
+	}
+	// The page the panel's headline opens comes from the provider's own
+	// descriptor, through the use case, to the view: the assembly is where
+	// that link can go missing without anything failing to compile.
+	if view := panels.View(listed[0].ID); view.UsageURL != paneldeepseek.UsageURL {
+		t.Errorf("the panel opens %q, want the provider's page %q", view.UsageURL, paneldeepseek.UsageURL)
+	}
 
 	// With no credential stored, the panel says so instead of asking the
 	// network: nothing here reaches out.

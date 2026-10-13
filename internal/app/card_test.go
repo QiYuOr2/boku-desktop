@@ -1,9 +1,11 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"image"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +51,8 @@ func TestCardShowsTheBalance(t *testing.T) {
 }
 
 // The panel's first line is its name, and beside it how old the numbers are
-// with the action that fetches them again — one line, one request.
+// with the action that fetches them again — one line, one request. The
+// action is a mark rather than a word, so it is found by its label.
 func TestCardTitleCarriesTheTimeAndTheAction(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
 	loaded(t, state)
@@ -63,9 +66,11 @@ func TestCardTitleCarriesTheTimeAndTheAction(t *testing.T) {
 		t.Errorf("the updated line at y=%.0f is not on the title's line at y=%.0f h=%.0f",
 			updated.Y, title.Y, title.H)
 	}
-	if refresh.Y < title.Y-1 || refresh.Y > title.Y+title.H {
-		t.Errorf("the refresh action at y=%.0f is not on the title's line at y=%.0f h=%.0f",
-			refresh.Y, title.Y, title.H)
+	// The control is a mark with a little room around it, so what sits on
+	// the title's line is its middle rather than its top edge.
+	if center := refresh.Y + refresh.H/2; center < title.Y || center > title.Y+title.H {
+		t.Errorf("the refresh action centered at y=%.0f is not on the title's line at y=%.0f h=%.0f",
+			center, title.Y, title.H)
 	}
 	if updated.X <= title.X+title.W {
 		t.Errorf("the updated line at x=%.0f is not right of the title, which ends at x=%.0f",
@@ -74,11 +79,68 @@ func TestCardTitleCarriesTheTimeAndTheAction(t *testing.T) {
 	if refresh.X <= updated.X {
 		t.Errorf("the action at x=%.0f is not right of the time at x=%.0f", refresh.X, updated.X)
 	}
+	// The action is a mark in the room a word would have taken: it is found
+	// by its label, and it is no bigger than a small icon needs.
+	if refresh.W > 24 || refresh.H > 24 {
+		t.Errorf("the refresh action is %.0fx%.0f: an icon takes a mark's room, not a word's", refresh.W, refresh.H)
+	}
 	// Nothing else claims the bottom of the window: the panel's own line is
 	// gone, and the footer is all that is left below it.
 	if version := findText(t, tt, "Boku 0.1.0"); version.Y <= updated.Y {
 		t.Errorf("the footer at y=%.0f is not below the title line at y=%.0f", version.Y, updated.Y)
 	}
+}
+
+// The refresh action is drawn as a mark, and it turns for as long as a fetch
+// runs: a still mark beside unchanged numbers would leave the user wondering
+// whether the click landed. Once the answer is in, it stops.
+func TestCardRefreshMarkTurnsWhileFetching(t *testing.T) {
+	provider := newTestProvider()
+	state := testState(t, provider, withCredential(newTestStore()), "0.1.0")
+	loaded(t, state)
+
+	// A settled card draws the same frame twice: nothing on it animates.
+	settled := ui.NewTester(state.View, panelWidth, panelHeight)
+	before := frameBytes(settled.Image())
+	time.Sleep(40 * time.Millisecond)
+	settled.Frame()
+	if after := frameBytes(settled.Image()); !bytes.Equal(before, after) {
+		t.Error("the card animates while no fetch is running")
+	}
+
+	// Hold the next fetch open and draw the card again: the mark turns, so
+	// two frames taken apart differ.
+	gate := provider.hold()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = state.panelService.Refresh(context.Background(), deepseek.PanelID)
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for provider.count() < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !state.panelService.View(deepseek.PanelID).Loading {
+		close(gate)
+		<-done
+		t.Fatal("the provider was not held in a fetch")
+	}
+	turning := ui.NewTester(state.View, panelWidth, panelHeight)
+	first := frameBytes(turning.Image())
+	time.Sleep(120 * time.Millisecond)
+	turning.Frame()
+	second := frameBytes(turning.Image())
+	close(gate)
+	<-done
+	if bytes.Equal(first, second) {
+		t.Error("the refresh mark does not turn while a fetch is running")
+	}
+}
+
+// frameBytes copies what a frame was drawn as, so two of them can be
+// compared.
+func frameBytes(img *image.RGBA) []byte {
+	return append([]byte(nil), img.Pix...)
 }
 
 // The detail rows stay folded away until they are asked for: the panel says
@@ -157,11 +219,12 @@ func TestCardShowsWhyAFailureHappened(t *testing.T) {
 	if _, err := state.panelService.Refresh(context.Background(), deepseek.PanelID); err == nil {
 		t.Fatal("the refresh succeeded although the provider failed")
 	}
-	texts := cardText(t, state)
+	tt := ui.NewTester(state.View, panelWidth, panelHeight)
+	texts := tt.Texts()
 	if !contains(texts, "服务暂时不可用") {
 		t.Errorf("the card does not explain the failure: %q", texts)
 	}
-	if !contains(texts, "重试") {
+	if _, ok := tt.Find("重试"); !ok {
 		t.Errorf("the card offers no retry: %q", texts)
 	}
 	assertNoZero(t, texts)
@@ -177,19 +240,88 @@ func TestCardKeepsTheOldNumbersWhenARefreshFails(t *testing.T) {
 	if _, err := state.panelService.Refresh(context.Background(), deepseek.PanelID); err == nil {
 		t.Fatal("the refresh succeeded although the provider timed out")
 	}
-	texts := cardText(t, state)
+	tt := ui.NewTester(state.View, panelWidth, panelHeight)
+	texts := tt.Texts()
 	if !contains(texts, "¥42.10") {
 		t.Errorf("the card dropped the last good balance: %q", texts)
 	}
 	if !contains(texts, "旧数据") {
 		t.Errorf("the card does not mark the numbers as old: %q", texts)
 	}
-	if !contains(texts, "重试") {
+	// One line, one action: retrying and refreshing fetch the same thing.
+	if _, ok := tt.Find("重试"); !ok {
 		t.Errorf("the card offers no retry: %q", texts)
 	}
-	// One line, one action: retrying and refreshing fetch the same thing.
-	if contains(texts, "刷新") {
+	if _, ok := tt.Find("刷新"); ok {
 		t.Errorf("the failing card offers both 重试 and 刷新: %q", texts)
+	}
+}
+
+// Clicking the mark asks the provider again, whatever the cache says: it is
+// the one action of the block.
+func TestCardRefreshMarkFetches(t *testing.T) {
+	provider := newTestProvider()
+	state := testState(t, provider, withCredential(newTestStore()), "0.1.0")
+	loaded(t, state)
+	if got := provider.count(); got != 1 {
+		t.Fatalf("the card was loaded with %d fetches, want 1", got)
+	}
+
+	tt := ui.NewTester(state.View, panelWidth, panelHeight)
+	if err := tt.Click("刷新"); err != nil {
+		t.Fatalf("click the refresh mark: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for provider.count() < 2 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := provider.count(); got != 2 {
+		t.Errorf("the provider was fetched %d times after one click, want 2", got)
+	}
+}
+
+// The headline is the way to the provider's own page for the account: a
+// balance is worth seeing in full where it is kept, and the number is what
+// the user is looking at when that thought arrives.
+func TestCardBalanceOpensTheProvidersDetailPage(t *testing.T) {
+	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	loaded(t, state)
+	tt := ui.NewTester(state.View, panelWidth, panelHeight)
+
+	if !tt.HasText("¥42.10") {
+		t.Fatalf("the card does not show the balance: %q", tt.Texts())
+	}
+	if err := tt.Click("¥42.10"); err != nil {
+		t.Fatalf("click the balance: %v", err)
+	}
+	opened := tt.OpenedURLs()
+	if len(opened) != 1 || opened[0] != deepseek.UsageURL {
+		t.Errorf("clicking the balance opened %v, want %q", opened, deepseek.UsageURL)
+	}
+	// It is a link and not a hidden one: it says so under the pointer, and
+	// assistive technology reads it as an action.
+	if _, ok := tt.Find("查看总余额明细"); !ok {
+		t.Errorf("the balance is not named as an action: %q", tt.Texts())
+	}
+}
+
+// A provider that keeps no such page leaves a number that is only a number:
+// nothing is opened, and nothing pretends there is somewhere to go.
+func TestCardBalanceWithoutADetailPageIsJustANumber(t *testing.T) {
+	provider := newTestProvider()
+	provider.descriptor.UsageURL = ""
+	state := testState(t, provider, withCredential(newTestStore()), "0.1.0")
+	loaded(t, state)
+	tt := ui.NewTester(state.View, panelWidth, panelHeight)
+
+	if _, ok := tt.Find("查看总余额明细"); ok {
+		t.Errorf("a provider without a detail page still offers one: %q", tt.Texts())
+	}
+	if err := tt.Click("¥42.10"); err != nil {
+		t.Fatalf("click the balance: %v", err)
+	}
+	if opened := tt.OpenedURLs(); len(opened) != 0 {
+		t.Errorf("clicking a plain number opened %v", opened)
 	}
 }
 

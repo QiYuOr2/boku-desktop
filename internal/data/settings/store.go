@@ -69,6 +69,11 @@ type tool struct {
 	// ClipboardPollIntervalMs is the poll interval in milliseconds, the unit
 	// a file a person edits can be written in.
 	ClipboardPollIntervalMs int64 `json:"clipboardPollIntervalMs"`
+	// ClipboardHistorySize is the record range: how many of the most recent
+	// copies are kept, in entries. A file that does not have it (or holds a
+	// number that is not one of the ranges) is brought back to the default
+	// by Normalize.
+	ClipboardHistorySize int `json:"clipboardHistorySize"`
 }
 
 // historyDocument is clipboard_history.json.
@@ -136,6 +141,7 @@ func (s *Settings) Load(ctx context.Context) (domain.ToolSettings, error) {
 		ClipboardRegionVisible: doc.Tools.ClipboardRegionVisible,
 		ClipboardMonitoring:    doc.Tools.ClipboardMonitoring,
 		ClipboardPollInterval:  time.Duration(doc.Tools.ClipboardPollIntervalMs) * time.Millisecond,
+		ClipboardHistorySize:   doc.Tools.ClipboardHistorySize,
 	}.Normalize()
 	s.mu.Lock()
 	s.settings, s.loaded = settings, true
@@ -164,6 +170,7 @@ func (s *Settings) Save(ctx context.Context, settings domain.ToolSettings) error
 			ClipboardRegionVisible:  settings.ClipboardRegionVisible,
 			ClipboardMonitoring:     settings.ClipboardMonitoring,
 			ClipboardPollIntervalMs: settings.Interval().Milliseconds(),
+			ClipboardHistorySize:    settings.HistorySize(),
 		},
 	}
 	data, err := json.MarshalIndent(doc, "", "  ")

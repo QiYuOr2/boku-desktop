@@ -24,6 +24,12 @@ type ProviderDescriptor struct {
 	SettingsSchema map[string]string
 	// DocsURL is where the user gets the credentials.
 	DocsURL string
+	// UsageURL is the provider's own page for the account a panel reads:
+	// where the numbers a panel summarizes are kept in full. It is the
+	// link a panel's headline opens. A provider that has no such page
+	// leaves it empty, and the interface then draws a number that is only
+	// a number.
+	UsageURL string
 	// Endpoint is the address the provider asks, so that the interface can
 	// show where a credential is going before the user hands it over.
 	Endpoint string

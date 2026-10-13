@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // A kind is written to the history and read back from it, so Valid is what
 // keeps a row from claiming a shape the application cannot draw.
@@ -17,5 +20,43 @@ func TestClipKindValid(t *testing.T) {
 		if kind.Valid() {
 			t.Errorf("%q should not be valid", kind)
 		}
+	}
+}
+
+// The record range is one of three, and anything else — a file that predates
+// the setting, or a number a person edited in — is the default rather than a
+// reason not to start.
+func TestToolSettingsNormalizesTheRecordRange(t *testing.T) {
+	for _, size := range ClipboardHistorySizes() {
+		if !ValidClipboardHistorySize(size) {
+			t.Errorf("%d is one of the record ranges but is not valid", size)
+		}
+		settings := ToolSettings{ClipboardHistorySize: size}
+		if got := settings.Normalize().ClipboardHistorySize; got != size {
+			t.Errorf("Normalize kept %d as %d, want %d", size, got, size)
+		}
+		if got := settings.HistorySize(); got != size {
+			t.Errorf("HistorySize of %d = %d", size, got)
+		}
+	}
+	for _, size := range []int{0, -1, 7, 11, 100, 1000} {
+		if ValidClipboardHistorySize(size) {
+			t.Errorf("%d should not be a record range", size)
+		}
+		settings := ToolSettings{ClipboardHistorySize: size}
+		if got := settings.Normalize().HistorySize(); got != ClipboardDefaultHistorySize {
+			t.Errorf("Normalize of the record range %d = %d, want the default %d",
+				size, got, ClipboardDefaultHistorySize)
+		}
+		if got := settings.HistorySize(); got != ClipboardDefaultHistorySize {
+			t.Errorf("HistorySize of %d = %d, want the default %d", size, got, ClipboardDefaultHistorySize)
+		}
+	}
+
+	// Normalizing the range does not disturb the interval, which has its own
+	// rule.
+	settings := ToolSettings{ClipboardPollInterval: time.Second, ClipboardHistorySize: 7}.Normalize()
+	if settings.Interval() != time.Second {
+		t.Errorf("Normalize changed the interval to %s", settings.Interval())
 	}
 }

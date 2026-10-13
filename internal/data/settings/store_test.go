@@ -60,6 +60,7 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 		ClipboardRegionVisible: true,
 		ClipboardMonitoring:    true,
 		ClipboardPollInterval:  1500 * time.Millisecond,
+		ClipboardHistorySize:   domain.ClipboardMaxHistorySize,
 	}
 	if err := store.Save(context.Background(), want); err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -73,6 +74,9 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	if !strings.Contains(string(data), `"clipboardMonitoring": true`) {
 		t.Errorf("the settings file does not name the switch:\n%s", data)
 	}
+	if !strings.Contains(string(data), `"clipboardHistorySize": 50`) {
+		t.Errorf("the settings file does not name the record range:\n%s", data)
+	}
 
 	reopened, err := New(settingsPath, settingsPath)
 	if err != nil {
@@ -84,6 +88,30 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	}
 	if got != want {
 		t.Errorf("Load = %+v, want %+v", got, want)
+	}
+}
+
+// A file written before the record range existed, and one a person edited to
+// a number that is not one of the ranges, both come back as the default:
+// starting with a range nobody chose is better than refusing to start.
+func TestLoadNormalizesTheRecordRange(t *testing.T) {
+	store, settingsPath, _ := newStore(t)
+	for _, written := range []string{
+		`{"version":1,"tools":{"clipboardMonitoring":true}}`,
+		`{"version":1,"tools":{"clipboardHistorySize":7}}`,
+		`{"version":1,"tools":{"clipboardHistorySize":1000}}`,
+	} {
+		if err := os.WriteFile(settingsPath, []byte(written), 0o600); err != nil {
+			t.Fatalf("write the settings file: %v", err)
+		}
+		settings, err := store.Load(context.Background())
+		if err != nil {
+			t.Fatalf("Load(%s) failed: %v", written, err)
+		}
+		if got := settings.HistorySize(); got != domain.ClipboardDefaultHistorySize {
+			t.Errorf("Load(%s) gave the record range %d, want the default %d",
+				written, got, domain.ClipboardDefaultHistorySize)
+		}
 	}
 }
 

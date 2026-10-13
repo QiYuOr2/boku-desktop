@@ -78,6 +78,10 @@ type State struct {
 	// clipboardMark labels the quick window's clipboard line, parsed for the
 	// same reason.
 	clipboardMark *ui.SVG
+	// refreshMark is the panel's refresh action. It is drawn instead of a
+	// word, and turned while a fetch runs, so it is parsed once at startup
+	// like the other marks.
+	refreshMark *ui.SVG
 
 	tray           *mygo.Tray
 	panel          *mygo.Window // the open quick window, or nil when closed
@@ -128,6 +132,10 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the clipboard mark: %w", err)
 	}
+	refreshMark, err := ui.ParseSVG(assets.Refresh())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the refresh mark: %w", err)
+	}
 	return &State{
 		app:           app,
 		panelService:  deps.Panels,
@@ -138,6 +146,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		trayIcon:      trayIcon,
 		deepseekMark:  mark,
 		clipboardMark: clipMark,
+		refreshMark:   refreshMark,
 	}, nil
 }
 
@@ -280,9 +289,12 @@ func (s *State) Open() {
 			s.panel = nil
 		}
 	})
-	// Opening the window is the moment to refresh: a view never starts
-	// work of its own, because MyGo builds it several times per frame.
-	s.refreshAsync(false)
+	// Opening the window is the moment to refresh, and every tray click asks
+	// again whatever the cache says: the numbers a click shows should be the
+	// numbers now, not the ones the previous click left behind. The request
+	// runs off the main thread; the view never starts work of its own,
+	// because MyGo builds it several times per frame.
+	s.refreshAsync(true)
 }
 
 // View builds one frame of the quick window: the panels, the divider and the
@@ -376,4 +388,10 @@ func (s *State) refreshAsync(force bool) {
 			window.Update(func() {})
 		}
 	}()
+	// The frame the request needs while it is in flight, rather than only the
+	// one its answer lands in: the mark by the title turns for as long as a
+	// fetch runs, and nothing else would ask for the frames that turn it.
+	if window != nil {
+		window.Update(func() {})
+	}
 }
