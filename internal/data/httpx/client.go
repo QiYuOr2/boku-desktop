@@ -1,0 +1,249 @@
+// Package httpx is the application's only way out to the network. It puts
+// the same discipline around every third-party request: a timeout and a
+// cancellation, a ceiling on the response, an error the caller can classify
+// instead of a raw status code, and never a credential in a message.
+//
+// Providers use it; nothing else in the application does.
+package httpx
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strings"
+	"time"
+
+	"boku/internal/domain"
+)
+
+const (
+	// DefaultTimeout bounds one request, end to end. A provider may ask for
+	// less; nothing waits on a third party longer than this.
+	DefaultTimeout = 10 * time.Second
+	// DefaultMaxBytes is how much of a response is read. A provider that
+	// answers with more than this is answering with something else.
+	DefaultMaxBytes = 1 << 20
+)
+
+// Options configures a Client. The zero value is usable: a standard client,
+// "Boku" as the user agent, DefaultTimeout and DefaultMaxBytes.
+type Options struct {
+	// HTTPClient is the transport to use. Its own Timeout is left alone:
+	// the request context carries the deadline, so one client can serve
+	// requests with different ones.
+	HTTPClient *http.Client
+	UserAgent  string
+	MaxBytes   int64
+	Timeout    time.Duration
+}
+
+// Client makes the requests. It is safe to use from several goroutines, and
+// it keeps no state between calls.
+type Client struct {
+	http      *http.Client
+	userAgent string
+	maxBytes  int64
+	timeout   time.Duration
+}
+
+// New returns a client with the options applied, filling in the defaults.
+func New(opts Options) *Client {
+	c := &Client{
+		http:      opts.HTTPClient,
+		userAgent: strings.TrimSpace(opts.UserAgent),
+		maxBytes:  opts.MaxBytes,
+		timeout:   opts.Timeout,
+	}
+	if c.http == nil {
+		c.http = &http.Client{}
+	}
+	if c.userAgent == "" {
+		c.userAgent = "Boku"
+	}
+	if c.maxBytes <= 0 {
+		c.maxBytes = DefaultMaxBytes
+	}
+	if c.timeout <= 0 {
+		c.timeout = DefaultTimeout
+	}
+	return c
+}
+
+// GetJSON asks for a JSON document.
+func (c *Client) GetJSON(ctx context.Context, endpoint string, headers map[string]string) (domain.FetchResult, error) {
+	return c.do(ctx, http.MethodGet, endpoint, headers, nil)
+}
+
+// PostJSON sends a JSON document and asks for one back.
+func (c *Client) PostJSON(ctx context.Context, endpoint string, headers map[string]string, body []byte) (domain.FetchResult, error) {
+	return c.do(ctx, http.MethodPost, endpoint, headers, body)
+}
+
+// do performs one request and translates everything that can go wrong into
+// a domain error:
+//
+//	401, 403         ErrProviderUnauthorized
+//	429              ErrProviderRateLimited
+//	5xx              ErrProviderUnavailable
+//	any other status BadResponseError (ErrProviderBadResponse)
+//	2xx but not JSON BadResponseError
+//	timeout, cancel  ErrProviderTimeout
+//	no answer        ErrProviderUnavailable
+func (c *Client) do(ctx context.Context, method, endpoint string, headers map[string]string, body []byte) (domain.FetchResult, error) {
+	safe := Redact(endpoint)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	var payload io.Reader
+	if body != nil {
+		payload = bytes.NewReader(body)
+	}
+	request, err := http.NewRequestWithContext(ctx, method, endpoint, payload)
+	if err != nil {
+		// The address is the caller's to get right; it is configuration,
+		// not a service that failed.
+		return domain.FetchResult{Endpoint: safe}, fmt.Errorf("%w: %s: %v", domain.ErrInvalidArgument, safe, err)
+	}
+	request.Header.Set("User-Agent", c.userAgent)
+	request.Header.Set("Accept", "application/json")
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	for name, value := range headers {
+		request.Header.Set(name, value)
+	}
+
+	response, err := c.http.Do(request)
+	if err != nil {
+		return domain.FetchResult{Endpoint: safe}, transportError(err, safe)
+	}
+	defer response.Body.Close()
+
+	result := domain.FetchResult{
+		Endpoint:   safe,
+		FetchedAt:  time.Now().UTC(),
+		HTTPStatus: response.StatusCode,
+	}
+	data, err := readLimited(response.Body, c.maxBytes)
+	if err != nil {
+		return result, err
+	}
+	result.Payload = data
+
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		return result, statusError(response.StatusCode, safe, data)
+	}
+	if !json.Valid(data) {
+		return result, &domain.BadResponseError{
+			Endpoint:   safe,
+			HTTPStatus: response.StatusCode,
+			Reason:     "the response is not JSON",
+			Snippet:    domain.Snippet(data),
+		}
+	}
+	return result, nil
+}
+
+// readLimited reads at most max bytes and reports a longer answer rather
+// than truncating it into something that parses by accident.
+func readLimited(r io.Reader, max int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, max+1))
+	if err != nil {
+		return nil, transportError(err, "")
+	}
+	if int64(len(data)) > max {
+		return nil, &domain.BadResponseError{
+			Reason: fmt.Sprintf("the response is larger than %d bytes", max),
+		}
+	}
+	return data, nil
+}
+
+func statusError(status int, endpoint string, payload []byte) error {
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return fmt.Errorf("%w: %s answered %d", domain.ErrProviderUnauthorized, endpoint, status)
+	case status == http.StatusTooManyRequests:
+		return fmt.Errorf("%w: %s answered %d", domain.ErrProviderRateLimited, endpoint, status)
+	case status >= 500:
+		return fmt.Errorf("%w: %s answered %d", domain.ErrProviderUnavailable, endpoint, status)
+	default:
+		return &domain.BadResponseError{
+			Endpoint:   endpoint,
+			HTTPStatus: status,
+			Reason:     "the request was rejected",
+			Snippet:    domain.Snippet(payload),
+		}
+	}
+}
+
+func transportError(err error, endpoint string) error {
+	where := endpoint
+	if where != "" {
+		where = " at " + where
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return fmt.Errorf("%w%s", domain.ErrProviderTimeout, where)
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return fmt.Errorf("%w%s", domain.ErrProviderTimeout, where)
+	}
+	// The transport's own message can quote the URL, so it is redacted
+	// before it reaches a log or a card.
+	return fmt.Errorf("%w%s: %s", domain.ErrProviderUnavailable, where, RedactText(err.Error()))
+}
+
+// sensitiveQueryKey reports whether a query parameter carries a credential.
+func sensitiveQueryKey(name string) bool {
+	switch strings.ToLower(name) {
+	case "key", "api_key", "apikey", "api-key", "access_token", "token",
+		"secret", "password", "passwd", "auth", "authorization",
+		"sig", "signature", "client_secret":
+		return true
+	}
+	return false
+}
+
+// Redact removes what must never reach a log or an error message from a
+// URL: the user info, and the value of any parameter that looks like a
+// credential.
+func Redact(endpoint string) string {
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Scheme == "" {
+		return RedactText(endpoint)
+	}
+	if parsed.User != nil {
+		parsed.User = url.User("redacted")
+	}
+	query := parsed.Query()
+	changed := false
+	for name := range query {
+		if sensitiveQueryKey(name) {
+			query.Set(name, "redacted")
+			changed = true
+		}
+	}
+	if changed {
+		parsed.RawQuery = query.Encode()
+	}
+	return parsed.String()
+}
+
+var secretAssignment = regexp.MustCompile(`(?i)\b(key|api_key|apikey|api-key|access_token|token|secret|password|passwd|auth|authorization|sig|signature|client_secret)=([^&\s"']+)`)
+
+// RedactText removes credential values from arbitrary text, such as a
+// transport error message that quotes a URL.
+func RedactText(text string) string {
+	return secretAssignment.ReplaceAllString(text, "$1=redacted")
+}
