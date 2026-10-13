@@ -19,6 +19,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -28,10 +29,14 @@ import (
 )
 
 const (
-	appName     = "Boku"
-	toolTip     = "Boku — 我的面板"
-	panelWidth  = 320
-	panelHeight = 320
+	appName    = "Boku"
+	toolTip    = "Boku — 我的面板"
+	panelWidth = 320
+	// panelHeight leaves room for the panel, the two lines that close the
+	// bottom, the clipboard line between them and the footer: the content
+	// then fits without scrolling, and a panel with more in it scrolls
+	// rather than pushing the lines off the window.
+	panelHeight = 380
 	// trayIconSize is the icon in device pixels: 16 points on a Retina
 	// display, which MyGo scales to the screen's density on Windows and
 	// Linux.
@@ -44,6 +49,10 @@ type Deps struct {
 	Panels *usecase.Panels
 	// Secrets stores the credentials those panels need.
 	Secrets *usecase.Secrets
+	// Clipboard reads and records the system clipboard. It is what the
+	// quick window's clipboard line and the history window show; a State
+	// without one draws neither.
+	Clipboard *usecase.Clipboard
 	// Version is the application version, shown in the footer.
 	Version string
 	// Quit is how the tray application leaves: it has no main window to
@@ -57,6 +66,7 @@ type State struct {
 	app           *mygo.Application
 	panelService  *usecase.Panels
 	secretService *usecase.Secrets
+	clipboard     *usecase.Clipboard
 	version       string
 	quit          func()
 
@@ -65,14 +75,25 @@ type State struct {
 	// built several times per frame, and parsing a document is not a view's
 	// work.
 	deepseekMark *ui.SVG
+	// clipboardMark labels the quick window's clipboard line, parsed for the
+	// same reason.
+	clipboardMark *ui.SVG
 
 	tray           *mygo.Tray
 	panel          *mygo.Window // the open quick window, or nil when closed
 	settingsWindow *mygo.Window // the open settings window, or nil
+	historyWindow  *mygo.Window // the open clipboard history window, or nil
 
 	// form is the settings window's state, on the main thread like the
 	// rest.
 	form connectForm
+	// clipboardStatus is the last thing the clipboard switches said, shown
+	// under them.
+	clipboardStatus string
+	// copiedEntry is the row that was last clicked in the history, and
+	// copiedAt is when: the row says so for a moment.
+	copiedEntry string
+	copiedAt    time.Time
 	// detailsOpen is whether the quick window shows the panel's detail rows
 	// — the smaller numbers under the headline — which stay folded away
 	// until they are asked for.
@@ -103,14 +124,20 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the DeepSeek mark: %w", err)
 	}
+	clipMark, err := ui.ParseSVG(assets.Clipboard())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the clipboard mark: %w", err)
+	}
 	return &State{
 		app:           app,
 		panelService:  deps.Panels,
 		secretService: deps.Secrets,
+		clipboard:     deps.Clipboard,
 		version:       deps.Version,
 		quit:          deps.Quit,
 		trayIcon:      trayIcon,
 		deepseekMark:  mark,
+		clipboardMark: clipMark,
 	}, nil
 }
 
@@ -173,6 +200,22 @@ func (s *State) Destroy() {
 	if s.tray != nil {
 		s.tray.Destroy()
 		s.tray = nil
+	}
+}
+
+// Refresh asks the open windows for a frame. It is what a background answer
+// calls — a new clipboard reading, a switch that was flipped — and it is
+// safe to call from another goroutine: Window.Update carries it to the main
+// thread, which is the only thread that may touch this state.
+func (s *State) Refresh() {
+	if s.panel != nil {
+		s.panel.Update(func() {})
+	}
+	if s.settingsWindow != nil {
+		s.settingsWindow.Update(func() {})
+	}
+	if s.historyWindow != nil {
+		s.historyWindow.Update(func() {})
 	}
 }
 
@@ -259,10 +302,27 @@ func (s *State) View(c *ui.Context) {
 	}
 	box.Children(func() {
 		s.page(c, page{
-			body:    s.card,
+			body: s.card,
+			// The clipboard line closes the content: it is about the
+			// desktop rather than about a panel, and it belongs at the far
+			// end of the window from the numbers.
+			bottom:  s.clipboardBottom,
 			actions: s.flyoutActions,
 		})
 	})
+}
+
+// clipboardBottom draws the quick window's clipboard region, when the user
+// asked for it. Without the switch the region is not there at all — no
+// divider, no empty line — so a window that never wanted it is unchanged.
+func (s *State) clipboardBottom(c *ui.Context) {
+	if s.clipboard == nil {
+		return
+	}
+	if !s.clipboard.Settings().ClipboardRegionVisible {
+		return
+	}
+	s.clipboardRegion(c)
 }
 
 // flyoutActions is the quick window's footer: everything the user can always

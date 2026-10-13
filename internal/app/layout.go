@@ -30,13 +30,25 @@ type page struct {
 	// body draws the screen's own blocks, between the header's divider and
 	// the footer's, filling the room that is left.
 	body func(c *ui.Context)
+	// bottom draws a region of its own under the body — the quick window's
+	// clipboard line — between its own dividers and above the footer. It is
+	// nil for a screen that has no such region.
+	bottom func(c *ui.Context)
 	// actions draws the right side of the footer, or is nil for a screen
 	// whose actions are elsewhere.
 	actions func(c *ui.Context)
 }
 
 // page lays the regions out in a column. The body takes the space that is
-// left, so the footer stays at the bottom whatever the window's height is.
+// left and scrolls when it does not fit, so the region below it and the
+// footer stay where they are.
+//
+// A region at the bottom of the window draws its own leading line, and the
+// line above the footer is drawn here. The clipboard line is such a region:
+// with it, the window reads content / line / clipboard / line / footer, and
+// without it — nothing has been copied yet, or the region is switched off —
+// content / line / footer. Nothing is reserved for a region that is not
+// drawn, so there is no empty band to explain.
 func (s *State) page(c *ui.Context, p page) {
 	t := c.Theme()
 	ui.Column(c).Fill().Children(func() {
@@ -44,14 +56,22 @@ func (s *State) page(c *ui.Context, p page) {
 			header(c, p)
 			ui.Divider(c)
 		}
-		body := ui.Column(c).Fill().
-			Padding(t.Space(4), t.Space(4), t.Space(3), t.Space(4)).
-			Gap(t.Space(3))
+		// The body scrolls: Grow takes the room the regions below it do not
+		// use, and a body taller than that room scrolls inside it.
+		body := ui.Scroll(c).FillWidth().Grow(1)
 		body.Children(func() {
-			if p.body != nil {
-				p.body(c)
-			}
+			ui.Column(c).FillWidth().
+				Padding(t.Space(4), t.Space(4), t.Space(3), t.Space(4)).
+				Gap(t.Space(3)).
+				Children(func() {
+					if p.body != nil {
+						p.body(c)
+					}
+				})
 		})
+		if p.bottom != nil {
+			p.bottom(c)
+		}
 		ui.Divider(c)
 		footer(c, s.versionLine(), p.actions)
 	})
@@ -141,13 +161,21 @@ func header(c *ui.Context, p page) {
 // always available on the right. It is deliberately quiet — a hairline above
 // it, no face of its own — so it reads as the edge of the window rather than
 // as another row of content.
+//
+// The version and the actions keep their own width: the actions are what the
+// footer is for, and a footer that squeezed them into an ellipsis would be a
+// footer nobody could use.
 func footer(c *ui.Context, version string, actions func(c *ui.Context)) {
 	t := c.Theme()
 	ui.Row(c).FillWidth().Height(t.Space(9)).
 		PaddingX(t.Space(3)).
 		AlignItems(ui.Center).
 		Children(func() {
-			ui.Text(c, version).FontSize(t.Rem(0.75)).TextColor(t.TextMuted).SingleLine()
+			ui.Text(c, version).
+				FontSize(t.Rem(0.75)).
+				TextColor(t.TextMuted).
+				SingleLine().
+				Shrink(0)
 			ui.Spacer(c)
 			if actions != nil {
 				actions(c)
@@ -164,6 +192,31 @@ func textButton(c *ui.Context, label string) ui.Element {
 	button.Radius(t.Radius).Padding(t.Space(1), t.Space(2))
 	button.Children(func() {
 		text := ui.Text(c, label).FontSize(t.Rem(0.8)).SingleLine()
+		if button.Hovered() || button.Focused() {
+			text.TextColor(t.Text)
+		} else {
+			text.TextColor(t.TextMuted)
+		}
+	})
+	return button
+}
+
+// chipButton is a text button with a face: a small label on a rounded
+// background, which darkens under the pointer. It is for a row that is about
+// a value rather than about actions — the clipboard line — where a control
+// with no face is easy to miss next to the text it sits beside.
+func chipButton(c *ui.Context, label string) ui.Element {
+	t := c.Theme()
+	button := ui.ButtonBase(c)
+	button.Radius(t.Radius).Padding(t.Space(0.5), t.Space(2))
+	switch {
+	case button.Hovered() || button.Focused():
+		button.Background(t.SurfacePressed)
+	default:
+		button.Background(t.SurfaceHover)
+	}
+	button.Children(func() {
+		text := ui.Text(c, label).FontSize(t.Rem(0.75)).SingleLine()
 		if button.Hovered() || button.Focused() {
 			text.TextColor(t.Text)
 		} else {

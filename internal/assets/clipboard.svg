@@ -1,0 +1,12 @@
+// The clipboard icon: a board with the clip that holds its paper.
+//
+// It is a line drawing rather than a filled one, and it is drawn in the color
+// of the text around it (currentColor), so whoever shows it decides that.
+// The region it labels is a quiet line under the panels, and a solid mark
+// there would read as a button.
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16"
+     fill="none" stroke="currentColor" stroke-width="1.2"
+     stroke-linecap="round" stroke-linejoin="round">
+  <rect x="2.5" y="4.5" width="11" height="9.5" rx="1.8"/>
+  <path d="M6 4.5V3.7a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v.8"/>
+</svg>

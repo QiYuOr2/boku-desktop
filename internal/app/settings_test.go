@@ -16,6 +16,18 @@ func settingsText(t *testing.T, state *State) []string {
 	return tt.Texts()
 }
 
+// exact reports whether one drawn text is exactly this, rather than
+// containing it: what a window must not offer is its own word, and a
+// sentence about it is not the same thing.
+func exact(texts []string, want string) bool {
+	for _, text := range texts {
+		if text == want {
+			return true
+		}
+	}
+	return false
+}
+
 // The settings window is a page of settings, and connecting a data source is
 // one section of it: no header of its own — the title bar names the window —
 // and the provider in a block that carries its own name and mark. The window
@@ -38,8 +50,10 @@ func TestSettingsShowsTheConnectForm(t *testing.T) {
 	// Neither the window's own name nor a page header: the title bar says
 	// what this window is, and the sections say what is in it. Nor the
 	// address the provider asks, which is the provider's business.
+	// These are matched whole: a sentence about the clipboard may well
+	// contain the word "关闭" without offering a close action.
 	for _, unwanted := range []string{appName + " 设置", "配置数据源", "关闭", "API endpoint", "api.deepseek.com"} {
-		if contains(texts, unwanted) {
+		if exact(texts, unwanted) {
 			t.Errorf("the settings window still says %q: %q", unwanted, texts)
 		}
 	}
@@ -192,7 +206,7 @@ func TestSettingsWithoutAPanel(t *testing.T) {
 func TestSettingsHasNoCloseAction(t *testing.T) {
 	state := testState(t, newTestProvider(), newTestStore(), "0.1.0")
 	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
-	if tt.HasText("关闭") {
+	if exact(tt.Texts(), "关闭") {
 		t.Errorf("the settings window offers 关闭 in its own view: %q", tt.Texts())
 	}
 	if version, ok := tt.Find("Boku 0.1.0"); !ok {
@@ -260,5 +274,20 @@ func TestTargetFollowsThePanel(t *testing.T) {
 	}
 	if configured.panelID != deepseek.PanelID {
 		t.Errorf("panel id = %q, want %q", configured.panelID, deepseek.PanelID)
+	}
+}
+
+func TestCredentialLabel(t *testing.T) {
+	cases := map[string]string{
+		"apiKey":   "API Key",
+		"adminKey": "Admin Key",
+		"steamId":  "Steam ID",
+		"":         "凭据",
+		"other":    "other",
+	}
+	for key, want := range cases {
+		if got := credentialLabel(key); got != want {
+			t.Errorf("credentialLabel(%q) = %q, want %q", key, got, want)
+		}
 	}
 }

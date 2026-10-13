@@ -2,10 +2,14 @@ package app
 
 import (
 	"context"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+
+	"boku/internal/domain"
 )
 
 // The settings window is created when it is first asked for and closed for
@@ -99,10 +103,10 @@ func (s *State) openSettings() {
 }
 
 // settingsView builds the settings window: a page of settings, of which
-// connecting a data source is one section. The window has no header of its
-// own — its title bar already says it is Boku's settings — so the sections
-// start at the top, and the groups still to come (shortcuts, the data
-// directory, the vault) are added as further blocks.
+// connecting a data source, the clipboard and the tools are sections. The
+// window has no header of its own — its title bar already says it is Boku's
+// settings — so the sections start at the top, and the groups still to come
+// (shortcuts, the data directory, the vault) are added as further blocks.
 func (s *State) settingsView(c *ui.Context) {
 	t := c.Theme()
 	c.Root().Background(t.Background)
@@ -115,14 +119,114 @@ func (s *State) settingsView(c *ui.Context) {
 						FontSize(t.Rem(0.9)).
 						TextColor(t.TextMuted)
 				})
-				return
+			} else {
+				// One block after another, with a divider between them: the
+				// groups still to come are added the same way.
+				s.connectBody(c, configured)
+				ui.Divider(c)
 			}
-			// One block after another, with a divider between them: the
-			// groups still to come are added the same way.
-			s.connectBody(c, configured)
+			s.clipboardBody(c)
 		},
 	})
 }
+
+// clipboardBody is the clipboard group: the two switches and the way to the
+// history.
+//
+// Both switches start off, and the form says why: the clipboard is the most
+// sensitive thing Boku can read. Turning monitoring off stops the reading
+// rather than hiding it, and the form says that too, because "off" that
+// still reads would be a lie.
+//
+// What each switch reports is done in its OnClick, not by comparing what was
+// drawn with what is stored: a click is applied to the control's own value,
+// and the switch it flips is read from that. Comparing the two after the
+// fact would need the value to survive a pass, and a view is built several
+// times with local state each time.
+func (s *State) clipboardBody(c *ui.Context) {
+	t := c.Theme()
+	if s.clipboard == nil {
+		return
+	}
+	block(c, "剪贴板", func() {
+		settings := s.clipboard.Settings()
+		ui.Text(c, "剪贴板内容可能包含密码、验证码与私人对话；默认不读取。").
+			FontSize(t.Rem(0.75)).
+			TextColor(t.TextMuted).
+			Wrap()
+
+		monitor := settings.ClipboardMonitoring
+		ui.Checkbox(c, &monitor, "监听剪贴板（每 "+intervalLabel(settings)+" 读取一次）").
+			FontSize(t.Rem(0.82)).
+			OnClick(func() { s.setClipboardMonitoring(monitor) })
+
+		visible := settings.ClipboardRegionVisible
+		ui.Checkbox(c, &visible, "在快捷窗口底部显示剪贴板内容").
+			FontSize(t.Rem(0.82)).
+			OnClick(func() { s.setClipboardRegionVisible(visible) })
+
+		if !settings.ClipboardMonitoring {
+			ui.Text(c, "关闭监听后不再读取剪贴板，历史里已有的记录仍然保留。").
+				FontSize(t.Rem(0.72)).
+				TextColor(t.TextMuted).
+				Wrap()
+		}
+
+		ui.Row(c).Gap(t.Space(2)).Children(func() {
+			if button := ui.Button(c, "打开剪贴板历史"); button.Clicked() {
+				s.openHistory()
+			}
+		})
+
+		if text := s.clipboardStatusLine(); text != "" {
+			ui.Text(c, text).FontSize(t.Rem(0.78)).TextColor(t.TextMuted).Wrap()
+		}
+	})
+}
+
+// intervalLabel names the poll interval the way the switch reads.
+func intervalLabel(settings domain.ToolSettings) string {
+	interval := settings.Interval()
+	if interval%time.Second == 0 {
+		return strconv.Itoa(int(interval/time.Second)) + " 秒"
+	}
+	return strconv.Itoa(int(interval/time.Millisecond)) + " 毫秒"
+}
+
+// setClipboardMonitoring flips the switch and says what happened, so the
+// user is not left guessing whether it worked.
+func (s *State) setClipboardMonitoring(enabled bool) {
+	err := s.clipboard.SetMonitoring(context.Background(), enabled)
+	settings := s.clipboard.Settings()
+	switch {
+	case err != nil:
+		s.clipboardStatus = "开关没能写进设置文件：" + friendlyError(err) + "（本次运行内已生效）"
+	case settings.ClipboardMonitoring:
+		s.clipboardStatus = "已开始读取剪贴板。"
+	default:
+		s.clipboardStatus = "已停止读取剪贴板。"
+	}
+	s.Refresh()
+}
+
+// setClipboardRegionVisible flips the visibility of the quick window's
+// clipboard line.
+func (s *State) setClipboardRegionVisible(visible bool) {
+	err := s.clipboard.SetRegionVisible(context.Background(), visible)
+	settings := s.clipboard.Settings()
+	switch {
+	case err != nil:
+		s.clipboardStatus = "开关没能写进设置文件：" + friendlyError(err) + "（本次运行内已生效）"
+	case settings.ClipboardRegionVisible:
+		s.clipboardStatus = "快捷窗口底部会显示剪贴板内容。"
+	default:
+		s.clipboardStatus = "快捷窗口底部不再显示剪贴板内容。"
+	}
+	s.Refresh()
+}
+
+// clipboardStatusLine is the last thing the clipboard switches said.
+func (s *State) clipboardStatusLine() string { return s.clipboardStatus }
 
 // providerMark is the icon the header shows for a provider: its own mark,
 // which is what tells the user at a glance which account they are

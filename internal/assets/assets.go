@@ -34,10 +34,20 @@ var trayIconPNG []byte
 //go:embed deepseek.svg
 var deepseekSVG []byte
 
+// clipboardSVG is the clipboard mark, drawn beside the clipboard line in the
+// quick window. It is an SVG for the same reason the DeepSeek mark is: it is
+// shown at a text size and stays sharp there.
+//
+//go:embed clipboard.svg
+var clipboardSVG []byte
+
 // DeepSeek returns the DeepSeek mark as the SVG document it is. The caller
 // parses it once and keeps the result: parsing belongs to the framework,
 // and this package depends on the standard library alone.
 func DeepSeek() []byte { return deepseekSVG }
+
+// Clipboard returns the clipboard mark as the SVG document it is.
+func Clipboard() []byte { return clipboardSVG }
 
 // Icon returns the application icon as a PNG, scaled to size×size pixels.
 //

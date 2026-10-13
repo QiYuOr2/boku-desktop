@@ -13,12 +13,17 @@ import (
 // its provider, can be paired wrongly. That is a startup error, and it can
 // be checked without a window.
 func TestServicesAssembleTheDeepSeekPanel(t *testing.T) {
-	panels, secrets, err := services(t.TempDir(), "0.1.0")
+	panels, secrets, clipboard, err := services(t.TempDir(), "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}
-	if panels == nil || secrets == nil {
+	if panels == nil || secrets == nil || clipboard == nil {
 		t.Fatal("services returned no services")
+	}
+	// The clipboard starts off, and nothing here reads the system
+	// clipboard: assembling a service is not using it.
+	if settings := clipboard.Settings(); settings.ClipboardMonitoring || settings.ClipboardRegionVisible {
+		t.Errorf("the clipboard starts enabled: %+v", settings)
 	}
 
 	listed := panels.List()

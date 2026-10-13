@@ -2,7 +2,8 @@ package app
 
 import (
 	"context"
-	"image"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -18,39 +19,6 @@ func cardText(t *testing.T, state *State) []string {
 	t.Helper()
 	tt := ui.NewTester(state.View, panelWidth, panelHeight)
 	return tt.Texts()
-}
-
-// findText returns where one text of the frame sits. The tester matches a
-// text in full, so a label and the value beside it can both be found.
-func findText(t *testing.T, tt *ui.Tester, want string) ui.Rect {
-	t.Helper()
-	rect, ok := tt.Find(want)
-	if !ok {
-		t.Fatalf("no text is %q; the frame shows %q", want, tt.Texts())
-	}
-	return rect
-}
-
-// findTextPrefix returns where the text starting with prefix sits. It is for
-// the lines whose value the test does not decide, such as the clock.
-func findTextPrefix(t *testing.T, tt *ui.Tester, prefix string) ui.Rect {
-	t.Helper()
-	for _, text := range tt.Texts() {
-		if strings.HasPrefix(text, prefix) {
-			return findText(t, tt, text)
-		}
-	}
-	t.Fatalf("no text starts with %q; the frame shows %q", prefix, tt.Texts())
-	return ui.Rect{}
-}
-
-func contains(texts []string, want string) bool {
-	for _, text := range texts {
-		if strings.Contains(text, want) {
-			return true
-		}
-	}
-	return false
 }
 
 // A failure must never be drawn as 0: the card says what happened instead.
@@ -163,53 +131,6 @@ func TestCardDetailsAreCollapsedUntilClicked(t *testing.T) {
 	}
 	if tt.HasText("赠送余额") {
 		t.Errorf("the collapsed card still shows the detail rows: %q", tt.Texts())
-	}
-}
-
-// dividerRows returns the y of every row of the frame that is drawn edge to
-// edge in one color, which is how a divider looks in a rendered frame.
-func dividerRows(img *image.RGBA, c ui.Color, width int) []int {
-	var rows []int
-	for y := 0; y < img.Rect.Dy(); y++ {
-		row := 0
-		for x := 0; x < width; x++ {
-			i := img.PixOffset(x, y)
-			if img.Pix[i] == c.R && img.Pix[i+1] == c.G && img.Pix[i+2] == c.B {
-				row++
-			}
-		}
-		if row == width {
-			rows = append(rows, y)
-		}
-	}
-	return rows
-}
-
-// A window marks its sections with dividers, not with boxes: the panel and
-// the footer each end at one.
-func TestWindowSectionsAreMarkedByDividers(t *testing.T) {
-	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	loaded(t, state)
-	const scale = 2
-	img := ui.Render(state.View, panelWidth, panelHeight, scale)
-
-	tt := ui.NewTester(state.View, panelWidth, panelHeight)
-	collapsed := findText(t, tt, "明细").Y
-	version := findText(t, tt, "Boku 0.1.0").Y
-
-	rows := dividerRows(img, ui.LightTheme().Border, panelWidth*scale)
-	if len(rows) == 0 {
-		t.Fatal("the window draws no divider at all: the panel is not separated from the footer")
-	}
-	between := false
-	for _, y := range rows {
-		if at := float32(y) / scale; at > collapsed && at < version {
-			between = true
-		}
-	}
-	if !between {
-		t.Errorf("no divider falls between the panel at y=%.0f and the footer at y=%.0f: %v",
-			collapsed, version, rows)
 	}
 }
 
@@ -330,5 +251,70 @@ func TestCardWithoutPanels(t *testing.T) {
 	texts := cardText(t, state)
 	if !contains(texts, "还没有面板") {
 		t.Errorf("an empty dashboard does not say so: %q", texts)
+	}
+}
+
+func TestFriendlyErrorSpeaksTheUsersLanguage(t *testing.T) {
+	cases := []struct {
+		err      error
+		contains string
+	}{
+		{fmt.Errorf("%w: deepseek.apiKey", domain.ErrCredentialMissing), "凭据"},
+		{fmt.Errorf("%w: 401", domain.ErrProviderUnauthorized), "被拒绝"},
+		{fmt.Errorf("%w: 429", domain.ErrProviderRateLimited), "频繁"},
+		{fmt.Errorf("%w: timeout", domain.ErrProviderTimeout), "超时"},
+		{fmt.Errorf("%w: 500", domain.ErrProviderUnavailable), "不可用"},
+		{fmt.Errorf("%w: deepseek", domain.ErrProviderNotFound), "找不到"},
+		{&domain.BadResponseError{ProviderID: "deepseek", Reason: "balance_infos is empty"}, "balance_infos is empty"},
+	}
+	for _, c := range cases {
+		message := friendlyError(c.err)
+		if !strings.Contains(message, c.contains) {
+			t.Errorf("friendlyError(%v) = %q, want it to mention %q", c.err, message, c.contains)
+		}
+	}
+	if friendlyError(nil) != "" {
+		t.Error("friendlyError(nil) is not empty")
+	}
+	if err := errors.New("something else"); friendlyError(err) != err.Error() {
+		t.Errorf("friendlyError(%v) = %q", err, friendlyError(err))
+	}
+}
+
+func TestFormatMetricNeverInventsAZero(t *testing.T) {
+	metrics := deepseek.Metrics()
+	empty := domain.Snapshot{ProviderID: "deepseek", Status: domain.StatusOK}
+	if got := formatMetric(empty, metrics[0]); got != "—" {
+		t.Errorf("formatMetric of an empty snapshot = %q, want a dash", got)
+	}
+	snapshot := domain.Snapshot{
+		ProviderID: "deepseek",
+		Status:     domain.StatusOK,
+		Currency:   "CNY",
+		Observations: []domain.Observation{
+			{MetricKey: deepseek.MetricBalanceMinor, Value: domain.NumberValue(4210)},
+			{MetricKey: deepseek.MetricGrantedMinor, Value: domain.TextValue("plenty")},
+		},
+	}
+	if got := formatMetric(snapshot, metrics[0]); got != "¥42.10" {
+		t.Errorf("formatMetric(balance) = %q, want ¥42.10", got)
+	}
+	if got := formatMetric(snapshot, metrics[1]); got != "—" {
+		t.Errorf("formatMetric of a text where a number belongs = %q, want a dash", got)
+	}
+	noCurrency := snapshot
+	noCurrency.Currency = ""
+	if got := formatMetric(noCurrency, metrics[0]); got != "—" {
+		t.Errorf("formatMetric without a currency = %q, want a dash", got)
+	}
+}
+
+func TestClock(t *testing.T) {
+	if got := clock(time.Time{}); got != "—" {
+		t.Errorf("clock of the zero time = %q", got)
+	}
+	at := time.Date(2026, 1, 2, 15, 4, 5, 0, time.Local)
+	if got := clock(at); got != "15:04" {
+		t.Errorf("clock = %q, want 15:04", got)
 	}
 }
