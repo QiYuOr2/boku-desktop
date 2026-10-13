@@ -60,6 +60,44 @@ func rowCentre(t *testing.T, tt *ui.Tester, label string) (float32, float32) {
 	return row.X + row.W - 3, row.Y + row.H/2
 }
 
+// rowFace is the face a row is drawn on: the colors in the room it keeps
+// around its text, which is where the row's background shows and no glyph
+// reaches. A single pixel cannot say this: where a letter lands depends on
+// the font, and where a row begins depends on the layout around it.
+//
+// It draws the frame again first, so that a rect read before a pointer moved
+// is not used to read pixels after it.
+func rowFace(t *testing.T, tt *ui.Tester, label string) map[color.RGBA]int {
+	t.Helper()
+	rect, ok := tt.Find(label)
+	if !ok {
+		t.Fatalf("the row for %q was not found; the window shows %q", label, tt.Texts())
+	}
+	img := tt.Image()
+	y := int(rect.Y + rect.H/2)
+	counts := map[color.RGBA]int{}
+	for x := int(rect.X) - 12; x < int(rect.X); x++ {
+		counts[img.RGBAAt(x, y)]++
+	}
+	for x := int(rect.X+rect.W) + 4; x < historyWidth; x++ {
+		counts[img.RGBAAt(x, y)]++
+	}
+	return counts
+}
+
+// sameFace reports whether two bands were drawn the same.
+func sameFace(a, b map[color.RGBA]int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for c, n := range a {
+		if b[c] != n {
+			return false
+		}
+	}
+	return true
+}
+
 // colourAt is the pixel the frame drew at a point.
 func colourAt(img *image.RGBA, x, y float32) color.RGBA {
 	return img.RGBAAt(int(x), int(y))
@@ -72,21 +110,18 @@ func TestARowDarkensUnderThePointer(t *testing.T) {
 	state := historyState(t, "a copy that can be clicked", "another copy")
 	tt := ui.NewTester(state.historyView, historyWidth, historyHeight)
 
-	// Where the pointer is not.
+	away := rowFace(t, tt, "another copy")
+	otherAway := rowFace(t, tt, "a copy that can be clicked")
+
+	// The pointer onto one row, and only that one changes.
 	x, y := rowCentre(t, tt, "another copy")
-	away := colourAt(tt.Image(), x, y)
-
-	// The pointer onto the row.
 	tt.Move(x, y)
-	hovered := colourAt(tt.Image(), x, y)
 
-	if hovered == away {
-		t.Errorf("the row is the same colour under the pointer: %v", hovered)
+	if hovered := rowFace(t, tt, "another copy"); sameFace(hovered, away) {
+		t.Errorf("the row is the same face under the pointer: %v", hovered)
 	}
-	// And the row that is away keeps its own face.
-	otherX, otherY := rowCentre(t, tt, "a copy that can be clicked")
-	if got := colourAt(tt.Image(), otherX, otherY); got != away {
-		t.Errorf("the row the pointer is not on changed colour: %v, was %v", got, away)
+	if other := rowFace(t, tt, "a copy that can be clicked"); !sameFace(other, otherAway) {
+		t.Errorf("the row the pointer is not on changed face: %v, was %v", other, otherAway)
 	}
 }
 
@@ -118,6 +153,7 @@ func TestAClickedRowIsMarkedAndThenCleared(t *testing.T) {
 	// changes is the state the next frame reads.
 	state.clearCopied()
 	tt.Frame()
+	markedX, markedY = rowCentre(t, tt, entry.Line())
 	plain := colourAt(tt.Image(), markedX, markedY)
 	if marked == plain {
 		t.Error("the mark does not change the row it is on")

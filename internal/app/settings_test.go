@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"image"
 	"testing"
 
@@ -29,9 +28,9 @@ func exact(texts []string, want string) bool {
 }
 
 // The settings window is a page of settings, and connecting a data source is
-// one section of it: no header of its own — the title bar names the window —
-// and the provider in a block that carries its own name and mark. The window
-// also says where a credential is going before it is handed over.
+// one section of it: the title bar names the window, the section carries the
+// provider's own mark and name, and the page says where a credential is going
+// before it is handed over.
 func TestSettingsShowsTheConnectForm(t *testing.T) {
 	state := testState(t, newTestProvider(), newTestStore(), "0.1.0")
 	texts := settingsText(t, state)
@@ -47,29 +46,32 @@ func TestSettingsShowsTheConnectForm(t *testing.T) {
 			t.Errorf("the settings window does not show %q; it shows %q", want, texts)
 		}
 	}
-	// Neither the window's own name nor a page header: the title bar says
-	// what this window is, and the sections say what is in it. Nor the
-	// address the provider asks, which is the provider's business.
-	// These are matched whole: a sentence about the clipboard may well
-	// contain the word "关闭" without offering a close action.
+	// The window says what it is once — in the system's title bar — and not
+	// again inside itself. Nor the address the provider asks, which is the
+	// provider's business. These are matched whole: a sentence about the
+	// clipboard may well contain the word "关闭" without offering a close
+	// action.
 	for _, unwanted := range []string{appName + " 设置", "配置数据源", "关闭", "API endpoint", "api.deepseek.com"} {
 		if exact(texts, unwanted) {
 			t.Errorf("the settings window still says %q: %q", unwanted, texts)
 		}
 	}
+	// The provider's section is the first thing the window draws: nothing of
+	// the window's own is above it, since its name is in the system's title
+	// bar rather than in the view.
 	marked := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
 	provider, ok := marked.Find("DeepSeek")
 	if !ok {
-		t.Fatalf("the provider's block was not found; the window shows %q", texts)
+		t.Fatalf("the provider's section was not found; the window shows %q", texts)
 	}
-	if provider.Y > 40 {
-		t.Errorf("the provider's block starts at y=%.0f: something is above it", provider.Y)
+	if provider.Y > pageEdge+4 {
+		t.Errorf("the provider's section starts at y=%.0f: something is above it", provider.Y)
 	}
 }
 
-// A data source is one block among the settings window's blocks, not the
-// window: the provider's own name heads it, and its fields sit at the
-// window's margin rather than in a box.
+// A data source is one section among the settings window's sections, not the
+// window: the provider's own name heads it, and its rows sit at the page's
+// margin rather than in a box.
 func TestSettingsPutsTheProviderInItsOwnSection(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
 	state.loadCredential()
@@ -79,14 +81,11 @@ func TestSettingsPutsTheProviderInItsOwnSection(t *testing.T) {
 	key := findText(t, tt, "API Key")
 	warning := findTextPrefix(t, tt, "凭据目前以明文保存")
 
-	if provider.Y > 40 {
-		t.Errorf("the provider's section starts at y=%.0f: something is above it", provider.Y)
+	if provider.X < pageEdge {
+		t.Errorf("the provider's section reaches the page's edge at x=%.0f", provider.X)
 	}
-	if provider.X < 8 {
-		t.Errorf("the provider's section reaches the window's left edge at x=%.0f", provider.X)
-	}
-	// The section's own rows start at the section's margin; the provider's
-	// name sits further right, beside its mark.
+	// The section's own rows start at the page's margin; the provider's name
+	// sits further right, beside its mark.
 	if key.X > provider.X {
 		t.Errorf("the field label at x=%.0f is indented under the provider's name at x=%.0f", key.X, provider.X)
 	}
@@ -94,9 +93,9 @@ func TestSettingsPutsTheProviderInItsOwnSection(t *testing.T) {
 		t.Errorf("the fields are out of order: key y=%.0f, warning y=%.0f", key.Y, warning.Y)
 	}
 	// The credential fields belong to the provider's section, so they stay
-	// above the footer's divider, which is drawn edge to edge.
+	// above the footer's divider, which is drawn inside the page's margin.
 	img := ui.Render(state.settingsView, settingsWidth, settingsHeight, 2)
-	rows := dividerRows(img, ui.LightTheme().Border, settingsWidth*2)
+	rows := pageRows(img, colorBorder, settingsWidth*2, 2)
 	if len(rows) == 0 {
 		t.Fatal("the settings window draws no divider at all")
 	}
@@ -131,8 +130,13 @@ func TestSettingsShowsAStoredCredentialMasked(t *testing.T) {
 	if !state.form.hasCredential {
 		t.Fatal("the form does not see the stored credential")
 	}
-	if state.form.masked != "…0001" {
-		t.Errorf("the form shows %q, want only the last four characters", state.form.masked)
+	if state.form.stored != "…0001" {
+		t.Errorf("the form shows %q, want only the last four characters", state.form.stored)
+	}
+	// The stored value is not in the field: the field is what a new key is
+	// typed into, and it draws its own hint while it is empty.
+	if state.form.apiKey != "" {
+		t.Errorf("the field holds %q, want the empty field that draws its hint", state.form.apiKey)
 	}
 	texts := settingsText(t, state)
 	if !contains(texts, "已配置：…0001") {
@@ -145,32 +149,33 @@ func TestSettingsShowsAStoredCredentialMasked(t *testing.T) {
 	}
 }
 
-// Deleting asks once before it does anything.
-func TestSettingsAsksBeforeDeleting(t *testing.T) {
+// Typing is what replaces a stored credential, and it does so on its own: the
+// window offers no 更换 to press, and until the field holds something there is
+// nothing new to save. What is stored is said in one line, as its last four
+// characters.
+func TestSettingsATypedKeyIsTheReplacement(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
 	state.loadCredential()
-	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
 
-	if err := tt.Click("删除"); err != nil {
-		t.Fatalf("click 删除: %v", err)
+	// The window as it opens: the stored credential is named, and the field
+	// is empty, which is the state that has nothing new in it.
+	if !state.credentialIsShown() {
+		t.Fatal("a stored credential with an empty field is not read as stored")
 	}
-	tt.Frame()
-	if !state.form.confirmDelete {
-		t.Fatal("clicking 删除 did not ask for confirmation")
+	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
+	if !tt.HasText("已配置：…0001") {
+		t.Errorf("the window does not say what is stored: %q", tt.Texts())
 	}
-	if !tt.HasText("确认") || !tt.HasText("取消") {
-		t.Errorf("the confirmation does not offer both answers: %q", tt.Texts())
+	for _, gone := range []string{"更换", "删除", "确认", "取消"} {
+		if tt.HasText(gone) {
+			t.Errorf("the window still offers %q: %q", gone, tt.Texts())
+		}
 	}
-	if err := tt.Click("取消"); err != nil {
-		t.Fatalf("click 取消: %v", err)
-	}
-	tt.Frame()
-	if state.form.confirmDelete {
-		t.Error("取消 did not call the deletion off")
-	}
-	// The credential is still there: nothing was deleted.
-	if _, found, err := state.secretService.Masked(context.Background(), "deepseek", "apiKey"); err != nil || !found {
-		t.Errorf("the credential was removed without confirmation: found=%v err=%v", found, err)
+
+	// Typing into the field is the whole of asking to replace it.
+	state.form.apiKey = "sk-replaced-0002"
+	if state.credentialIsShown() {
+		t.Error("a typed key is still read as nothing new to save")
 	}
 }
 
@@ -195,7 +200,7 @@ func TestSettingsWithoutAPanel(t *testing.T) {
 	state := testState(t, newTestProvider(), newTestStore(), "0.1.0")
 	state.panelService = emptyPanelService(t)
 	texts := settingsText(t, state)
-	if !contains(texts, "还没有可以配置的数据源") {
+	if !contains(texts, "还没有可配置的数据源") {
 		t.Errorf("the settings window does not say there is nothing to configure: %q", texts)
 	}
 }

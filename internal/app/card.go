@@ -20,37 +20,35 @@ import (
 // never shows 0 in place of an answer it did not get. That rule is the whole
 // point of the card.
 //
-// The panel is one block among the window's blocks. A divider closes the
-// block, the way the footer's divider closes the content, so a second panel
-// is a second block under the first with its own divider between them.
+// The panel is a section of the window, the same shape the settings window
+// gives each of its own: a title line, then what the panel knows.
 func (s *State) card(c *ui.Context) {
-	t := c.Theme()
 	listed := s.panelService.List()
 	if len(listed) == 0 {
 		ui.Text(c, "还没有面板。").
-			FontSize(t.Rem(0.9)).
-			TextColor(t.TextMuted)
+			FontSize(sizeBody).
+			TextColor(colorTextMuted)
 		return
 	}
 	view := s.panelService.View(listed[0].ID)
 
-	ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
-		block(c, "", func() {
-			s.cardTitle(c, view)
-			s.cardNumbers(c, view)
-		})
-		ui.Divider(c)
+	ui.Column(c).FillWidth().Gap(float32(8)).Children(func() {
+		s.cardTitle(c, view)
+		s.cardNumbers(c, view)
 	})
 }
 
 // cardTitle is the panel's first line: what it is called on the left, and on
 // the right how old its numbers are together with the way to fetch them
 // again — the age of a number and the action that changes it belong next to
-// each other, at the head of the block.
+// each other, at the head of the section.
 func (s *State) cardTitle(c *ui.Context, view usecase.View) {
-	t := c.Theme()
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-		ui.Text(c, view.Panel.Title).FontSize(t.Rem(0.95)).Bold().SingleLine()
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
+		ui.Text(c, view.Panel.Title).
+			FontSize(sizeTitle).
+			FontWeight(600).
+			TextColor(colorTextSoft).
+			SingleLine()
 		ui.Spacer(c)
 		freshness(c, view)
 		// One action: fetching a panel that failed and fetching a panel
@@ -79,7 +77,6 @@ const (
 // and a still mark beside them would leave the user wondering whether the
 // click landed.
 func (s *State) refreshButton(c *ui.Context, view usecase.View) ui.Element {
-	t := c.Theme()
 	label := "刷新"
 	if view.Err != nil && view.HasSnapshot {
 		// One action, two situations: the reason the last attempt failed is
@@ -87,20 +84,35 @@ func (s *State) refreshButton(c *ui.Context, view usecase.View) ui.Element {
 		// called when there is something to try again about.
 		label = "重试"
 	}
-	button := ui.ButtonBase(c).Label(label).Tooltip(label).Cursor(ui.CursorPointer).
-		Radius(t.Radius).
-		Padding(t.Space(0.5))
+	// The mark is built here and filled in below, inside the button's own
+	// children: the refresh action draws a mark that moves, which the
+	// design system's icon button — a still mark — does not. Everything
+	// else about it, down to the face under the pointer, is the design's.
+	var mark ui.Element
+	button := ui.ButtonBase(c).Label(label).Tooltip(label).
+		Radius(radiusField).
+		Padding(2).
+		Cursor(ui.CursorPointer)
+	switch {
+	case button.Pressed():
+		button = button.Background(colorActive)
+	case button.Hovered() || button.Focused():
+		button = button.Background(colorHover)
+	}
 	button.Children(func() {
-		mark := ui.Icon(c, s.refreshMark).Size(t.Space(4), t.Space(4)).Shrink(0)
+		mark = ui.Icon(c, s.refreshMark).Size(float32(16), float32(16)).Shrink(0)
 		if button.Hovered() || button.Focused() {
-			mark.TextColor(t.Text)
+			mark.TextColor(colorText)
 		} else {
-			mark.TextColor(t.TextMuted)
-		}
-		if view.Loading {
-			mark.Rotate(mark.Loop(spinKey, spinPeriod, ui.Linear) * 360)
+			mark.TextColor(colorTextMuted)
 		}
 	})
+	// Turning the mark is what the click answers while a fetch runs: a still
+	// mark beside unchanged numbers would leave the user wondering whether
+	// the click landed.
+	if view.Loading && mark.Valid() {
+		mark.Rotate(mark.Loop(spinKey, spinPeriod, ui.Linear) * 360)
+	}
 	return button
 }
 
@@ -109,29 +121,21 @@ func (s *State) refreshButton(c *ui.Context, view usecase.View) ui.Element {
 // instead of drawing numbers; a snapshot is drawn as its headline, and the
 // smaller numbers stay folded away until the user asks for them.
 func (s *State) cardNumbers(c *ui.Context, view usecase.View) {
-	t := c.Theme()
 	switch {
 	case view.NeedsCredentials():
-		ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
-			ui.Text(c, "还没有配置凭据。").
-				FontSize(t.Rem(0.85))
-			ui.Text(c, "配置后即可读取面板数据。").
-				FontSize(t.Rem(0.78)).
-				TextColor(t.TextMuted)
+		ui.Column(c).FillWidth().Gap(float32(10)).Children(func() {
+			notice(c, notePlain, "还没有配置凭据。配置后即可读取面板数据。")
 			actionRow(c, "去配置", s.openSettings)
 		})
 	case view.Err != nil && !view.HasSnapshot:
-		ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
-			ui.Text(c, friendlyError(view.Err)).
-				FontSize(t.Rem(0.85)).
-				TextColor(t.Danger).
-				Wrap()
+		ui.Column(c).FillWidth().Gap(float32(10)).Children(func() {
+			notice(c, noteDanger, friendlyError(view.Err))
 			actionRow(c, "重试", func() { s.refreshAsync(true) })
 		})
 	case !view.HasSnapshot:
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "正在获取…").FontSize(t.Rem(0.85)).TextColor(t.TextMuted)
+			ui.Text(c, "正在获取…").FontSize(sizeBody).TextColor(colorTextMuted)
 		})
 	default:
 		balance(c, view, &s.detailsOpen)
@@ -141,16 +145,10 @@ func (s *State) cardNumbers(c *ui.Context, view usecase.View) {
 	// is worth more than none, as long as it is labelled as old. The window
 	// says why it failed and offers to try again on the title line.
 	if view.Err != nil && view.HasSnapshot {
-		ui.Text(c, friendlyError(view.Err)).
-			FontSize(t.Rem(0.78)).
-			TextColor(t.Danger).
-			Wrap()
+		notice(c, noteDanger, friendlyError(view.Err))
 	}
 	if message := view.Snapshot.Message; message != "" {
-		ui.Text(c, message).
-			FontSize(t.Rem(0.78)).
-			TextColor(t.TextMuted).
-			Wrap()
+		notice(c, notePlain, message)
 	}
 }
 
@@ -162,7 +160,6 @@ func (s *State) cardNumbers(c *ui.Context, view usecase.View) {
 // says what the big number is ("总余额"), the control beside the number says
 // there is more behind it.
 func balance(c *ui.Context, view usecase.View, detailsOpen *bool) {
-	t := c.Theme()
 	if len(view.Metrics) == 0 {
 		return
 	}
@@ -170,6 +167,7 @@ func balance(c *ui.Context, view usecase.View, detailsOpen *bool) {
 	remaining := view.Metrics[1:]
 	if len(remaining) == 0 {
 		balanceHeadline(c, view, headline, nil)
+		hairline(c)
 		return
 	}
 
@@ -183,7 +181,7 @@ func balance(c *ui.Context, view usecase.View, detailsOpen *bool) {
 		})
 	}
 
-	ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
+	ui.Column(c).FillWidth().Children(func() {
 		balanceHeadline(c, view, headline, detailsOpen)
 		if !*detailsOpen {
 			return
@@ -192,22 +190,32 @@ func balance(c *ui.Context, view usecase.View, detailsOpen *bool) {
 		// disclosure at the end of its line.
 		metricRows(c, rows)
 	})
+	hairline(c)
 }
 
 // disclosure is a control that opens and closes the rows under a headline: a
-// small chevron and the label, which the pointer, Enter and Space toggle. It
-// is drawn on the line of whatever it discloses rather than above the content
-// it opens, which ui.Collapsible cannot do — its trigger and its panel are
-// one column.
+// small chevron and the label, on a face of their own, which the pointer,
+// Enter and Space toggle. It is drawn on the line of whatever it discloses
+// rather than above the content it opens, which ui.Collapsible cannot do —
+// its trigger and its panel are one column.
+//
+// It wears a face because it is the only thing on its line that can be
+// clicked: the label beside it is what the big number is, and a control that
+// looks like the text it sits next to is a control nobody finds.
 func disclosure(c *ui.Context, label string, open *bool) {
-	t := c.Theme()
 	button := ui.ButtonBase(c).Focusable().Cursor(ui.CursorPointer).
 		Role(ui.RoleDisclosure).Expanded(*open).
-		Radius(t.Radius).Padding(t.Space(0.5), t.Space(1)).
-		AlignItems(ui.Center).Gap(t.Space(1))
+		Radius(999).Padding(float32(2), float32(8)).
+		AlignItems(ui.Center).Gap(float32(4)).Translate(float32(8), 0)
+	switch {
+	case button.Pressed():
+		button = button.Background(colorActive)
+	case button.Hovered():
+		button = button.Background(colorHover)
+	}
 	button.Children(func() {
+		ui.Text(c, label).FontSize(sizeSmall).TextColor(colorTextMuted).SingleLine()
 		disclosureArrow(c, turn(*open))
-		ui.Text(c, label).FontSize(t.Rem(0.78)).TextColor(t.TextMuted).SingleLine()
 	})
 	if button.Clicked() {
 		*open = !*open
@@ -233,9 +241,8 @@ func turn(open bool) float32 {
 // arrives. It wears a pointer and the accent color under the pointer, so
 // that it is not a hidden action.
 func balanceHeadline(c *ui.Context, view usecase.View, headline domain.Metric, detailsOpen *bool) {
-	t := c.Theme()
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-		ui.Text(c, headline.Label).FontSize(t.Rem(0.78)).TextColor(t.TextMuted)
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
+		ui.Text(c, headline.Label).FontSize(sizeSmall).TextColor(colorTextMuted).SingleLine()
 		ui.Spacer(c)
 		if detailsOpen != nil {
 			disclosure(c, "明细", detailsOpen)
@@ -243,7 +250,7 @@ func balanceHeadline(c *ui.Context, view usecase.View, headline domain.Metric, d
 	})
 	number := formatMetric(view.Snapshot, headline)
 	if view.UsageURL == "" {
-		ui.Text(c, number).FontSize(t.Rem(1.8)).Bold()
+		ui.Text(c, number).FontSize(28).FontWeight(600).SingleLine()
 		return
 	}
 	// The number is its own row, so that the column does not stretch the
@@ -254,9 +261,9 @@ func balanceHeadline(c *ui.Context, view usecase.View, headline domain.Metric, d
 			Tooltip("在官网查看明细").
 			Cursor(ui.CursorPointer)
 		button.Children(func() {
-			text := ui.Text(c, number).FontSize(t.Rem(1.8)).Bold()
+			text := ui.Text(c, number).FontSize(28).FontWeight(600).SingleLine()
 			if button.Hovered() || button.Focused() {
-				text.TextColor(t.Accent)
+				text.TextColor(colorBrand)
 			}
 		})
 		if button.Clicked() {
@@ -270,8 +277,7 @@ func balanceHeadline(c *ui.Context, view usecase.View, headline domain.Metric, d
 // disclosureArrow draws a chevron: pointing right, turned by deg degrees
 // clockwise.
 func disclosureArrow(c *ui.Context, deg float32) {
-	t := c.Theme()
-	ui.Box(c).Size(t.Space(4), t.Space(4)).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
+	ui.Box(c).Size(float32(12), float32(12)).Shrink(0).Draw(func(p *ui.Painter, r ui.Rect) {
 		cx, cy, d := r.X+r.W/2, r.Y+r.H/2, r.W/8
 		s, co := math.Sincos(float64(deg) * math.Pi / 180)
 		sin, cos := float32(s), float32(co)
@@ -285,36 +291,60 @@ func disclosureArrow(c *ui.Context, deg float32) {
 		path.MoveTo(x1, y1)
 		path.LineTo(x2, y2)
 		path.LineTo(x3, y3)
-		p.StrokePath(&path, 1.5, t.TextMuted)
+		p.StrokePath(&path, 1.5, colorTextMuted)
 	})
 }
 
 // actionRow puts one action at the left of its own row, where a column's
-// stretching does not turn it into a full-width button.
-func actionRow(c *ui.Context, label string, action func()) {
-	ui.Row(c).FillWidth().Children(func() {
-		if button := textButton(c, label); button.Clicked() && action != nil {
-			action()
+// stretching does not turn it into a full-width button. It is a secondary
+// action — the form's main one is the other button beside it — so it keeps
+// the face of one rather than being a word the user has to hunt for.
+func actionRow(c *ui.Context, label string, run func()) {
+	ui.Row(c).FillWidth().Gap(float32(8)).Children(func() {
+		if button := designButton(c, label, buttonSecondary); button.Clicked() && run != nil {
+			run()
 		}
 		ui.Spacer(c)
 	})
 }
 
-// freshness says how old the numbers are, or that they are being fetched.
+// freshness says how old the numbers are, or that they are being fetched. A
+// number from a failed attempt is marked as old in the color of a warning,
+// because the number is still worth more than none.
 func freshness(c *ui.Context, view usecase.View) {
-	t := c.Theme()
 	switch {
 	case view.HasSnapshot && view.Stale:
 		ui.Text(c, "旧数据 · "+clock(view.FetchedAt)).
-			FontSize(t.Rem(0.75)).
-			TextColor(t.Warning).
+			FontSize(sizeSmall).
+			TextColor(colorWarning).
 			SingleLine()
 	case view.HasSnapshot:
 		ui.Text(c, "已更新 "+clock(view.FetchedAt)).
-			FontSize(t.Rem(0.75)).
-			TextColor(t.TextMuted).
+			FontSize(sizeSmall).
+			TextColor(colorTextMuted).
 			SingleLine()
 	}
+}
+
+// metricRows draws the small numbers under a section's headline: one line
+// each, label on the left and value on the right, close together so that a
+// section stays a section instead of turning into a page.
+func metricRows(c *ui.Context, rows []metricRow) {
+	ui.Column(c).FillWidth().Gap(float32(2)).Children(func() {
+		for _, row := range rows {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+				ui.Text(c, row.label).FontSize(sizeSmall).TextColor(colorTextMuted)
+				ui.Spacer(c)
+				ui.Text(c, row.value).FontSize(sizeSmall).SingleLine()
+			})
+		}
+	})
+}
+
+// metricRow is one line of a section: what a number is, and the number.
+type metricRow struct {
+	label string
+	value string
 }
 
 // formatMetric shows one observation. A metric the snapshot does not have

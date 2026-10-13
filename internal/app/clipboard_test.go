@@ -223,8 +223,8 @@ func TestEntryLabelIsOneWordAtMost(t *testing.T) {
 		{"a small image", domain.ClipboardEntry{Kind: domain.ClipKindImage, ImageBytes: 1}, "图片 1 B"},
 	}
 	for _, c := range cases {
-		if got := entryLabel(c.entry); got != c.want {
-			t.Errorf("%s: entryLabel = %q, want %q", c.name, got, c.want)
+		if got := historyLabel(c.entry); got != c.want {
+			t.Errorf("%s: historyLabel = %q, want %q", c.name, got, c.want)
 		}
 	}
 }
@@ -346,7 +346,7 @@ func TestHistoryWindowListsAndCopiesBack(t *testing.T) {
 	tt := ui.NewTester(state.historyView, historyWidth, historyHeight)
 	// The heading is the record range the user chose, which is also all the
 	// page can list.
-	for _, want := range []string{"最近 10 条", "first copy", "second copy", "third copy", "点击一条即复制回剪贴板。"} {
+	for _, want := range []string{"最近 10 条", "first copy", "second copy", "third copy"} {
 		if !tt.HasText(want) {
 			t.Errorf("the history does not show %q; it shows %q", want, tt.Texts())
 		}
@@ -456,9 +456,6 @@ func TestSettingsChooseTheRecordRange(t *testing.T) {
 	}
 	if !tt.HasText("只保留最近 10 条；缩短范围会立刻丢弃更早的记录。") {
 		t.Errorf("the settings do not show the new range: %q", tt.Texts())
-	}
-	if text := state.clipboardStatusLine(); !strings.Contains(text, "丢弃") {
-		t.Errorf("the settings do not say what shortening the range cost: %q", text)
 	}
 }
 

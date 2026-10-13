@@ -12,8 +12,8 @@ import (
 )
 
 // The clipboard tool has two faces. The quick window shows one line — what is
-// on the clipboard right now — under the panels and above the footer, which
-// is where a line about something else belongs. The history window lists the
+// on the clipboard right now — under the panel and above the footer, which is
+// where a line about something else belongs. The history window lists the
 // copies before it, newest first, and a click puts one back on the clipboard.
 //
 // The line is one line: the tool's own reading decides what it says, so a
@@ -21,39 +21,40 @@ import (
 // shows. Nothing here shortens anything while drawing — that was decided when
 // the reading was recorded, which is what keeps a frame cheap.
 const (
-	historyWidth  = 420
-	historyHeight = 420
+	historyWidth = 420
+	// historyHeight is the room the list wants: a windowful of copies, with
+	// the head and the two quiet lines under it always in place.
+	historyHeight = 640
 )
 
-// clipboardRegion is the line under the panels: the mark, the content, and
-// the way to the history. It is one row high, so that the quick window stays
-// a glance rather than becoming a list.
+// clipboardRegion is the line under the panel: the mark, the content, and the
+// way to the history. It is one row high, so that the quick window stays a
+// glance rather than becoming a list.
 //
 // It draws its own leading line, and only when there is something to show:
-// with nothing read yet — monitoring is off, or nothing has been copied —
-// the line under the content runs straight to the footer, which is what a
-// window with no clipboard region looks like.
+// with nothing read yet — monitoring is off, or nothing has been copied — the
+// line under the content runs straight to the footer, which is what a window
+// with no clipboard region looks like.
 //
 // The mark and the way in do not shrink: a long value loses its own tail to
 // the ellipsis, and what the row is and what it offers stay readable.
 func (s *State) clipboardRegion(c *ui.Context) {
-	t := c.Theme()
 	content, ok := s.clipboardLatest()
 
 	if content.Display == "" || !ok {
 		return
 	}
 
-	ui.Divider(c)
-	ui.Row(c).FillWidth().Height(t.Space(8)).
-		PaddingX(t.Space(4)).
+	hairline(c)
+	ui.Row(c).FillWidth().Height(float32(34)).Shrink(0).
+		PaddingX(float32(12)).
 		AlignItems(ui.Center).
-		Gap(t.Space(2)).
+		Gap(float32(8)).
 		Children(func() {
 			// The mark wears the label's color: it is a label, and the
 			// word it replaced was drawn in the same place.
-			ui.Icon(c, s.clipboardMark).TextColor(t.TextMuted)
-			ui.Text(c, content.Display).FontSize(t.Rem(0.78)).SingleLine()
+			ui.Icon(c, s.clipboardMark).Size(float32(14), float32(14)).Shrink(0).TextColor(colorTextMuted)
+			ui.Text(c, content.Display).FontSize(sizeSmall).TextColor(colorTextBody).SingleLine()
 			ui.Spacer(c)
 			if button := historyButton(c); button.Clicked() {
 				s.openHistory()
@@ -117,11 +118,11 @@ func (s *State) openHistory() {
 	}
 	if s.historyWindow == nil {
 		window := mygo.NewWindow(mygo.WindowOptions{
-			Title:     appName + " 剪贴板历史",
+			Title:     "剪贴板历史",
 			Width:     historyWidth,
 			Height:    historyHeight,
-			MinWidth:  320,
-			MinHeight: 240,
+			MinWidth:  340,
+			MinHeight: 320,
 			Content:   ui.View(s.historyView),
 		})
 		s.historyWindow = window
@@ -142,53 +143,73 @@ func (s *State) openHistory() {
 	window.Update(func() {})
 }
 
-// historyView lists the recorded copies. It reads what the tool already
-// holds, and copies nothing while drawing.
+// historyView lists the recorded copies: the line that says what the list is
+// and what a click does, and the list itself.
+//
+// It reads what the tool already holds, and copies nothing while drawing.
 func (s *State) historyView(c *ui.Context) {
-	t := c.Theme()
-	c.Root().Background(t.Background)
-	s.page(c, page{
-		body: func(c *ui.Context) {
-			if err := s.clipboardHistoryError(); err != nil {
-				block(c, "剪贴板历史", func() {
-					ui.Text(c, "读不到上次的历史："+friendlyError(err)).
-						FontSize(t.Rem(0.82)).
-						TextColor(t.Danger).
-						Wrap()
-					ui.Text(c, "新复制的仍然会记下来。").
-						FontSize(t.Rem(0.75)).
-						TextColor(t.TextMuted).
-						Wrap()
-				})
-				ui.Divider(c)
-				return
-			}
-			entries := s.clipboardHistory()
-			block(c, "最近 "+strconv.Itoa(s.clipboardHistorySize())+" 条", func() {
-				if len(entries) == 0 {
-					ui.Text(c, "还没有记录。").
-						FontSize(t.Rem(0.85)).
-						TextColor(t.TextMuted)
-					ui.Text(c, "复制一段内容，再打开这里。").
-						FontSize(t.Rem(0.75)).
-						TextColor(t.TextMuted)
-					return
-				}
-				ui.Column(c).FillWidth().Gap(t.Space(1)).Children(func() {
-					for _, entry := range entries {
-						s.historyRow(c, entry)
-					}
+	useDesign(c)
+	windowFrame(c).Children(func() {
+		// What the list is, and what a click does, on its own line above it:
+		// the list scrolls under this, so it stays where it is. The window's
+		// own title bar names the window, so this does not say it again.
+		ui.Row(c).FillWidth().Shrink(0).
+			Padding(pageEdge/2, pageEdge).
+			AlignItems(ui.Center).
+			Children(func() {
+				ui.Text(c, "最近 "+strconv.Itoa(s.clipboardHistorySize())+" 条").
+					FontSize(sizeSection).FontWeight(600).TextColor(colorTextBody).SingleLine()
+				ui.Spacer(c)
+				ui.Text(c, "点击即复制").FontSize(sizeSmall).TextColor(colorTextMuted).SingleLine()
+			})
+		hairline(c)
+
+		if err := s.clipboardHistoryError(); err != nil {
+			content(c, true, func() {
+				inset(c, func() {
+					notice(c, noteDanger, "读不到上次的历史："+friendlyError(err))
+					notice(c, notePlain, "新复制的仍然会记下来。")
 				})
 			})
-			ui.Divider(c)
-			ui.Text(c, "点击一条即复制回剪贴板。").
-				FontSize(t.Rem(0.72)).
-				TextColor(t.TextMuted)
-		},
+			return
+		}
+
+		entries := s.clipboardHistory()
+		if len(entries) == 0 {
+			content(c, true, func() {
+				inset(c, func() {
+					ui.Text(c, "还没有记录。").
+						FontSize(sizeBody).
+						TextColor(colorTextMuted)
+					ui.Text(c, "复制一段内容，再打开这里。").
+						FontSize(sizeSmall).
+						TextColor(colorTextMuted)
+				})
+			})
+			return
+		}
+
+		list := ui.Scroll(c).FillWidth().Grow(1)
+		list.Children(func() {
+			// The rows keep the page's margin and the room between two of
+			// them, the same margin and the same line the sections of any
+			// other window use: a list is a list wherever it is drawn.
+			ui.Column(c).FillWidth().Children(func() {
+				for index, entry := range entries {
+					if index > 0 {
+						rowDivider(c)
+					}
+					s.historyRow(c, entry)
+				}
+			})
+		})
 	})
 }
 
-// historyRow is one recorded copy: what was copied, when, and of what kind.
+// historyRow is one recorded copy: the tile that says what it is, the copy
+// itself, how long ago it was taken, and — for a copy whose kind is worth a
+// word — the kind's own badge in the kind's own color.
+//
 // The whole row is the button: a list of ten copies is a list of ten things
 // to click, not a list with a small target at the end of each line.
 //
@@ -197,54 +218,117 @@ func (s *State) historyView(c *ui.Context) {
 // copy, so that a click is answered on the row itself rather than only on
 // the clipboard.
 func (s *State) historyRow(c *ui.Context, entry domain.ClipboardEntry) {
-	t := c.Theme()
+	tile, ink, mark := s.historyKind(entry)
+	label := historyLabel(entry)
 	row := ui.ButtonBase(c).FillWidth().
-		Radius(t.Radius).
-		Padding(t.Space(1.5), t.Space(2)).
+		Padding(float32(10), float32(12)).
 		AlignItems(ui.Center).
-		Gap(t.Space(2))
+		Gap(float32(12))
 	justCopied := entry.ID == s.copiedEntry
 	switch {
 	case justCopied:
-		row.Background(t.Accent.Alpha(0.18))
+		row.Background(ink.Alpha(0.10))
 	case row.Pressed():
-		row.Background(t.SurfacePressed)
+		row.Background(colorActive)
 	case row.Hovered() || row.Focused():
-		row.Background(t.SurfaceHover)
+		row.Background(colorRowAlt)
 	}
 	row.Children(func() {
-		if entry.Pinned {
-			ui.Text(c, "★").FontSize(t.Rem(0.7)).TextColor(t.TextMuted).SingleLine().Shrink(0)
-		}
-		ui.Text(c, entry.Line()).FontSize(t.Rem(0.8)).SingleLine()
-		ui.Spacer(c)
-		// What the reading noticed about itself: the copy is still usable,
-		// and the interface should not pretend it was complete. It is the
-		// copy's own words, so it is drawn as it was stored.
-		if entry.Note != "" {
-			ui.Text(c, entry.Note).
-				FontSize(t.Rem(0.66)).
-				TextColor(t.Danger).
-				SingleLine().
-				Shrink(0)
-		}
-		// One label, not two: what the copy is, and for an image how much
-		// of it the platform handed over.
-		if label := entryLabel(entry); label != "" {
-			ui.Text(c, label).
-				FontSize(t.Rem(0.68)).
-				TextColor(t.TextMuted).
-				SingleLine().
-				Shrink(0)
-		}
-		ui.Text(c, copiedClock(entry.CopiedAt)).
-			FontSize(t.Rem(0.68)).
-			TextColor(t.TextMuted).
+		kindTile(c, mark, tile, ink)
+		ui.Text(c, entry.Line()).
+			FontSize(sizeBody).
+			TextColor(inkText(entry)).
+			Font(fontOf(entry)).
 			SingleLine().
-			Shrink(0)
+			Grow(1).
+			MinWidth(0)
+		ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(6)).Children(func() {
+			if entry.Note != "" {
+				// What the reading noticed about itself: the copy is still
+				// usable, and the interface should not pretend it was
+				// complete. It is the copy's own words, drawn as stored.
+				notice(c, noteDanger, entry.Note)
+			}
+			if label != "" {
+				kindBadge(c, tile, ink, label)
+			}
+			ui.Text(c, copiedClock(entry.CopiedAt)).
+				FontSize(sizeSmall).
+				TextColor(colorTextMuted).
+				SingleLine()
+		})
 	})
 	if row.Clicked() {
 		s.copyEntry(entry)
+	}
+}
+
+// inkText is the color a copy's own text is drawn in: a link is drawn in the
+// color of a link, and everything else in the list's body color.
+func inkText(entry domain.ClipboardEntry) ui.Color {
+	if entry.Kind == domain.ClipKindURL {
+		return colorBlueInk
+	}
+	return colorTextBody
+}
+
+// fontOf is the family a copy's own text is drawn in: a copy that is code or a
+// color value is read character by character, and a monospace face is what
+// makes that possible.
+func fontOf(entry domain.ClipboardEntry) string {
+	if entry.Kind == domain.ClipKindCode {
+		return "monospace"
+	}
+	return ""
+}
+
+// historyKind is the tile and the ink a copy is drawn with — and, for a copy
+// that is an image, the same tile with the picture mark — so a list of ten
+// copies is read by shape and color before it is read word by word.
+func (s *State) historyKind(entry domain.ClipboardEntry) (tile, ink ui.Color, mark *ui.SVG) {
+	switch entry.Kind {
+	case domain.ClipKindImage:
+		return colorVioletTile, colorVioletInk, s.historyImage
+	case domain.ClipKindURL:
+		return colorBlueTile, colorBlueInk, s.historyLink
+	case domain.ClipKindCode:
+		return colorStoneTile, colorStoneInk, s.historyCode
+	case domain.ClipKindJSON:
+		return colorEmeraldTile, colorEmeraldInk, s.historyText
+	case domain.ClipKindFile:
+		return colorAmberTile, colorAmberInk, s.historyText
+	default:
+		return colorSkyTile, colorSkyInk, s.historyText
+	}
+}
+
+// historyLabel is the one word a list shows beside a copy: what it is, and for
+// an image how much of it there is — an image is the kind whose copying
+// depends on what the platform handed over.
+func historyLabel(entry domain.ClipboardEntry) string {
+	if entry.Kind == domain.ClipKindImage && entry.ImageBytes > 0 {
+		return "图片 " + byteSize(entry.ImageBytes)
+	}
+	return kindLabel(entry.Kind)
+}
+
+// kindLabel names an entry's kind, where knowing that a copy was a link
+// rather than prose is worth a word. Plain text gets none: it is what most
+// copies are.
+func kindLabel(kind domain.ClipKind) string {
+	switch kind {
+	case domain.ClipKindURL:
+		return "链接"
+	case domain.ClipKindJSON:
+		return "JSON"
+	case domain.ClipKindCode:
+		return "代码"
+	case domain.ClipKindFile:
+		return "文件"
+	case domain.ClipKindImage:
+		return "图片"
+	default:
+		return ""
 	}
 }
 
@@ -314,22 +398,6 @@ func (s *State) unmarkCopiedLater(after time.Duration) {
 	})
 }
 
-// entryLabel is the one word a list shows beside a copy: what it is, and for
-// an image how much of it there is — an image is the kind whose copying
-// depends on what the platform handed over.
-func entryLabel(entry domain.ClipboardEntry) string {
-	switch {
-	case entry.Kind == domain.ClipKindFile:
-		return "文件"
-	case entry.Kind == domain.ClipKindImage && entry.ImageBytes > 0:
-		return "图片 " + byteSize(entry.ImageBytes)
-	case entry.Kind == domain.ClipKindImage:
-		return "图片"
-	default:
-		return kindLabel(entry.Kind)
-	}
-}
-
 // byteSize writes a size the way a person reads it.
 func byteSize(n int) string {
 	switch {
@@ -339,26 +407,6 @@ func byteSize(n int) string {
 		return strconv.Itoa(n/(1<<10)) + " KB"
 	default:
 		return strconv.Itoa(n) + " B"
-	}
-}
-
-// kindLabel names an entry's kind, where knowing that a copy was a link
-// rather than prose is worth a word. Plain text gets none: it is what most
-// copies are.
-func kindLabel(kind domain.ClipKind) string {
-	switch kind {
-	case domain.ClipKindURL:
-		return "链接"
-	case domain.ClipKindJSON:
-		return "JSON"
-	case domain.ClipKindCode:
-		return "代码"
-	case domain.ClipKindFile:
-		return "文件"
-	case domain.ClipKindImage:
-		return "图片"
-	default:
-		return ""
 	}
 }
 

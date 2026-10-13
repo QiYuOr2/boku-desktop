@@ -16,8 +16,11 @@ import (
 // real afterwards: a tray application should cost nothing while nobody is
 // configuring it.
 const (
-	settingsWidth  = 420
-	settingsHeight = 460
+	settingsWidth = 420
+	// settingsHeight is the room the page wants today: the title bar, the
+	// two sections and the footer. A page with more sections on it scrolls
+	// rather than growing the window past the screen.
+	settingsHeight = 640
 )
 
 // deepseekBrandColor draws the DeepSeek mark. The brand's blue, written
@@ -36,13 +39,19 @@ const (
 // already stored (masked, never in the clear), and what the last attempt
 // answered. It lives on the main thread with the rest of the view state.
 type connectForm struct {
-	apiKey        string
-	masked        string
+	// apiKey is what the user typed, and only that: a stored credential is
+	// never put in the field, so what the field shows is the key being
+	// replaced and never the one being kept. An empty field over a stored
+	// credential is the state the design draws.
+	apiKey string
+	// stored is the stored credential as the store reports it to the
+	// interface — its last four characters — which is what the status line
+	// under the field names.
+	stored        string
 	hasCredential bool
 	busy          bool
 	status        int
 	statusText    string
-	confirmDelete bool
 }
 
 // target is the provider the settings window configures. It is read from the
@@ -91,7 +100,7 @@ func (s *State) openSettings() {
 		Width:     settingsWidth,
 		Height:    settingsHeight,
 		MinWidth:  360,
-		MinHeight: 400,
+		MinHeight: 420,
 		Content:   ui.View(s.settingsView),
 	})
 	s.settingsWindow = window
@@ -102,38 +111,101 @@ func (s *State) openSettings() {
 	})
 }
 
-// settingsView builds the settings window: a page of settings, of which
-// connecting a data source, the clipboard and the tools are sections. The
-// window has no header of its own — its title bar already says it is Boku's
-// settings — so the sections start at the top, and the groups still to come
-// (shortcuts, the data directory, the vault) are added as further blocks.
+// settingsView builds the settings window: a column of sections with a hairline
+// between them, and the version at its foot.
+//
+// The sections are peers: connecting a data source, the clipboard, and the
+// groups still to come (shortcuts, the data directory, the vault) each state
+// their own subject with a mark, a name and one line. Nothing nests inside
+// anything else, and no section wears a card of its own.
+//
+// The window draws no title bar of its own: the system's title bar already
+// names it, and repeating that name inside the window is a second title.
 func (s *State) settingsView(c *ui.Context) {
-	t := c.Theme()
-	c.Root().Background(t.Background)
+	useDesign(c)
 	configured, ok := s.target()
-	s.page(c, page{
-		body: func(c *ui.Context) {
-			if !ok {
-				block(c, "数据源", func() {
-					ui.Text(c, "还没有可以配置的数据源。").
-						FontSize(t.Rem(0.9)).
-						TextColor(t.TextMuted)
-				})
-			} else {
-				// One block after another, with a divider between them: the
-				// groups still to come are added the same way.
-				s.connectBody(c, configured)
-				ui.Divider(c)
-			}
-			s.clipboardBody(c)
-		},
+	windowFrame(c).Children(func() {
+		body := ui.Scroll(c).FillWidth().Grow(1)
+		body.Children(func() {
+			content(c, false, func() {
+				if !ok {
+					inset(c, func() {
+						sectionHead(c, s.clipboardMark, colorStoneInk, "数据源", "还没有可配置的数据源")
+						notice(c, notePlain, "配置一个面板之后，这里可以填入它需要的凭据。")
+					})
+					betweenSections(c)
+				} else {
+					s.connectBody(c, configured)
+					betweenSections(c)
+				}
+				s.clipboardBody(c)
+			})
+		})
+		footer(c, s.versionLine())
 	})
 }
 
-// clipboardBody is the clipboard group: the two switches and the way to the
-// history.
+// connectBody is the data source section: the provider's mark and name, the
+// credential itself, what is already stored, and the two ways to use it.
 //
-// Both switches start off, and the form says why: the clipboard is the most
+// The address the provider asks is not shown: it is the provider's business,
+// not the user's.
+func (s *State) connectBody(c *ui.Context, configured target) {
+	mark := s.providerMark(configured.providerID)
+	inset(c, func() {
+		stacked(c, float32(16), func() {
+			sectionHead(c, mark.svg, mark.color, configured.displayName, credentialLabel(configured.credentialKey)+" 配置")
+
+			stacked(c, float32(12), func() {
+				sectionLabel(c, credentialLabel(configured.credentialKey))
+				s.credentialField(c, configured)
+
+				// What the credential is now: while one is stored, the line
+				// under the field says so, as its last four characters.
+				// Typing over it is the whole of replacing it.
+				if s.credentialIsShown() {
+					s.storedCredential(c)
+				}
+
+				ui.Row(c).FillWidth().Gap(float32(8)).Children(func() {
+					if button := designButton(c, "测试连接", buttonSecondary); button.Clicked() {
+						s.testCredential(configured)
+					}
+					if button := designButton(c, "保存", buttonPrimary); button.Clicked() {
+						s.saveCredential(configured)
+					}
+				})
+
+				s.statusLine(c, configured)
+
+				noticePanel(c, "凭据目前以明文保存", "存放在 "+s.credentialPath()+"。"+
+					"加密密钥库（Task 008）完成前，请不要把别人的 Key 存在这里。")
+			})
+		})
+	})
+}
+
+// credentialField is the credential itself. It holds what the user is typing
+// and never what is stored: a stored credential is a fact about the account
+// rather than a value to retype, so the field stays empty and draws its own
+// "sk-......" hint whether something is stored or not.
+//
+// It is always ready to be typed in, because typing is what replaces what is
+// stored: there is no way in of its own to ask for a replacement, and nothing
+// is replaced until a save reads the field. What is stored is named by the line
+// under the field, as its last four characters — masked there, and nowhere
+// else.
+func (s *State) credentialField(c *ui.Context, configured target) {
+	field := ui.TextInput(c, &s.form.apiKey)
+	field.Password().Placeholder("sk-......").SingleLine()
+	field.Disabled(s.form.busy)
+	inputFrame(c, field).Font("monospace")
+}
+
+// clipboardBody is the clipboard section: the two switches, the record range
+// and the way to the history.
+//
+// Both switches start off, and the section says why: the clipboard is the most
 // sensitive thing Boku can read. Turning monitoring off stops the reading
 // rather than hiding it, and the form says that too, because "off" that
 // still reads would be a lie.
@@ -144,69 +216,100 @@ func (s *State) settingsView(c *ui.Context) {
 // fact would need the value to survive a pass, and a view is built several
 // times with local state each time.
 func (s *State) clipboardBody(c *ui.Context) {
-	t := c.Theme()
 	if s.clipboard == nil {
 		return
 	}
-	block(c, "剪贴板", func() {
-		settings := s.clipboard.Settings()
-		ui.Text(c, "剪贴板内容可能包含密码、验证码与私人对话；默认不读取。").
-			FontSize(t.Rem(0.75)).
-			TextColor(t.TextMuted).
-			Wrap()
+	settings := s.clipboard.Settings()
+	inset(c, func() {
+		stacked(c, float32(16), func() {
+			sectionHead(c, s.clipboardMark, colorStoneInk, "剪贴板", "监听与预览设置")
 
-		monitor := settings.ClipboardMonitoring
-		ui.Checkbox(c, &monitor, "监听剪贴板（每 "+intervalLabel(settings)+" 读取一次）").
-			FontSize(t.Rem(0.82)).
-			OnClick(func() { s.setClipboardMonitoring(monitor) })
+			stacked(c, float32(12), func() {
+				notice(c, notePlain, "剪贴板内容可能包含密码、验证码与私人对话；默认不读取。")
 
-		visible := settings.ClipboardRegionVisible
-		ui.Checkbox(c, &visible, "在快捷窗口底部显示剪贴板内容").
-			FontSize(t.Rem(0.82)).
-			OnClick(func() { s.setClipboardRegionVisible(visible) })
+				stacked(c, float32(10), func() {
+					monitor := settings.ClipboardMonitoring
+					ui.Checkbox(c, &monitor, "监听剪贴板（每 "+intervalLabel(settings)+" 读取一次）").
+						FontSize(sizeBody).
+						OnClick(func() { s.setClipboardMonitoring(monitor) })
 
-		// The record range: how much of what was copied is kept. It is a
-		// choice among three rather than a number, and the line under it
-		// says what shortening it costs, because the entries that no longer
-		// fit are dropped rather than hidden.
-		sizes := domain.ClipboardHistorySizes()
-		selected := 0
-		for index, size := range sizes {
-			if size == settings.HistorySize() {
-				selected = index
-			}
-		}
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-			ui.Text(c, "记录范围").FontSize(t.Rem(0.82))
-			ui.Spacer(c)
-			picker := ui.Segmented(c, &selected, historySizeLabels(sizes)...).Label("记录范围")
-			if picker.Changed() {
-				s.setClipboardHistorySize(sizes[selected])
-			}
+					visible := settings.ClipboardRegionVisible
+					ui.Checkbox(c, &visible, "在快捷窗口底部显示剪贴板内容").
+						FontSize(sizeBody).
+						OnClick(func() { s.setClipboardRegionVisible(visible) })
+				})
+
+				// The record range: how much of what was copied is kept. It is
+				// a choice among three rather than a number, and the line under
+				// it says what shortening it costs, because the entries that no
+				// longer fit are dropped rather than hidden.
+				sizes := domain.ClipboardHistorySizes()
+				selected := 0
+				for index, size := range sizes {
+					if size == settings.HistorySize() {
+						selected = index
+					}
+				}
+				stacked(c, float32(8), func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+						sectionLabel(c, "记录范围")
+						ui.Spacer(c)
+						// The control takes its own width: a segmented control
+						// stretched across the section would put its segments
+						// wherever the room happens to fall.
+						picker := segmented(c, &selected, historySizeLabels(sizes)...)
+						if picker.Changed() {
+							s.setClipboardHistorySize(sizes[selected])
+						}
+					})
+					notice(c, notePlain, "只保留最近 "+strconv.Itoa(settings.HistorySize())+
+						" 条；缩短范围会立刻丢弃更早的记录。")
+					if !settings.ClipboardMonitoring {
+						notice(c, notePlain, "关闭监听后不再读取剪贴板，历史里已有的记录仍然保留。")
+					}
+				})
+
+				if button := s.historyButton(c); button.Clicked() {
+					s.openHistory()
+				}
+
+				if text := s.clipboardStatusLine(); text != "" {
+					notice(c, notePlain, text)
+				}
+			})
 		})
-		ui.Text(c, "只保留最近 "+strconv.Itoa(settings.HistorySize())+
-			" 条；缩短范围会立刻丢弃更早的记录。").
-			FontSize(t.Rem(0.75)).
-			TextColor(t.TextMuted).
-			Wrap()
-
-		if !settings.ClipboardMonitoring {
-			ui.Text(c, "关闭监听后不再读取剪贴板，历史里已有的记录仍然保留。").
-				FontSize(t.Rem(0.72)).
-				TextColor(t.TextMuted).
-				Wrap()
-		}
-
-		ui.Row(c).Gap(t.Space(2)).Children(func() {
-			if button := ui.Button(c, "打开剪贴板历史"); button.Clicked() {
-				s.openHistory()
-			}
-		})
-
-		if text := s.clipboardStatusLine(); text != "" {
-			ui.Text(c, text).FontSize(t.Rem(0.78)).TextColor(t.TextMuted).Wrap()
-		}
 	})
+}
+
+// historyButton is the way from the settings to the clipboard history: a
+// full-width secondary action with the clipboard's mark on it, because the
+// line it sits on is the section's own rather than a value's.
+func (s *State) historyButton(c *ui.Context) ui.Element {
+	b := ui.ButtonBase(c).Label("打开剪贴板历史").
+		FillWidth().
+		Height(heightControl).
+		Radius(radiusField).
+		Background(colorSurface).
+		Border(1, colorBorder).
+		Cursor(ui.CursorPointer)
+	switch {
+	case b.Pressed():
+		b = b.Background(colorActive)
+	case b.Hovered() || b.Focused():
+		b = b.Background(colorHover)
+	}
+	b.Children(func() {
+		// The mark and the words are one thing at the middle of the button,
+		// not two things at its two ends.
+		ui.Row(c).FillWidth().Justify(ui.Center).AlignItems(ui.Center).Gap(float32(8)).Children(func() {
+			ui.Icon(c, s.clipboardMark).
+				Size(float32(16), float32(16)).
+				Shrink(0).
+				TextColor(colorTextMuted)
+			ui.Text(c, "打开剪贴板历史").FontSize(sizeBody).FontWeight(500).SingleLine()
+		})
+	})
+	return b
 }
 
 // intervalLabel names the poll interval the way the switch reads.
@@ -259,22 +362,16 @@ func historySizeLabels(sizes []int) []string {
 	return labels
 }
 
-// setClipboardHistorySize chooses the record range and says what it cost:
-// what no longer fits is dropped here, not at the next copy.
+// setClipboardHistorySize chooses the record range: what no longer fits is
+// dropped here, not at the next copy. The line under the control is what says
+// shortening the range costs the entries that no longer fit.
 func (s *State) setClipboardHistorySize(size int) {
 	if s.clipboard == nil {
 		return
 	}
-	before := len(s.clipboard.History(0))
 	err := s.clipboard.SetHistorySize(context.Background(), size)
-	settings := s.clipboard.Settings()
 	if err != nil {
 		s.clipboardStatus = "没能写进设置文件：" + friendlyError(err) + "（本次运行内已生效）"
-	} else {
-		s.clipboardStatus = "只保留最近 " + strconv.Itoa(settings.HistorySize()) + " 条剪贴板记录。"
-	}
-	if after := len(s.clipboard.History(0)); after < before {
-		s.clipboardStatus += "丢弃了 " + strconv.Itoa(before-after) + " 条更早的记录。"
 	}
 	s.Refresh()
 }
@@ -293,98 +390,43 @@ func (s *State) providerMark(providerID string) brandedMark {
 	return brandedMark{svg: s.deepseekMark, color: deepseekBrandColor}
 }
 
-// connectBody is the provider's own block: its mark and name, the credential
-// itself, what is already stored, and the two ways to use it. The address the
-// provider asks is not shown: it is the provider's business, not the user's.
-func (s *State) connectBody(c *ui.Context, configured target) {
-	t := c.Theme()
-	block(c, "", func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-			if mark := s.providerMark(configured.providerID); mark.svg != nil {
-				ui.Image(c, mark.svg).Height(t.Space(8)).TextColor(mark.color)
-			}
-			ui.Text(c, configured.displayName).FontSize(t.Rem(0.95)).Bold()
-		})
-
-		ui.Column(c).FillWidth().Gap(t.Space(2)).Children(func() {
-			ui.Text(c, credentialLabel(configured.credentialKey)).FontSize(t.Rem(0.8)).Bold()
-			c.Key("credential." + configured.providerID + "." + configured.credentialKey)
-			field := ui.TextInput(c, &s.form.apiKey)
-			field.Password().Placeholder("sk-…").SingleLine()
-			field.Disabled(s.form.busy)
-
-			if s.form.hasCredential {
-				s.storedCredential(c, configured)
-			}
-
-			ui.Row(c).Gap(t.Space(2)).Children(func() {
-				if button := ui.Button(c, "测试连接"); button.Clicked() {
-					s.testCredential(configured)
-				}
-				if button := ui.PrimaryButton(c, "保存"); button.Clicked() {
-					s.saveCredential(configured)
-				}
-			})
-
-			s.statusLine(c, configured)
-
-			ui.Text(c, "凭据目前以明文保存（"+s.credentialPath()+"）。").
-				FontSize(t.Rem(0.72)).
-				TextColor(t.Warning).
-				Wrap()
-			ui.Text(c, "加密密钥库（Task 008）完成前，请不要把别人的 Key 存在这里。").
-				FontSize(t.Rem(0.72)).
-				TextColor(t.TextMuted).
-				Wrap()
-		})
-	})
-}
-
 // storedCredential says that a credential is already stored, as its last four
-// characters, and offers to remove it — after asking once.
-func (s *State) storedCredential(c *ui.Context, configured target) {
-	t := c.Theme()
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
-		ui.Text(c, "已配置："+s.form.masked).
-			FontSize(t.Rem(0.8)).
-			TextColor(t.Success)
-		ui.Spacer(c)
-		if s.form.confirmDelete {
-			ui.Text(c, "删除？").FontSize(t.Rem(0.78)).TextColor(t.Danger)
-			if button := textButton(c, "确认"); button.Clicked() {
-				s.deleteCredential(configured)
-			}
-			if button := textButton(c, "取消"); button.Clicked() {
-				s.form.confirmDelete = false
-			}
-			return
-		}
-		if button := textButton(c, "删除"); button.Clicked() {
-			s.form.confirmDelete = true
-		}
+// characters. It is a state to be told about rather than a row of actions:
+// replacing what is stored is done by typing over it, and a save is what
+// replaces it, so there is nothing here to press.
+//
+// The line is a dot and a word in the success color. Whether a key is stored
+// is what the user needs to know before typing another.
+func (s *State) storedCredential(c *ui.Context) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
+		statusNote(c, "已配置："+s.form.stored)
 	})
 }
 
 // statusLine reports the last attempt: what is happening, or what happened.
 func (s *State) statusLine(c *ui.Context, configured target) {
-	t := c.Theme()
 	switch {
 	case s.form.busy:
-		ui.Row(c).AlignItems(ui.Center).Gap(t.Space(2)).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(float32(8)).Children(func() {
 			ui.Spinner(c)
 			ui.Text(c, "正在连接 "+configured.displayName+"…").
-				FontSize(t.Rem(0.8)).
-				TextColor(t.TextMuted)
+				FontSize(sizeSmall).
+				TextColor(colorTextMuted)
 		})
 	case s.form.status == statusOK:
-		ui.Text(c, s.form.statusText).FontSize(t.Rem(0.8)).TextColor(t.Success)
+		notice(c, noteSuccess, s.form.statusText)
 	case s.form.status == statusError:
-		ui.Text(c, s.form.statusText).FontSize(t.Rem(0.8)).TextColor(t.Danger).Wrap()
+		notice(c, noteDanger, s.form.statusText)
 	}
 }
 
 // loadCredential reads what is already stored, as the interface may show it.
 // It runs on the main thread, over a local file, when the window opens.
+//
+// What is stored does not go into the field: the field is where a new key is
+// typed, and a value that is only shown is a value a save could read back as
+// the credential. The stored credential is named by the status line instead —
+// its last four characters — while the field keeps its own hint.
 func (s *State) loadCredential() {
 	s.form = connectForm{}
 	configured, ok := s.target()
@@ -397,8 +439,16 @@ func (s *State) loadCredential() {
 		s.form.statusText = friendlyError(err)
 		return
 	}
-	s.form.masked = masked
+	s.form.stored = masked
 	s.form.hasCredential = found
+}
+
+// credentialIsShown reports whether the window is still showing only the stored
+// credential: something is stored and the field is empty, so there is nothing
+// new to save or to test. Typing into the field is what leaves this state —
+// there is no control of its own that asks for a replacement.
+func (s *State) credentialIsShown() bool {
+	return s.form.hasCredential && strings.TrimSpace(s.form.apiKey) == ""
 }
 
 // testCredential asks the provider whether a key works, without storing it.
@@ -406,6 +456,13 @@ func (s *State) loadCredential() {
 // Window.Update, which is the only way a goroutine may touch this state.
 func (s *State) testCredential(configured target) {
 	if s.form.busy {
+		return
+	}
+	if s.credentialIsShown() {
+		// What is stored has already been accepted once; what the user wants
+		// to test is a replacement, which they have not typed yet.
+		s.form.status = statusError
+		s.form.statusText = "要先填入新的 " + credentialLabel(configured.credentialKey) + "，再测试连接。"
 		return
 	}
 	key := strings.TrimSpace(s.form.apiKey)
@@ -442,6 +499,13 @@ func (s *State) saveCredential(configured target) {
 	if s.form.busy {
 		return
 	}
+	if s.credentialIsShown() {
+		// The field is showing what is stored, so there is nothing to save
+		// yet: the value would be the mask, which is not a key.
+		s.form.status = statusError
+		s.form.statusText = "要先填入新的 " + credentialLabel(configured.credentialKey) + "，再保存。"
+		return
+	}
 	key := strings.TrimSpace(s.form.apiKey)
 	if key == "" {
 		s.form.status = statusError
@@ -474,41 +538,12 @@ func (s *State) saveCredential(configured target) {
 	}()
 }
 
-// deleteCredential removes the stored key, after the form asked once.
-func (s *State) deleteCredential(configured target) {
-	if s.form.busy {
-		return
-	}
-	window := s.settingsWindow
-	secrets := s.secretService
-	providerID, credentialKey := configured.providerID, configured.credentialKey
-	s.form.busy = true
-	s.form.status = statusNone
-	s.form.statusText = ""
-
-	go func() {
-		err := secrets.Delete(context.Background(), providerID, credentialKey)
-		window.Update(func() {
-			s.form.busy = false
-			if err != nil {
-				s.form.status = statusError
-				s.form.statusText = friendlyError(err)
-				return
-			}
-			s.loadCredentialAfterSave()
-			s.form.status = statusOK
-			s.form.statusText = "已删除。"
-		})
-	}()
-}
-
 // loadCredentialAfterSave refreshes the masked line without clearing the
 // message that was just set.
 func (s *State) loadCredentialAfterSave() {
 	status, text := s.form.status, s.form.statusText
-	confirm := s.form.confirmDelete
 	s.loadCredential()
-	s.form.status, s.form.statusText, s.form.confirmDelete = status, text, confirm
+	s.form.status, s.form.statusText = status, text
 }
 
 // credentialPath names the file the credentials are in, for the warning the

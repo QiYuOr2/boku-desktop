@@ -32,10 +32,9 @@ const (
 	appName    = "Boku"
 	toolTip    = "Boku — 我的面板"
 	panelWidth = 320
-	// panelHeight leaves room for the panel, the two lines that close the
-	// bottom, the clipboard line between them and the footer: the content
-	// then fits without scrolling, and a panel with more in it scrolls
-	// rather than pushing the lines off the window.
+	// panelHeight leaves room for the page's margin, the panel's section, the
+	// clipboard line under it and the footer. A section with more in it
+	// scrolls rather than pushing the lines off the window.
 	panelHeight = 380
 	// trayIconSize is the icon in device pixels: 16 points on a Retina
 	// display, which MyGo scales to the screen's density on Windows and
@@ -82,6 +81,18 @@ type State struct {
 	// word, and turned while a fetch runs, so it is parsed once at startup
 	// like the other marks.
 	refreshMark *ui.SVG
+	// The history's kind marks: what a recorded copy is drawn as, in the
+	// tile at the head of its row. They are parsed once for the same reason
+	// the panel's marks are.
+	historyText  *ui.SVG
+	historyImage *ui.SVG
+	historyLink  *ui.SVG
+	historyCode  *ui.SVG
+	// settingsMark and quitMark are the quick window footer's two actions,
+	// parsed once like the rest: they are marks rather than words, and what
+	// they mean is their label.
+	settingsMark *ui.SVG
+	quitMark     *ui.SVG
 
 	tray           *mygo.Tray
 	panel          *mygo.Window // the open quick window, or nil when closed
@@ -136,6 +147,30 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the refresh mark: %w", err)
 	}
+	historyText, err := ui.ParseSVG(assets.HistoryText())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the history text mark: %w", err)
+	}
+	historyImage, err := ui.ParseSVG(assets.HistoryImage())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the history image mark: %w", err)
+	}
+	historyLink, err := ui.ParseSVG(assets.HistoryLink())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the history link mark: %w", err)
+	}
+	historyCode, err := ui.ParseSVG(assets.HistoryCode())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the history code mark: %w", err)
+	}
+	settingsMark, err := ui.ParseSVG(assets.Settings())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the settings mark: %w", err)
+	}
+	quitMark, err := ui.ParseSVG(assets.Quit())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the quit mark: %w", err)
+	}
 	return &State{
 		app:           app,
 		panelService:  deps.Panels,
@@ -147,6 +182,12 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		deepseekMark:  mark,
 		clipboardMark: clipMark,
 		refreshMark:   refreshMark,
+		historyText:   historyText,
+		historyImage:  historyImage,
+		historyLink:   historyLink,
+		historyCode:   historyCode,
+		settingsMark:  settingsMark,
+		quitMark:      quitMark,
 	}, nil
 }
 
@@ -297,30 +338,40 @@ func (s *State) Open() {
 	s.refreshAsync(true)
 }
 
-// View builds one frame of the quick window: the panels, the divider and the
-// footer. It has no header: what the window is about is said by the panel's
-// own title, and a flyout is too small to spend its first line on repeating
-// the application's name.
+// View builds one frame of the quick window: the panel, the clipboard line
+// under it and the footer. It has no title bar of its own — a flyout hangs
+// from the tray icon, and the window it opens is what names the application —
+// so the content starts at the top of the window.
+//
+// The window is drawn on the application's design (design.go) rather than on
+// the framework's default theme: the panel reads as the first section of a
+// page, which is what it is.
 func (s *State) View(c *ui.Context) {
-	t := c.Theme()
+	useDesign(c)
 	c.Root().Background(ui.Transparent)
 	box := ui.Column(c).Fill()
 	switch {
 	case c.Vibrancy(): // over the popover's own material on macOS
 	case runtime.GOOS == "windows": // Windows 11 rounds and outlines the flyout
-		box.Background(t.Surface)
+		box.Background(colorSurface)
 	default:
-		box.Background(t.Surface).Radius(10).Border(1, t.Border)
+		box.Background(colorSurface).Radius(radiusCard).Border(1, colorBorder)
 	}
 	box.Children(func() {
-		s.page(c, page{
-			body: s.card,
-			// The clipboard line closes the content: it is about the
-			// desktop rather than about a panel, and it belongs at the far
-			// end of the window from the numbers.
-			bottom:  s.clipboardBottom,
-			actions: s.flyoutActions,
+		body := ui.Scroll(c).FillWidth().Grow(1)
+		body.Children(func() {
+			content(c, false, func() {
+				inset(c, func() { s.card(c) })
+			})
 		})
+		// The clipboard line closes the content: it is about the desktop
+		// rather than about a panel, and it belongs at the far end of the
+		// window from the numbers. The line under it is the window's own —
+		// it runs from edge to edge, as the footer's line does — and the
+		// footer itself keeps its own room inside that.
+		s.clipboardBottom(c)
+		hairline(c)
+		quickWindowFooter(c, s.versionLine(), s.flyoutActions)
 	})
 }
 
@@ -338,14 +389,19 @@ func (s *State) clipboardBottom(c *ui.Context) {
 }
 
 // flyoutActions is the quick window's footer: everything the user can always
-// do from here.
+// do from here. The two actions are marks rather than words — the footer is one
+// line at the bottom of a card, and a word there reads as another piece of
+// content while a mark reads as what it is. Each keeps its label for the
+// pointer that rests on it and for assistive technology.
 func (s *State) flyoutActions(c *ui.Context) {
-	if button := textButton(c, "设置"); button.Clicked() {
-		s.openSettings()
-	}
-	if button := textButton(c, "退出"); button.Clicked() {
-		s.quit()
-	}
+	ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(4)).Children(func() {
+		if button := quietIconButton(c, s.settingsMark, "设置"); button.Clicked() {
+			s.openSettings()
+		}
+		if button := quietIconButton(c, s.quitMark, "退出"); button.Clicked() {
+			s.quit()
+		}
+	})
 }
 
 // versionLine is what the footer shows on the left.

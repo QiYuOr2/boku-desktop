@@ -48,6 +48,32 @@ var clipboardSVG []byte
 //go:embed refresh.svg
 var refreshSVG []byte
 
+// The quick window footer's two actions: the way into the settings window and
+// the way out of the application. They are marks rather than words because the
+// footer is one line at the bottom of a card, and two words there read as
+// content while two marks read as what they are.
+var (
+	//go:embed settings.svg
+	settingsSVG []byte
+	//go:embed quit.svg
+	quitSVG []byte
+)
+
+// The clipboard history's kind marks: what a recorded copy is drawn as, in
+// the tile at the head of its row. They are the framework's own drawing
+// language (a 24-unit box, stroked in currentColor), so they take the color
+// of the kind they stand for.
+var (
+	//go:embed history-text.svg
+	historyTextSVG []byte
+	//go:embed history-image.svg
+	historyImageSVG []byte
+	//go:embed history-link.svg
+	historyLinkSVG []byte
+	//go:embed history-code.svg
+	historyCodeSVG []byte
+)
+
 // DeepSeek returns the DeepSeek mark as the SVG document it is. The caller
 // parses it once and keeps the result: parsing belongs to the framework,
 // and this package depends on the standard library alone.
@@ -58,6 +84,24 @@ func Clipboard() []byte { return clipboardSVG }
 
 // Refresh returns the refresh mark as the SVG document it is.
 func Refresh() []byte { return refreshSVG }
+
+// Settings returns the settings mark as the SVG document it is.
+func Settings() []byte { return settingsSVG }
+
+// Quit returns the quit mark as the SVG document it is.
+func Quit() []byte { return quitSVG }
+
+// HistoryText returns the mark for a copy that is text.
+func HistoryText() []byte { return historyTextSVG }
+
+// HistoryImage returns the mark for a copy that is an image.
+func HistoryImage() []byte { return historyImageSVG }
+
+// HistoryLink returns the mark for a copy that is a link.
+func HistoryLink() []byte { return historyLinkSVG }
+
+// HistoryCode returns the mark for a copy that reads as code.
+func HistoryCode() []byte { return historyCodeSVG }
 
 // Icon returns the application icon as a PNG, scaled to size×size pixels.
 //

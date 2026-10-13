@@ -25,8 +25,9 @@ func TestQuickWindowHasNoHeaderAndKeepsItsFooter(t *testing.T) {
 	if tt.HasText("看见状态，用完就走。") {
 		t.Errorf("the quick window still shows the header's subtitle: %q", tt.Texts())
 	}
-	// The panel comes first: the window is its block, not a header's worth
-	// of padding followed by one.
+	// The panel comes first: the window is its card, not a header's worth
+	// of padding followed by one. The card keeps the page's margin, so the
+	// mark is where the margin ends rather than at the window's edge.
 	title, ok := tt.Find("DeepSeek 余额")
 	if !ok {
 		t.Fatalf("the panel title was not found; the window shows %q", tt.Texts())
@@ -76,33 +77,5 @@ func TestViewInNarrowWindow(t *testing.T) {
 	tt := ui.NewTester(state.View, 160, panelHeight)
 	if !tt.HasText("退出") {
 		t.Errorf("the quick window does not show the footer when narrow; it shows %q", tt.Texts())
-	}
-}
-
-// A window marks its sections with dividers, not with boxes: the panel and
-// the footer each end at one.
-func TestWindowSectionsAreMarkedByDividers(t *testing.T) {
-	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	loaded(t, state)
-	const scale = 2
-	img := ui.Render(state.View, panelWidth, panelHeight, scale)
-
-	tt := ui.NewTester(state.View, panelWidth, panelHeight)
-	collapsed := findText(t, tt, "明细").Y
-	version := findText(t, tt, "Boku 0.1.0").Y
-
-	rows := dividerRows(img, ui.LightTheme().Border, panelWidth*scale)
-	if len(rows) == 0 {
-		t.Fatal("the window draws no divider at all: the panel is not separated from the footer")
-	}
-	between := false
-	for _, y := range rows {
-		if at := float32(y) / scale; at > collapsed && at < version {
-			between = true
-		}
-	}
-	if !between {
-		t.Errorf("no divider falls between the panel at y=%.0f and the footer at y=%.0f: %v",
-			collapsed, version, rows)
 	}
 }
