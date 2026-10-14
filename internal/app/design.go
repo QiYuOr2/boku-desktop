@@ -1,7 +1,11 @@
 package app
 
 import (
+	"strings"
+
 	"github.com/egoist/mygo/ui"
+
+	"boku/internal/domain"
 )
 
 // This file is Boku's design system: the one place the application's look is
@@ -84,6 +88,46 @@ var (
 
 	// The tints behind a quiet button and a badge.
 	colorTextFill = ui.RGBA(15, 23, 42, 0.06)
+	// brandTint is the ground a provider's mark sits on inside a card: a wash
+	// of the brand's own color, so that the logo is on a tile of its own
+	// rather than loose on the page.
+	brandTint = ui.Hex("#EEF2FF")
+
+	// colorReadingInk is how a reading above a word is written in the
+	// translation window: the design's stone-500.
+	colorReadingInk = ui.Hex("#78716C")
+	// colorSkeleton is the face of a line that has not arrived yet.
+	colorSkeleton = ui.Hex("#F5F5F4")
+
+	// --- The translation card's own palette ------------------------------
+
+	// The design is a stone scale rather than the slate one the rest of the
+	// application uses, because the card is a piece of the page's own text
+	// rather than a form: every color below is the one its class names.
+	colorSourceInk = ui.Hex("#1C1917") // stone-900, the source text
+	colorParticle  = ui.Hex("#A8A29E") // stone-400, a particle between words
+	colorEyebrow   = ui.Hex("#A8A29E") // stone-400, the "原文" label
+	colorBodyInk   = ui.Hex("#292524") // stone-800, the translation
+	colorFooterInk = ui.Hex("#A8A29E") // stone-400, the line at the foot
+	colorLoanword  = colorBrand        // the brand green, for a loanword
+
+	// Each language's badge: the face and the ink the design gives it.
+	badgeStoneFill, badgeStoneInk     = ui.Hex("#F5F5F4"), ui.Hex("#78716C") // 日本語
+	badgeBlueFill, badgeBlueInk       = ui.Hex("#EFF6FF"), ui.Hex("#2563EB") // English
+	badgeVioletFill, badgeVioletInk   = ui.Hex("#F5F3FF"), ui.Hex("#7C3AED") // 한국어
+	badgeEmeraldFill, badgeEmeraldInk = ui.Hex("#ECFDF5"), colorBrand        // 中文
+
+	// The foot of the card is the design's stone-50 at half strength over
+	// the card's white, which is what the eye is shown: #FAFAF9 at 50%
+	// over #FFFFFF.
+	colorCardFoot = ui.Hex("#FCFCFC")
+	// colorCardLine is the hairline the design draws inside the card:
+	// stone-100 between the two blocks, stone-200/80 around it.
+	colorCardLine = ui.Hex("#F5F5F4")
+	// The annotation chips: stone-50 on a stone-100 edge, with the word in
+	// stone-700 and its reading — or the loanword's own word — above it.
+	colorChip    = ui.Hex("#FAFAF9") // stone-50
+	colorChipInk = ui.Hex("#44403C") // stone-700
 )
 
 // The application's metrics, in points, taken from the design: every window
@@ -92,7 +136,7 @@ var (
 const (
 	// pageEdge is the window's own margin: the room the page keeps on every
 	// side, and the room the footer's version keeps inside it.
-	pageEdge = 20.0
+	pageEdge = 14.0
 	// sectionGap is the room a section keeps above and below itself, which is
 	// what keeps the line dividing two of them from touching either.
 	sectionGap = 16.0
@@ -117,6 +161,43 @@ const (
 	sizeBody     = 14.0
 	sizeSmall    = 12.0
 	sizeTiny     = 10.0
+
+	// The translation card's own scale, read off the design's classes: the
+	// source and the translation are 13px, and the labels and badges 10px.
+	// Its actions are 14px marks in 4px of padding, which is what makes a
+	// 22-point target out of a 14-point glyph.
+	sizeCardLabel  = 10.0
+	sizeCardSource = 13.0
+	sizeCardTarget = 13.0
+	sizeCardFoot   = 11.0
+	sizeCardMark   = 14.0
+	// The annotation chips: the word is 12px, the reading or the loanword's
+	// own word above it 10px. The chip is stone-50 with a stone-100 edge,
+	// cornered at 8, and 10 by 6 of its own padding.
+	sizeChipWord = 12.0
+	sizeChipNote = 10.0
+	chipRadius   = 8.0
+	chipPadX     = 10.0
+	chipPadY     = 6.0
+	// cardEdge is the design's px-3.5 and the vertical room of its blocks:
+	// 14 on each side, 12 above the source block and 10 under it.
+	cardEdge    = 14.0
+	cardHeadTop = 12.0
+	cardHeadEnd = 10.0
+	cardBodyTop = 10.0
+	cardBodyEnd = 10.0
+	// cardFootTop and cardFootEnd are the room above and below the foot's own
+	// line: the design's px-3 py-1.5 is 6, raised to 10 so that the line does
+	// not sit on the card's bottom edge (the user asked for more room there,
+	// and it is the settings window's own footer padding).
+	cardFootTop = 10.0
+	cardFootEnd = 10.0
+	// cardMarkPad is the design's p-1 around an action's mark: 4 points.
+	// With the 14-point glyph it makes the design's own 22-point target.
+	cardMarkPad = 4.0
+
+	// sizeIcon is the glyph of an action a card carries.
+	sizeIcon = 20.0
 )
 
 // theme colours MyGo's own widgets: its check boxes, inputs, focus rings,
@@ -326,6 +407,233 @@ func quietIconButton(c *ui.Context, mark *ui.SVG, label string) ui.Element {
 		}
 	})
 	return b
+}
+
+// declinesInput takes no input at all, and is what a card's actions are given.
+//
+// The foot around them takes every pointer event as it comes, to be the handle
+// the card is dragged by, and the framework gives a press to the innermost
+// element that handles input as it comes — so an action without this would
+// have its clicks swallowed by the row it sits on, and the button would never
+// press. Saying nothing and letting the event go on is the framework's own
+// "shield", and it is what makes an action inside a drag handle work.
+func declinesInput(ui.InputEvent) bool { return false }
+
+// cardIconButton is the action a translation card carries: a 14-point mark in
+// 4 points of padding, which is what makes a 22-point target of it — the
+// design's p-1 and w-3.5 h-3.5.
+//
+// Its two states are the design's: under the pointer it takes a faint stone
+// face and the ink deepens. The glyph keeps the muted ink of a secondary
+// action otherwise.
+func cardIconButton(c *ui.Context, mark *ui.SVG, label string) ui.Element {
+	b := ui.ButtonBase(c).Label(label).Tooltip(label).
+		Radius(float32(4)).
+		Padding(cardMarkPad).
+		Cursor(ui.CursorPointer).
+		HandleInput(declinesInput)
+	switch {
+	case b.Pressed():
+		b = b.Background(colorActive)
+	case b.Hovered() || b.Focused():
+		b = b.Background(colorCardLine)
+	}
+	b.Children(func() {
+		icon := ui.Icon(c, mark).Size(float32(sizeCardMark), float32(sizeCardMark)).Shrink(0)
+		if b.Hovered() || b.Focused() {
+			icon.TextColor(colorTextSoft)
+		} else {
+			icon.TextColor(colorEyebrow)
+		}
+	})
+	return b
+}
+
+// cardIconToggle is cardIconButton with an on state: the mark keeps the
+// theme's green while what it stands for is on, which is the whole of what it
+// has to say. A pin that is pressed looks different from one that is not.
+//
+// The green is read from the theme rather than named here, because that is
+// what it is: the theme's accent, which the design happens to spell as the
+// same #3B693D the rest of the application calls the brand green.
+func cardIconToggle(c *ui.Context, mark *ui.SVG, label string, on bool) ui.Element {
+	b := ui.ButtonBase(c).Label(label).Tooltip(label).
+		Radius(float32(4)).
+		Padding(cardMarkPad).
+		Cursor(ui.CursorPointer).
+		HandleInput(declinesInput)
+	switch {
+	case b.Pressed():
+		b = b.Background(colorActive)
+	case on:
+		b = b.Background(colorCardLine)
+	case b.Hovered() || b.Focused():
+		b = b.Background(colorCardLine)
+	}
+	b.Children(func() {
+		icon := ui.Icon(c, mark).Size(float32(sizeCardMark), float32(sizeCardMark)).Shrink(0)
+		if on {
+			icon.TextColor(c.Theme().Accent)
+		} else if b.Hovered() || b.Focused() {
+			icon.TextColor(colorTextSoft)
+		} else {
+			icon.TextColor(colorEyebrow)
+		}
+	})
+	return b
+}
+
+// annotationChips is the annotation under the translation: one chip per word
+// that carries something, in the order the words appear, packed from the left
+// and wrapping.
+//
+// A chip is the word with the reading over it — or, for a loanword, the word
+// it came from, in the brand green. It is a chip rather than a line of ruby
+// over the whole sentence because what is drawn is not the sentence: the
+// sentence is above, and these are the words a reader cannot read. The face
+// and the corner are the design's stone-50 on stone-100 at 8.
+func annotationChips(c *ui.Context, words []domain.Segment, showReading, showGloss bool) {
+	ui.Row(c).FillWidth().Wrap().Justify(ui.Start).Gap(float32(6)).Children(func() {
+		for _, segment := range words {
+			if strings.TrimSpace(segment.Text) == "" {
+				continue
+			}
+			note, loanword := annotationNote(segment, showReading, showGloss)
+			annotationChip(c, segment.Text, note, loanword)
+		}
+	})
+}
+
+// annotationChip is one of those chips: the word, and above it what there is
+// to say about it — a reading in stone-500, or a loanword's own word in the
+// brand green.
+func annotationChip(c *ui.Context, word, note string, loanword bool) {
+	ui.Column(c).Shrink(0).AlignItems(ui.Center).
+		Background(colorChip).
+		Border(1, colorCardLine).
+		Radius(chipRadius).
+		Padding(chipPadY, chipPadX, chipPadY, chipPadX).
+		Children(func() {
+			if note != "" {
+				text := ui.Text(c, note).
+					FontSize(sizeChipNote).
+					TextColor(colorReadingInk).
+					SingleLine()
+				if loanword {
+					text.TextColor(colorLoanword).FontWeight(500)
+				}
+				text.FixedLineHeight(float32(sizeChipNote + 2)).Shrink(0)
+				ui.Spacer(c).Height(float32(4)).Shrink(0)
+			}
+			ui.Text(c, word).
+				FontSize(sizeChipWord).
+				TextColor(colorChipInk).
+				SingleLine().
+				Shrink(0)
+		})
+}
+
+// annotationBlock is the card's third block, under the translation: the row
+// that opens the annotation, and the chips it holds once it is open.
+//
+// It is its own block — its own hairline above it — because it is its own
+// thing: something the user asks for, that costs a request, and that is not
+// part of the translation above it.
+//
+// The row runs the card's own width, edge to edge, so that the face it takes
+// under the pointer covers the row rather than the label in the middle of it.
+// The label and the chevron keep the card's 14 points of edge inside it, which
+// is what the design's own closed row does with `w-full … px-3.5`.
+func annotationBlock(c *ui.Context, open bool, label string, toggle func()) {
+	button := ui.ButtonBase(c).Focusable().Cursor(ui.CursorPointer).
+		Role(ui.RoleDisclosure).Expanded(open).
+		FillWidth().Justify(ui.SpaceBetween).AlignItems(ui.Center).
+		Radius(0).
+		Padding(float32(8), float32(cardEdge), float32(8), float32(cardEdge)).
+		HandleInput(declinesInput)
+	switch {
+	case button.Pressed():
+		button = button.Background(colorActive)
+	case button.Hovered():
+		button = button.Background(colorChip)
+	}
+	button.Children(func() {
+		ui.Text(c, label).FontSize(sizeCardFoot).TextColor(colorReadingInk).SingleLine()
+		disclosureArrow(c, arrowTurn(open))
+	})
+	if button.Clicked() && toggle != nil {
+		toggle()
+	}
+}
+
+// arrowTurn is how far the annotation row's chevron is turned: pointing down
+// while closed, up while open, which is the design's own pair.
+func arrowTurn(open bool) float32 {
+	if open {
+		return -90
+	}
+	return 90
+}
+
+// langBadge is the small label that names a language: the one piece of the
+// translation window that says what is being read. It wears the design's own
+// pair for the language — 日本語 stone, English blue, 한국어 violet, 中文
+// emerald — in 10-point type with 1 point of vertical and 6 of horizontal
+// room.
+func langBadge(c *ui.Context, name string, code domain.Language) {
+	if strings.TrimSpace(name) == "" {
+		return
+	}
+	fill, ink := langBadgeColors(code)
+	ui.Box(c).Shrink(0).
+		Padding(float32(1), float32(6)).
+		Radius(float32(4)).
+		Background(fill).
+		Children(func() {
+			ui.Text(c, name).FontSize(sizeCardLabel).FontWeight(500).TextColor(ink).SingleLine()
+		})
+}
+
+// langBadgeColors is the pair a language's badge is drawn with, as the design
+// writes it.
+func langBadgeColors(code domain.Language) (fill, ink ui.Color) {
+	switch code {
+	case domain.LangChinese:
+		return badgeEmeraldFill, badgeEmeraldInk
+	case domain.LangEnglish:
+		return badgeBlueFill, badgeBlueInk
+	case domain.LangJapanese:
+		return badgeStoneFill, badgeStoneInk
+	case domain.LangKorean:
+		return badgeVioletFill, badgeVioletInk
+	default:
+		return badgeStoneFill, badgeStoneInk
+	}
+}
+
+// eyebrow is the small label above a block of text: "原文" or "译文". It is
+// written the way the design writes it — 10 points, medium, uppercase and
+// letter-spaced, in stone-400 — so that it names the block without competing
+// with it.
+func eyebrow(c *ui.Context, label string) {
+	ui.Text(c, strings.ToUpper(label)).
+		FontSize(sizeCardLabel).
+		FontWeight(500).
+		TextColor(colorEyebrow).
+		SingleLine().
+		Shrink(0)
+}
+
+// skeletonBar is a placeholder line: the shape of the text that is on its
+// way, so that a window waiting for an answer looks like a window rather than
+// like a mistake. It is measured in the card's own width, which the card
+// passes in.
+func skeletonBar(c *ui.Context, width, fraction float32) {
+	ui.Box(c).
+		Height(float32(12)).
+		Width(width * fraction).
+		Radius(float32(4)).
+		Background(colorSkeleton)
 }
 
 // segmented is the choice among a few short options: a bordered track, and

@@ -263,6 +263,46 @@ func TestRedactTextKeepsOrdinaryText(t *testing.T) {
 	}
 }
 
+// A service that echoes a credential back inside its error is the case this
+// exists for: the fragment an error carries must not hold one, whatever
+// punctuation the service used.
+func TestRedactTextRemovesCredentialFields(t *testing.T) {
+	cases := map[string]string{
+		`{"error":{"message":"failed","key":"sk-live-1234567890"}}`: `{"error":{"message":"failed","key":"redacted"}}`,
+		`{"api_key": "sk-live-1234567890"}`:                         `{"api_key": "redacted"}`,
+		`{"error":{"apiKey":"sk-live-1234567890"}}`:                 `{"error":{"apiKey":"redacted"}}`,
+		`token=abc123&other=1`:                                      `token=redacted&other=1`,
+		`{"access_token":"eyJhbGciOi"}`:                             `{"access_token":"redacted"}`,
+		// A response with nothing sensitive in it is left exactly as it was:
+		// redaction must not eat the diagnostic the snippet is for.
+		`{"model":"deepseek-chat","choices":[]}`: `{"model":"deepseek-chat","choices":[]}`,
+	}
+	for in, want := range cases {
+		if got := RedactText(in); got != want {
+			t.Errorf("RedactText(%q)\n = %q\nwant %q", in, got, want)
+		}
+	}
+}
+
+// The snippet that reaches a caller is redacted where it is built, so a
+// status error cannot carry a credential even when the body is JSON.
+func TestBadResponseSnippetIsRedacted(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":{"message":"bad request","key":"sk-live-1234567890"}}`)
+	}))
+	defer server.Close()
+
+	client := New(Options{HTTPClient: server.Client()})
+	_, err := client.GetJSON(context.Background(), server.URL, nil)
+	if err == nil {
+		t.Fatal("the request did not fail")
+	}
+	if strings.Contains(err.Error(), "sk-live-1234567890") {
+		t.Fatalf("the error leaks the credential: %s", err)
+	}
+}
+
 // The client must not hold its request a moment longer than the deadline it
 // promises, whatever the transport is doing.
 func TestDefaultTimeoutApplies(t *testing.T) {

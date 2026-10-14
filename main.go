@@ -8,6 +8,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -21,8 +22,13 @@ import (
 	"boku/internal/data/httpx"
 	"boku/internal/data/provider"
 	providerdeepseek "boku/internal/data/providers/deepseek"
+	translatedefault "boku/internal/data/providers/translate/custom"
+	translatedeepseek "boku/internal/data/providers/translate/deepseek"
 	"boku/internal/data/secret"
+	"boku/internal/data/selection"
 	"boku/internal/data/settings"
+	"boku/internal/data/translator"
+	"boku/internal/domain"
 	paneldeepseek "boku/internal/domain/deepseek"
 	"boku/internal/usecase"
 )
@@ -40,7 +46,7 @@ func main() {
 	}
 	version := mygo.App.Version()
 
-	panels, secrets, clipboard, err := services(userData, version)
+	panels, secrets, clipboard, translate, err := services(userData, version)
 	if err != nil {
 		log.Fatalf("boku: %v", err)
 	}
@@ -61,6 +67,8 @@ func main() {
 		Panels:    panels,
 		Secrets:   secrets,
 		Clipboard: clipboard,
+		Translate: translate,
+		Shortcuts: app.MyGoShortcuts(),
 		Version:   version,
 		Quit:      mygo.App.Quit,
 	})
@@ -80,14 +88,18 @@ func main() {
 		// process does: a read that arrives while the backend is going
 		// away is a read nobody asked for.
 		clipboard.Stop()
+		// A shortcut left bound belongs to a process that no longer exists:
+		// the next launch would find it taken by itself.
+		state.UnregisterShortcuts()
 		state.Destroy()
 	})
 	mygo.App.WhenReady(func() {
 		if err := state.Setup(); err != nil {
 			log.Fatal(err)
 		}
-		// Monitoring starts only if the user turned it on, and it starts
-		// here because it needs the running application.
+		// The shortcut needs the running application, and monitoring starts
+		// only if the user turned it on.
+		state.RegisterShortcuts()
 		clipboard.Start(nil)
 	})
 	if err := mygo.App.Run(); err != nil {
@@ -97,23 +109,23 @@ func main() {
 
 // services assembles everything that exists before a window does: the
 // credential store, the settings, the system clipboard, the HTTP client, the
-// provider registry and the panels.
+// provider registry, the panels and the translation tool.
 //
 // It is a function of its own so that a test can check the wiring — a
 // mismatched provider and adapter, or a panel that breaks its provider's
 // contract, is a startup error and worth catching without a graphical
 // session.
-func services(userData, version string) (*usecase.Panels, *usecase.Secrets, *usecase.Clipboard, error) {
+func services(userData, version string) (*usecase.Panels, *usecase.Secrets, *usecase.Clipboard, *usecase.Translate, error) {
 	// Credentials: a file of their own, never the database. The store is
 	// named here and nowhere else, so moving to the encrypted vault of
 	// Task 008 is a change to this function.
 	secretStore, err := secret.Open(filepath.Join(userData, "secrets.json"))
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
 	}
 	secrets, err := usecase.NewSecrets(secretStore)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("prepare the credential store: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("prepare the credential store: %w", err)
 	}
 
 	// The application's own settings and the clipboard history, next to
@@ -124,7 +136,7 @@ func services(userData, version string) (*usecase.Panels, *usecase.Secrets, *use
 		filepath.Join(userData, "clipboard_history.json"),
 	)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
 	}
 
 	client := httpx.New(httpx.Options{UserAgent: "Boku/" + applicationVersion(version)})
@@ -136,10 +148,10 @@ func services(userData, version string) (*usecase.Panels, *usecase.Secrets, *use
 		providerdeepseek.New(client),
 		adapterdeepseek.NewAdapter(),
 	); err != nil {
-		return nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
 	}
 	if err := registry.Validate(); err != nil {
-		return nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
 	}
 
 	// The panels the application shows. Adding one means adding a definition
@@ -151,7 +163,7 @@ func services(userData, version string) (*usecase.Panels, *usecase.Secrets, *use
 		},
 	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
 	}
 
 	// The clipboard reads and writes on the thread the platform owns, so
@@ -176,9 +188,44 @@ func services(userData, version string) (*usecase.Panels, *usecase.Secrets, *use
 		Clock:  usecase.SystemClock{},
 	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
 	}
-	return panels, secrets, clipboard, nil
+
+	// The translators the tool may ask. Like the panels, adding one means
+	// adding a registration here; unlike a provider, a translator stands
+	// alone: it answers in the domain's own words, so there is no adapter to
+	// pair it with.
+	translators := translator.NewRegistry()
+	if err := translators.Register(translatedeepseek.New(client)); err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("register the deepseek translator: %w", err)
+	}
+	if err := translators.Register(translatedefault.New(client, func() domain.CustomTranslatorSettings {
+		// The address is read from the settings each time it is asked for:
+		// the user may change it while the application runs, and the next
+		// translation should use the new one.
+		settings, err := store.Load(context.Background())
+		if err != nil {
+			return domain.CustomTranslatorSettings{}
+		}
+		return settings.Normalize().Translation.Custom
+	})); err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("register the custom translator: %w", err)
+	}
+	translate, err := usecase.NewTranslate(usecase.TranslateOptions{
+		Translators: translators,
+		Secrets:     secretStore,
+		Tools:       store,
+		// The selection is asked first and the clipboard second: what the
+		// user has selected is what they mean, and what is on the clipboard
+		// is what they copied last.
+		Selection: selection.New(),
+		Clipboard: device,
+		Clock:     usecase.SystemClock{},
+	})
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("prepare the translation tool: %w", err)
+	}
+	return panels, secrets, clipboard, translate, nil
 }
 
 // applicationVersion is the version to send as a user agent: a plain `go

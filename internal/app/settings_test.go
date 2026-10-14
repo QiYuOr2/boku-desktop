@@ -1,12 +1,11 @@
 package app
 
 import (
+	"errors"
 	"image"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
-
-	"boku/internal/domain/deepseek"
 )
 
 func settingsText(t *testing.T, state *State) []string {
@@ -56,58 +55,63 @@ func TestSettingsShowsTheConnectForm(t *testing.T) {
 			t.Errorf("the settings window still says %q: %q", unwanted, texts)
 		}
 	}
-	// The provider's section is the first thing the window draws: nothing of
-	// the window's own is above it, since its name is in the system's title
-	// bar rather than in the view.
+	// The key section is the first thing the window draws: nothing of the
+	// window's own is above it, since its name is in the system's title bar
+	// rather than in the view.
 	marked := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
-	provider, ok := marked.Find("DeepSeek")
+	head, ok := marked.Find("API Key")
 	if !ok {
-		t.Fatalf("the provider's section was not found; the window shows %q", texts)
+		t.Fatalf("the key section was not found; the window shows %q", texts)
 	}
-	if provider.Y > pageEdge+4 {
-		t.Errorf("the provider's section starts at y=%.0f: something is above it", provider.Y)
+	if head.Y > pageEdge+4 {
+		t.Errorf("the key section starts at y=%.0f: something is above it", head.Y)
+	}
+}
+
+// A service is one section among the settings window's sections, and one card
+// among the services the section configures: the card's own name heads it, its
+// rows sit at the page's margin rather than in a box of their own, and the
+// field's label starts at that margin rather than under the card's name.
+func TestSettingsPutsTheProvidersInCards(t *testing.T) {
+	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state.loadCredentials()
+	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
+
+	// The section's own rows start at the page's margin; the service's name
+	// sits further right, inside the card's own padding. The field's label is
+	// the one in that card, so the card's name is found by the title it
+	// carries and the label by the section head's subtitle: several labels on
+	// the page say "API Key".
+	card := findText(t, tt, "DeepSeek")
+	field := findText(t, tt, "已配置：…0001")
+	section := findText(t, tt, "配置各 AI 服务密钥")
+	warning := findTextPrefix(t, tt, "凭据目前以明文保存")
+
+	if card.X < pageEdge {
+		t.Errorf("the service's card reaches the page's edge at x=%.0f", card.X)
+	}
+	if field.X > card.X {
+		t.Errorf("the card's rows at x=%.0f are indented under the card's own name at x=%.0f", field.X, card.X)
+	}
+	if section.Y >= card.Y {
+		t.Errorf("the first card at y=%.0f is not under the section's head at y=%.0f", card.Y, section.Y)
+	}
+	if warning.Y < section.Y {
+		t.Errorf("the fields are out of order: head y=%.0f, warning y=%.0f", section.Y, warning.Y)
 	}
 }
 
 // A data source is one section among the settings window's sections, not the
-// window: the provider's own name heads it, and its rows sit at the page's
-// margin rather than in a box.
-func TestSettingsPutsTheProviderInItsOwnSection(t *testing.T) {
+// window: the cards sit inside the key section rather than above it.
+func TestSettingsCardsComeAfterTheSectionHead(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	state.loadCredential()
+	state.loadCredentials()
 	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
 
-	provider := findText(t, tt, "DeepSeek")
-	key := findText(t, tt, "API Key")
-	warning := findTextPrefix(t, tt, "凭据目前以明文保存")
-
-	if provider.X < pageEdge {
-		t.Errorf("the provider's section reaches the page's edge at x=%.0f", provider.X)
-	}
-	// The section's own rows start at the page's margin; the provider's name
-	// sits further right, beside its mark.
-	if key.X > provider.X {
-		t.Errorf("the field label at x=%.0f is indented under the provider's name at x=%.0f", key.X, provider.X)
-	}
-	if warning.Y < key.Y {
-		t.Errorf("the fields are out of order: key y=%.0f, warning y=%.0f", key.Y, warning.Y)
-	}
-	// The credential fields belong to the provider's section, so they stay
-	// above the footer's divider, which is drawn inside the page's margin.
-	img := ui.Render(state.settingsView, settingsWidth, settingsHeight, 2)
-	rows := pageRows(img, colorBorder, settingsWidth*2, 2)
-	if len(rows) == 0 {
-		t.Fatal("the settings window draws no divider at all")
-	}
-	underProvider := false
-	for _, y := range rows {
-		if at := float32(y) / 2; at > warning.Y {
-			underProvider = true
-		}
-	}
-	if !underProvider {
-		t.Errorf("nothing separates the provider's section from the footer: dividers at %v, warning at y=%.0f",
-			rows, warning.Y)
+	head := findText(t, tt, "API Key")
+	card := findText(t, tt, "DeepSeek")
+	if card.Y <= head.Y {
+		t.Errorf("the first card at y=%.0f is not under the section's head at y=%.0f", card.Y, head.Y)
 	}
 }
 
@@ -121,22 +125,39 @@ func TestSettingsAdmitsTheCredentialIsNotEncrypted(t *testing.T) {
 	}
 }
 
+// A provider's mark is drawn in the provider's own color, at the head of its
+// card: it is the logo the user knows, and it is not replaced or recolored.
+func TestSettingsCardsDrawTheProviderMark(t *testing.T) {
+	state := testState(t, newTestProvider(), newTestStore(), "0.1.0")
+	const scale = 2
+	img := ui.Render(state.settingsView, settingsWidth, settingsHeight, scale)
+	if got := countColor(img, deepseekBrandColor); got < 200 {
+		t.Errorf("the DeepSeek mark covers %d pixels, want the logo drawn in its own color", got)
+	}
+	if state.providerMark("weread").svg != nil {
+		t.Error("a provider the application has no mark for got one anyway")
+	}
+	if state.providerMark("deepseek").svg == nil {
+		t.Error("the DeepSeek mark was not found for the DeepSeek provider")
+	}
+}
+
 // A stored credential is shown as its last four characters, never in full.
 func TestSettingsShowsAStoredCredentialMasked(t *testing.T) {
 	store := withCredential(newTestStore())
 	state := testState(t, newTestProvider(), store, "0.1.0")
-	state.loadCredential()
+	state.loadCredentials()
 
-	if !state.form.hasCredential {
+	if !state.form.hasCredential["deepseek"] {
 		t.Fatal("the form does not see the stored credential")
 	}
-	if state.form.stored != "…0001" {
-		t.Errorf("the form shows %q, want only the last four characters", state.form.stored)
+	if got := state.form.stored["deepseek"]; got != "…0001" {
+		t.Errorf("the form shows %q, want only the last four characters", got)
 	}
 	// The stored value is not in the field: the field is what a new key is
 	// typed into, and it draws its own hint while it is empty.
-	if state.form.apiKey != "" {
-		t.Errorf("the field holds %q, want the empty field that draws its hint", state.form.apiKey)
+	if typed := state.cardInput("deepseek"); typed != "" {
+		t.Errorf("the field holds %q, want the empty field that draws its hint", typed)
 	}
 	texts := settingsText(t, state)
 	if !contains(texts, "已配置：…0001") {
@@ -155,11 +176,12 @@ func TestSettingsShowsAStoredCredentialMasked(t *testing.T) {
 // characters.
 func TestSettingsATypedKeyIsTheReplacement(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	state.loadCredential()
+	state.loadCredentials()
+	deepseekCard := translateCard{id: "deepseek", credentialKey: "apiKey", needsCredential: true}
 
 	// The window as it opens: the stored credential is named, and the field
 	// is empty, which is the state that has nothing new in it.
-	if !state.credentialIsShown() {
+	if !state.credentialIsShown(deepseekCard) {
 		t.Fatal("a stored credential with an empty field is not read as stored")
 	}
 	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
@@ -167,15 +189,31 @@ func TestSettingsATypedKeyIsTheReplacement(t *testing.T) {
 		t.Errorf("the window does not say what is stored: %q", tt.Texts())
 	}
 	for _, gone := range []string{"更换", "删除", "确认", "取消"} {
-		if tt.HasText(gone) {
-			t.Errorf("the window still offers %q: %q", gone, tt.Texts())
+		// The window draws these as actions, so an action by that name is
+		// what is looked for: a sentence that happens to contain the word
+		// ("冲突时请更换") is not an action.
+		for _, label := range []string{gone, "快捷键 " + gone} {
+			if exact(tt.Texts(), label) {
+				t.Errorf("the window still offers %q as an action: %q", label, tt.Texts())
+			}
 		}
 	}
 
-	// Typing into the field is the whole of asking to replace it.
-	state.form.apiKey = "sk-replaced-0002"
-	if state.credentialIsShown() {
+	// Typing into the field is the whole of asking to replace it. The field
+	// belongs to one card at a time, so what was typed is filed under the
+	// card it was typed into.
+	state.showCardInput("deepseek")
+	state.form.input = "sk-replaced-0002"
+	if state.credentialIsShown(deepseekCard) {
 		t.Error("a typed key is still read as nothing new to save")
+	}
+	// Moving to the other card files it, and coming back finds it again.
+	state.showCardInput("custom")
+	if got := state.cardInput("deepseek"); got != "sk-replaced-0002" {
+		t.Errorf("the typed key was lost when the field moved: %q", got)
+	}
+	if got := state.keyValue("deepseek"); got != "sk-replaced-0002" {
+		t.Errorf("reading the card gives %q", got)
 	}
 }
 
@@ -188,11 +226,105 @@ func TestSettingsRefusesToSaveAnEmptyKey(t *testing.T) {
 		t.Fatalf("click 保存: %v", err)
 	}
 	tt.Frame()
-	if state.form.status != statusError {
-		t.Fatalf("status = %d, want an error", state.form.status)
+	card, ok := state.form.status["deepseek"]
+	if !ok {
+		t.Fatalf("the card said nothing; the window shows %q", tt.Texts())
 	}
-	if !contains([]string{state.form.statusText}, "API Key") {
-		t.Errorf("the form does not say what is missing: %q", state.form.statusText)
+	if card.status != statusError {
+		t.Fatalf("status = %d, want an error", card.status)
+	}
+	if !contains([]string{card.text}, "API Key") {
+		t.Errorf("the form does not say what is missing: %q", card.text)
+	}
+}
+
+// A service with no key is not a service the picker offers, and the window
+// says which one to configure rather than failing later.
+func TestSettingsReportsWhichServiceIsConfigured(t *testing.T) {
+	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	texts := settingsText(t, state)
+	// DeepSeek has the panel's key and the user's own service has no
+	// address, so the two cards say different things.
+	if !contains(texts, "已配置") || !contains(texts, "未配置") {
+		t.Errorf("the cards do not report their state: %q", texts)
+	}
+	if !contains(texts, "仅显示已配置 API Key 的服务可选") {
+		t.Errorf("the picker does not say what it is showing: %q", texts)
+	}
+}
+
+// The five sections the design asks for, and the sections it does not: the
+// reading and rent pages are not part of this build.
+func TestSettingsShowsTheFiveSections(t *testing.T) {
+	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state.loadCredentials()
+	texts := settingsText(t, state)
+	for _, want := range []string{
+		"API Key", "配置各 AI 服务密钥",
+		"划词翻译", "任意语言 → 中文 · AI 翻译",
+		"剪贴板", "监听与预览设置",
+		"通用", "启动与外观",
+		"关于", "版本与构建",
+	} {
+		if !contains(texts, want) {
+			t.Errorf("the settings window does not show %q; it shows %q", want, texts)
+		}
+	}
+	for _, unwanted := range []string{"阅读", "房租", "每日目标（分钟）", "检查更新"} {
+		if exact(texts, unwanted) {
+			t.Errorf("the settings window shows %q, which this build does not do", unwanted)
+		}
+	}
+}
+
+// The shortcut row: what the key does, what it is bound to, and how to record
+// another one. The other keys the design draws are not implemented, and the
+// window says so instead of drawing buttons that do nothing.
+func TestSettingsShowsTheShortcutRow(t *testing.T) {
+	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state.RegisterShortcuts()
+	texts := settingsText(t, state)
+	for _, want := range []string{
+		"快捷键",
+		"划词后弹出翻译",
+		"选中文字后按此键显示浮窗",
+		"Ctrl + Shift + T",
+		"恢复默认快捷键",
+		"点击快捷键可重新录制；与系统或其他软件冲突时请更换。",
+		"朗读、固定与关闭的组合键尚未实现。",
+	} {
+		if !contains(texts, want) {
+			t.Errorf("the shortcut row does not show %q; it shows %q", want, texts)
+		}
+	}
+	if got := shortcuts.bound(); got != "Ctrl+Shift+T" {
+		t.Errorf("the registered shortcut is %q, want the default", got)
+	}
+	// The design's other keys are not registered either: one binding is the
+	// whole of what this build does with the keyboard.
+	if registrations, _ := shortcuts.counts(); registrations != 1 {
+		t.Errorf("the application registered %d shortcuts, want one", registrations)
+	}
+}
+
+// A registration the platform refuses is visible rather than silent, and the
+// application keeps running: docs/tools.md §6.
+func TestSettingsShowsARegistrationFailure(t *testing.T) {
+	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	shortcuts.failWith(errors.New("already registered by another application"))
+	state.RegisterShortcuts()
+
+	texts := settingsText(t, state)
+	if !contains(texts, "无法注册") {
+		t.Errorf("a failed registration is not reported: %q", texts)
+	}
+	if shortcuts.bound() != "" {
+		t.Errorf("something was bound although registration failed: %q", shortcuts.bound())
+	}
+	// The window still draws: a tray application without a shortcut starts,
+	// and the section it failed to register is on the page.
+	if texts := settingsText(t, state); len(texts) == 0 {
+		t.Error("the settings window draws nothing")
 	}
 }
 
@@ -200,8 +332,8 @@ func TestSettingsWithoutAPanel(t *testing.T) {
 	state := testState(t, newTestProvider(), newTestStore(), "0.1.0")
 	state.panelService = emptyPanelService(t)
 	texts := settingsText(t, state)
-	if !contains(texts, "还没有可配置的数据源") {
-		t.Errorf("the settings window does not say there is nothing to configure: %q", texts)
+	if !contains(texts, "剪贴板") {
+		t.Errorf("the window does not draw its own sections: %q", texts)
 	}
 }
 
@@ -262,23 +394,25 @@ func TestCredentialPathIsShownAndNeverEmpty(t *testing.T) {
 	}
 }
 
-func TestTargetFollowsThePanel(t *testing.T) {
+// The cards the window draws are the translators the registry has, with what
+// each one needs: the picker and the key section are the same list, read
+// twice.
+func TestTranslateCardsFollowTheRegistry(t *testing.T) {
 	state := testState(t, newTestProvider(), newTestStore(), "0.1.0")
-	configured, ok := state.target()
-	if !ok {
-		t.Fatal("the form found nothing to configure")
+	cards := state.translateCards()
+	if len(cards) != 2 {
+		t.Fatalf("cards = %+v, want both translators", cards)
 	}
-	if configured.providerID != "deepseek" || configured.credentialKey != "apiKey" {
-		t.Errorf("target = %+v", configured)
+	// The one in use comes first.
+	if cards[0].id != "deepseek" || cards[0].displayName != "DeepSeek" {
+		t.Errorf("the first card is %+v", cards[0])
 	}
-	if configured.displayName != "DeepSeek" {
-		t.Errorf("display name = %q", configured.displayName)
+	if cards[0].credentialKey != "apiKey" || !cards[0].needsCredential {
+		t.Errorf("the first card does not ask for a key: %+v", cards[0])
 	}
-	if configured.endpoint == "" || configured.docsURL == "" {
-		t.Errorf("target = %+v, want an endpoint and a documentation link", configured)
-	}
-	if configured.panelID != deepseek.PanelID {
-		t.Errorf("panel id = %q, want %q", configured.panelID, deepseek.PanelID)
+	// The user's own service needs no key and has no address yet.
+	if cards[1].id != "custom" || cards[1].needsCredential || cards[1].configured {
+		t.Errorf("the custom card is %+v, want an unconfigured service that needs no key", cards[1])
 	}
 }
 

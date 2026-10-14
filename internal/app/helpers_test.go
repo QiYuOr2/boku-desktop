@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"image"
 	"sort"
@@ -240,6 +241,15 @@ func (r testRegistry) Adapter(id string) (domain.Adapter, error) {
 // the footer shows; the credential store starts empty unless it is given.
 func testState(t testing.TB, provider *testProvider, store *testStore, version string) *State {
 	t.Helper()
+	state, _, _ := testStateWith(t, provider, store, version)
+	return state
+}
+
+// testStateWith is testState with the translation fixture handed back, for
+// the tests that drive the translation tool: what it answers, what failed,
+// and what the shortcut registrar was told.
+func testStateWith(t testing.TB, provider *testProvider, store *testStore, version string) (*State, *testTranslateFixture, *testShortcuts) {
+	t.Helper()
 	if store == nil {
 		store = newTestStore()
 	}
@@ -255,17 +265,277 @@ func testState(t testing.TB, provider *testProvider, store *testStore, version s
 	if err != nil {
 		t.Fatalf("NewSecrets failed: %v", err)
 	}
+	device := &testDevice{}
+	translation := testTranslate(t, store, device)
+	shortcuts := &testShortcuts{}
 	state, err := New(mygo.App, Deps{
 		Panels:    panels,
 		Secrets:   secrets,
 		Clipboard: testClipboard(t, nil, nil),
+		Translate: translation.service,
+		Shortcuts: shortcuts,
 		Version:   version,
 		Quit:      func() {},
 	})
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
-	return state
+	return state, translation, shortcuts
+}
+
+// testTranslateFixture is the translation tool with the fakes it was built
+// over, so that a test can change what it answers.
+type testTranslateFixture struct {
+	service  *usecase.Translate
+	deepseek *testTranslator
+	custom   *testTranslator
+	tools    *testToolStore
+	device   *testDevice
+}
+
+// testTranslate assembles the translation tool over the fakes: a translator
+// whose answer the test decides, the credential store the window writes to,
+// and a clipboard device that never touches the system's.
+func testTranslate(t testing.TB, store *testStore, device *testDevice) *testTranslateFixture {
+	t.Helper()
+	reply := &testTranslator{id: "deepseek", name: "DeepSeek", descriptor: domain.TranslatorDescriptor{
+		Endpoint: "https://api.deepseek.com/chat/completions",
+	}}
+	custom := &testTranslator{id: "custom", name: "自定义", descriptor: domain.TranslatorDescriptor{
+		BaseURLSetting:       "custom.baseURL",
+		AllowEmptyCredential: true,
+	}}
+	// The store starts as a fresh installation has it: the file store fills
+	// the translation defaults in when the file has no such key, so the fake
+	// stands in for a store that has already been read once.
+	tools := &testToolStore{settings: domain.ToolSettings{Translation: domain.TranslationDefaults()}}
+	service, err := usecase.NewTranslate(usecase.TranslateOptions{
+		Translators: testTranslators{reply, custom},
+		Secrets:     store,
+		Tools:       tools,
+		Clipboard:   device,
+	})
+	if err != nil {
+		t.Fatalf("NewTranslate failed: %v", err)
+	}
+	return &testTranslateFixture{
+		service:  service,
+		deepseek: reply,
+		custom:   custom,
+		tools:    tools,
+		device:   device,
+	}
+}
+
+// testTranslator is a translator whose answer the test decides, so that a
+// view test can reach the state a translation puts the window in without a
+// network.
+//
+// It answers two requests differently, because the card makes two: the
+// translation, and the annotation under it. A test that sets only one answer
+// gets it for both.
+type testTranslator struct {
+	id         string
+	name       string
+	descriptor domain.TranslatorDescriptor
+
+	mu      sync.Mutex
+	result  domain.TranslationResult
+	err     error
+	replies int
+
+	// annotated is the answer to a request that asks for the annotation, and
+	// hasAnnotation says whether a test ever set it.
+	annotated     domain.TranslationResult
+	hasAnnotation bool
+	// requests is every request the translator was given, in order, so a
+	// test can say what was asked and how often.
+	requests []domain.TranslationRequest
+}
+
+func (t *testTranslator) ID() string { return t.id }
+
+func (t *testTranslator) Descriptor() domain.TranslatorDescriptor {
+	descriptor := t.descriptor
+	descriptor.ID = t.id
+	// What a translator says about itself is written down, the way the real
+	// ones write it: a fake that filled its own fields in on the way out
+	// would agree with code that had forgotten to.
+	descriptor.DisplayName = t.name
+	if len(descriptor.CredentialKeys) == 0 {
+		descriptor.CredentialKeys = []string{"apiKey"}
+	}
+	if descriptor.DocsURL == "" {
+		descriptor.DocsURL = "https://example.com/keys"
+	}
+	return descriptor
+}
+
+func (t *testTranslator) Translate(_ context.Context, _ domain.Credentials, req domain.TranslationRequest) (domain.TranslationResult, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.replies++
+	t.requests = append(t.requests, req)
+	if t.err != nil {
+		return domain.TranslationResult{}, t.err
+	}
+	result := t.result
+	if req.Annotation.Wants() && t.hasAnnotation {
+		result = t.annotated
+	}
+	result.SourceText = req.Text
+	result.SourceLang = req.SourceLang
+	result.TargetLang = req.TargetLang
+	result.ProviderID = t.id
+	if result.TranslatedText == "" && len(result.Segments) == 0 {
+		result.TranslatedText = "译文"
+	}
+	return result, nil
+}
+
+// answer makes the translator answer with this from now on.
+func (t *testTranslator) answer(result domain.TranslationResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.result = result
+}
+
+// annotate makes the translator answer a request for the annotation with this
+// from now on: the pieces the card's second request is for.
+func (t *testTranslator) annotate(result domain.TranslationResult) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.annotated, t.hasAnnotation = result, true
+}
+
+// fail makes the translator fail with this from now on.
+func (t *testTranslator) fail(err error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.err = err
+}
+
+// requestCount is how many requests the translator was given.
+func (t *testTranslator) requestCount() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.requests)
+}
+
+// lastRequest is the last one it was given.
+func (t *testTranslator) lastRequest() domain.TranslationRequest {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if len(t.requests) == 0 {
+		return domain.TranslationRequest{}
+	}
+	return t.requests[len(t.requests)-1]
+}
+
+// testTranslators is a domain.TranslatorRegistry over the fakes.
+type testTranslators []*testTranslator
+
+func (r testTranslators) Translator(id string) (domain.Translator, error) {
+	for _, reply := range r {
+		if reply.id == id {
+			return reply, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: translator %s", domain.ErrProviderNotFound, id)
+}
+
+func (r testTranslators) TranslatorIDs() []string {
+	ids := make([]string, 0, len(r))
+	for _, reply := range r {
+		ids = append(ids, reply.id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// testShortcuts is a ShortcutRegistrar the test drives: it records what was
+// registered, so that the rules around a global shortcut — bind it, show a
+// failure, release it on the way out — are checked without a graphical
+// session.
+type testShortcuts struct {
+	mu            sync.Mutex
+	accelerator   string
+	fn            func()
+	registrations int
+	releases      int
+	refusals      int
+	err           error
+	// working is how many more registrations are taken before err applies:
+	// it is how a test says "the first one works, the second is refused",
+	// which is the shape of a combination another application already holds.
+	working int
+}
+
+func (s *testShortcuts) Register(accelerator string, fn func()) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.registrations++
+	switch {
+	case s.working > 0:
+		s.working--
+	case s.err != nil:
+		s.refusals++
+		return s.err
+	}
+	s.accelerator, s.fn = accelerator, fn
+	return nil
+}
+
+// refuseAfter lets this many more registrations through before the failure
+// applies: the test's way of saying a combination is already taken, and then
+// letting the binding that was there be put back.
+func (s *testShortcuts) refuseAfter(taken int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.working = taken
+	s.err = errors.New("the combination is already registered")
+}
+
+// refused counts how many registrations were turned down.
+func (s *testShortcuts) refused() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.refusals
+}
+
+func (s *testShortcuts) UnregisterAll() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.releases++
+	s.accelerator, s.fn = "", nil
+}
+
+// press runs what is bound, the way the platform would.
+func (s *testShortcuts) press() {
+	s.mu.Lock()
+	fn := s.fn
+	s.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+func (s *testShortcuts) bound() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.accelerator
+}
+
+func (s *testShortcuts) counts() (registrations, releases int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.registrations, s.releases
+}
+
+func (s *testShortcuts) failWith(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.err = err
 }
 
 // testClipboard is a clipboard tool over a device and a store the test owns,
@@ -329,6 +599,9 @@ type testDevice struct {
 
 	mu      sync.Mutex
 	reading domain.ClipContent
+	// readErr, when set, is what the platform answers instead of a reading:
+	// a clipboard another application is holding answers that way.
+	readErr error
 	writes  []string
 	files   [][]string
 	images  [][]byte
@@ -344,13 +617,24 @@ func (d *testDevice) stamp(reading domain.ClipContent) domain.ClipContent {
 func (d *testDevice) Read(context.Context) (domain.ClipContent, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.reading.Kind == "" {
-		return domain.ClipContent{}, domain.ErrUnsupportedClipboardFormat
+	if d.readErr != nil {
+		return domain.ClipContent{}, d.readErr
 	}
 	if d.reading.CapturedAt.IsZero() {
 		d.reading = d.stamp(d.reading)
 	}
+	// A clipboard with nothing this application can show is not an error of
+	// the platform's: it is the state before anything was copied, and the
+	// reader answers with an empty reading.
 	return d.reading, nil
+}
+
+// failRead makes the next reading fail, the way a platform that refuses the
+// format does.
+func (d *testDevice) failRead(err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.readErr = err
 }
 
 func (d *testDevice) WriteText(_ context.Context, text string) error {

@@ -54,14 +54,93 @@ func TestLoadWithoutAFileGivesTheDefaults(t *testing.T) {
 	}
 }
 
+// A settings file from before the translation tool existed has none of its
+// keys, and the two Japanese annotations default to on: reading an absent key
+// as "false" is reading it as a choice the user never made, and it left the
+// translation window with no readings at all.
+//
+// This is the file the user had (a clipboard-only settings.json) with the two
+// switches still on, which is what the window needs to ask for annotations.
+func TestAnOldSettingsFileKeepsTheAnnotationsOn(t *testing.T) {
+	store, settingsPath, _ := newStore(t)
+	old := `{
+  "version": 1,
+  "tools": {
+    "clipboardRegionVisible": true,
+    "clipboardMonitoring": true,
+    "clipboardPollIntervalMs": 700,
+    "clipboardHistorySize": 30
+  }
+}
+`
+	if err := os.WriteFile(settingsPath, []byte(old), 0o600); err != nil {
+		t.Fatalf("writing the old settings file: %v", err)
+	}
+	settings, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if !settings.Translation.Furigana {
+		t.Error("an absent translateFurigana key turned the readings off")
+	}
+	if !settings.Translation.LoanwordGloss {
+		t.Error("an absent translateLoanwordGloss key turned the loanword glosses off")
+	}
+	if !settings.Translation.Enabled {
+		t.Error("an absent translateEnabled key turned the tool off")
+	}
+}
+
+// A key that IS there is a choice, whichever way it goes.
+func TestAStoredAnnotationKeyIsRespected(t *testing.T) {
+	store, settingsPath, _ := newStore(t)
+	stored := `{
+  "version": 1,
+  "tools": {
+    "translateEnabled": true,
+    "translateFurigana": false,
+    "translateLoanwordGloss": true
+  }
+}
+`
+	if err := os.WriteFile(settingsPath, []byte(stored), 0o600); err != nil {
+		t.Fatalf("writing the settings file: %v", err)
+	}
+	settings, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if settings.Translation.Furigana {
+		t.Error("a stored translateFurigana: false was not respected")
+	}
+	if !settings.Translation.LoanwordGloss {
+		t.Error("a stored translateLoanwordGloss: true was not respected")
+	}
+}
+
 func TestSaveAndLoadRoundTrip(t *testing.T) {
 	store, settingsPath, _ := newStore(t)
+	// want is what the store gives back, so it is normalized the way the
+	// store normalizes what it reads: a stored setting is never a partly
+	// filled struct.
 	want := domain.ToolSettings{
 		ClipboardRegionVisible: true,
 		ClipboardMonitoring:    true,
 		ClipboardPollInterval:  1500 * time.Millisecond,
 		ClipboardHistorySize:   domain.ClipboardMaxHistorySize,
-	}
+		Translation: domain.TranslationSettings{
+			Enabled:       true,
+			Provider:      "custom",
+			Furigana:      false,
+			LoanwordGloss: true,
+			Pinned:        true,
+			CloseDelay:    900 * time.Millisecond,
+			Custom: domain.CustomTranslatorSettings{
+				BaseURL:     "https://api.example.com/v1",
+				DisplayName: "本地 Ollama",
+			},
+		},
+	}.Normalize()
 	if err := store.Save(context.Background(), want); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
@@ -76,6 +155,18 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `"clipboardHistorySize": 50`) {
 		t.Errorf("the settings file does not name the record range:\n%s", data)
+	}
+	if !strings.Contains(string(data), `"translateProvider": "custom"`) {
+		t.Errorf("the settings file does not name the translation provider:\n%s", data)
+	}
+	if !strings.Contains(string(data), `"baseURL": "https://api.example.com/v1"`) {
+		t.Errorf("the settings file does not carry the custom address:\n%s", data)
+	}
+	// Nothing sensitive is written here: the key belongs to the credential
+	// store, and a settings file is a file the user may put in a cloud
+	// folder.
+	if strings.Contains(string(data), "sk-") {
+		t.Errorf("the settings file looks like it holds a credential:\n%s", data)
 	}
 
 	reopened, err := New(settingsPath, settingsPath)
@@ -142,6 +233,85 @@ func TestLoadNormalizesAndRefusesOtherVersions(t *testing.T) {
 	}
 	if _, err := store.Load(context.Background()); err == nil {
 		t.Error("Load accepted a settings file that is not JSON")
+	}
+}
+
+// The translation switch defaults to on, and a settings file that predates
+// the tool has no key for it: reading that file must not look like a user
+// who turned translation off.
+func TestLoadDefaultsTheTranslationSwitch(t *testing.T) {
+	store, settingsPath, _ := newStore(t)
+	for _, written := range []string{
+		`{"version":1,"tools":{}}`,
+		`{"version":1,"tools":{"clipboardMonitoring":true}}`,
+		// A key that is there and false is a choice, and it is kept.
+		`{"version":1,"tools":{"translateEnabled":false}}`,
+	} {
+		if err := os.WriteFile(settingsPath, []byte(written), 0o600); err != nil {
+			t.Fatalf("write the settings file: %v", err)
+		}
+		settings, err := store.Load(context.Background())
+		if err != nil {
+			t.Fatalf("Load(%s) failed: %v", written, err)
+		}
+		want := !strings.Contains(written, "false")
+		if settings.Translation.Enabled != want {
+			t.Errorf("Load(%s) gave enabled=%v, want %v", written, settings.Translation.Enabled, want)
+		}
+		if got := settings.Translation.ProviderOr(); got != domain.DefaultTranslationProvider {
+			t.Errorf("Load(%s) gave provider %q, want the default", written, got)
+		}
+	}
+}
+
+// The values a hand-edited file may carry that are not free-form are brought
+// into their bounds, like the record range is.
+func TestLoadNormalizesTheTranslationSettings(t *testing.T) {
+	store, settingsPath, _ := newStore(t)
+	written := `{"version":1,"tools":{
+		"translateEnabled":true,
+		"translateProvider":"nobody",
+		"translateCloseDelayMs":99000,
+		"translators":{"custom":{"baseURL":"api.example.com/v1/","displayName":"  中转站  "}}
+	}}`
+	if err := os.WriteFile(settingsPath, []byte(written), 0o600); err != nil {
+		t.Fatalf("write the settings file: %v", err)
+	}
+	settings, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	translation := settings.Translation
+	if translation.CloseDelayOr() != domain.TranslationMaxCloseDelay {
+		t.Errorf("close delay = %s, want it clamped to %s", translation.CloseDelayOr(), domain.TranslationMaxCloseDelay)
+	}
+	if got := translation.Custom.BaseURL; got != "https://api.example.com/v1" {
+		t.Errorf("base URL = %q, want it cleaned up", got)
+	}
+	if got := translation.Custom.DisplayName; got != "中转站" {
+		t.Errorf("display name = %q, want it trimmed", got)
+	}
+	// A provider nobody registered is kept in the file as written: which
+	// ids have a translator is the assembly's business, not the store's,
+	// and the use case falls back when it looks one up.
+	if got := translation.ProviderOr(); got != "nobody" {
+		t.Errorf("provider = %q, want it kept for the use case to judge", got)
+	}
+}
+
+// A negative delay is a value nobody can mean, and it falls back rather than
+// becoming "close at once".
+func TestLoadTreatsANegativeCloseDelayAsUnset(t *testing.T) {
+	store, settingsPath, _ := newStore(t)
+	if err := os.WriteFile(settingsPath, []byte(`{"version":1,"tools":{"translateCloseDelayMs":-1}}`), 0o600); err != nil {
+		t.Fatalf("write the settings file: %v", err)
+	}
+	settings, err := store.Load(context.Background())
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if got := settings.Translation.CloseDelayOr(); got != domain.DefaultTranslationCloseDelay {
+		t.Errorf("close delay = %s, want the default %s", got, domain.DefaultTranslationCloseDelay)
 	}
 }
 

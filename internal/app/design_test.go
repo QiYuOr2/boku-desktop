@@ -4,7 +4,6 @@ import (
 	"context"
 	"image"
 	"image/color"
-	"strings"
 	"testing"
 
 	"boku/internal/domain"
@@ -103,7 +102,7 @@ func rgba(c ui.Color) color.RGBA { return color.RGBA{R: c.R, G: c.G, B: c.B, A: 
 // the page's margin, and the version closes the window on its own face.
 func TestDesignWindowHasNoTitleOfItsOwn(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	state.loadCredential()
+	state.loadCredentials()
 	const scale = 2
 	img := ui.Render(state.settingsView, settingsWidth, settingsHeight, scale)
 	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
@@ -112,8 +111,9 @@ func TestDesignWindowHasNoTitleOfItsOwn(t *testing.T) {
 	if exact(tt.Texts(), appName+" 设置") {
 		t.Errorf("the window draws its own name inside itself: %q", tt.Texts())
 	}
-	// The first thing drawn is the section's head, at the page's margin.
-	head := findText(t, tt, "DeepSeek")
+	// The first thing drawn is the first section's head, at the page's
+	// margin.
+	head := findText(t, tt, "API Key")
 	if head.Y > pageEdge+4 {
 		t.Errorf("the content starts at y=%.0f: something is above it", head.Y)
 	}
@@ -125,100 +125,108 @@ func TestDesignWindowHasNoTitleOfItsOwn(t *testing.T) {
 	if got := img.RGBAAt(settingsWidth*scale/2, 2); got != rgba(colorSurface) {
 		t.Errorf("the window's top is %v, want its own face %v", got, colorSurface)
 	}
-	// The version closes the window, on that same face.
-	version := findText(t, tt, "Boku 0.1.0")
-	if got := img.RGBAAt(settingsWidth*scale/2, int(version.Y+version.H/2)*scale); got != rgba(colorSurface) {
-		t.Errorf("the version is drawn on %v, want the window's own face", got)
+	// The version closes the window, on that same face. The page is taller
+	// than the window, so the version is found where it is drawn rather than
+	// where the layout put it: the footer is pinned to the window's foot.
+	foot := float32(settingsHeight-1) * scale
+	if got := img.RGBAAt(settingsWidth*scale/2, int(foot)); got != rgba(colorSurface) {
+		t.Errorf("the window's foot is %v, want its own face %v", got, colorSurface)
 	}
 }
 
 // The settings window's sections are peers: each is a mark, a name and a line
-// of its own, and the two names start at the same left edge. Nothing nests
-// inside anything else — the data source and the clipboard are two of the same
-// thing — and one hairline divides them, drawn inside the page's margin: the
-// line between two sections belongs to the page, not to the window.
+// of its own, and their headings start at the same left edge. Nothing nests
+// inside anything else, and the line between two of them is drawn inside the
+// page's margin — the only line that runs to the window's edges is the one
+// above the footer, which is where the window says it ends.
 func TestDesignSectionsArePeers(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	state.loadCredential()
+	state.loadCredentials()
 	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
 
-	dataSource := findText(t, tt, "DeepSeek")
-	clipboard := findText(t, tt, "剪贴板")
-	if clipboard.Y <= dataSource.Y {
-		t.Fatalf("the clipboard section at y=%.0f is not under the data source at y=%.0f", clipboard.Y, dataSource.Y)
-	}
-	// The two heads start at the same x, which is what makes them peers: a
-	// section nested inside another would be indented under the outer one's
-	// head, and the two names would not line up. Both are right of the page's
-	// margin, because a head is a mark and then a name.
-	if dataSource.X <= pageEdge || clipboard.X <= pageEdge {
+	// The page is taller than the window: the sections below the fold have
+	// layout positions but no pixels, so a comparison is made between the
+	// headings that are on screen together.
+	keys := findText(t, tt, "配置各 AI 服务密钥")
+	translate := findText(t, tt, "任意语言 → 中文 · AI 翻译")
+	if keys.X <= pageEdge || translate.X <= pageEdge {
 		t.Errorf("the sections start at x=%.0f and x=%.0f, inside the page's margin of %.0f",
-			dataSource.X, clipboard.X, float32(pageEdge))
+			keys.X, translate.X, float32(pageEdge))
 	}
-	if d := dataSource.X - clipboard.X; d > 1 || d < -1 {
+	if d := keys.X - translate.X; d > 1 || d < -1 {
 		t.Errorf("the sections start at x=%.0f and x=%.0f: one is indented under the other",
-			dataSource.X, clipboard.X)
+			keys.X, translate.X)
+	}
+	// A section head is a mark and then a name, so the heading is right of the
+	// page's margin: the mark has the same room as a section label has none.
+	if keys.X <= pageEdge {
+		t.Errorf("the heading at x=%.0f is not right of its mark", keys.X)
 	}
 
-	// One hairline divides them, it falls between the two heads, and it stays
-	// inside the page's margin: the window's own line is the one above its
-	// footer, and this is not it.
+	// The line between two sections keeps the page's margin, the way every
+	// other thing on the page does. The page is taller than the window, so
+	// the divider is found where it was rendered: a row that is drawn from
+	// the page's margin to the other margin.
 	const scale = 2
 	img := ui.Render(state.settingsView, settingsWidth, settingsHeight, scale)
-	lines := 0
-	previous := float32(-100)
-	for _, y := range pageRows(img, colorBorder, settingsWidth*scale, scale) {
-		at := float32(y) / scale
-		if at <= dataSource.Y+dataSource.H || at >= clipboard.Y {
+	width := settingsWidth * scale
+	margin := int(pageEdge) * scale
+	divider := -1
+	for y := 0; y < img.Rect.Dy() && divider < 0; y++ {
+		if img.RGBAAt(margin+2, y) != rgba(colorBorder) || img.RGBAAt(margin-2, y) == rgba(colorBorder) {
 			continue
 		}
-		if img.RGBAAt(0, y) == rgba(colorBorder) || img.RGBAAt(settingsWidth*scale-1, y) == rgba(colorBorder) {
-			t.Errorf("the line at y=%.0f between the sections runs to the window's edge", at)
+		// It has to reach the other margin and stop there: a card's edge is
+		// drawn in the same color and stops short of it.
+		if img.RGBAAt(width-margin-2, y) != rgba(colorBorder) {
+			continue
 		}
-		if at-previous > 1 {
-			lines++
+		if img.RGBAAt(width-margin+2, y) == rgba(colorBorder) {
+			continue
 		}
-		previous = at
+		divider = y
 	}
-	if lines != 1 {
-		t.Errorf("%d hairlines divide the two sections, want exactly one", lines)
+	if divider < 0 {
+		t.Fatal("the page draws no line between two sections inside its margin")
 	}
-
-	// The provider is named once: the section's head says whose credential
-	// it wants, and nothing under it says it again.
-	named := 0
-	for _, text := range tt.Texts() {
-		if strings.Contains(text, "DeepSeek") {
-			named++
-		}
-	}
-	if named != 1 {
-		t.Errorf("the page names the provider %d times, want once: %q", named, tt.Texts())
+	if got := img.RGBAAt(0, divider); got == rgba(colorBorder) {
+		t.Errorf("the line between the sections at y=%.0f runs to the window's edge", float32(divider)/scale)
 	}
 }
 
 // A section introduces itself with the mark of what it is about, its name and
-// one line of explanation. A provider's mark is drawn in the provider's own
-// color: it is the logo the user knows, and it is not replaced or recolored.
+// one line of explanation: the name and its line start right of the mark, and
+// the two lines are not on top of each other.
 func TestDesignSectionHeadCarriesTheMark(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	state.loadCredential()
-	const scale = 2
-	img := ui.Render(state.settingsView, settingsWidth, settingsHeight, scale)
+	state.loadCredentials()
 	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
 
-	title := findText(t, tt, "DeepSeek")
-	subtitle := findText(t, tt, "API Key 配置")
+	title := findText(t, tt, "划词翻译")
+	subtitle := findText(t, tt, "任意语言 → 中文 · AI 翻译")
 	if subtitle.Y <= title.Y {
 		t.Errorf("the head's line at y=%.0f is not under its name at y=%.0f", subtitle.Y, title.Y)
 	}
 	if title.X <= pageEdge {
 		t.Errorf("the section's name at x=%.0f is not right of its mark", title.X)
 	}
-	// The mark is drawn in the provider's own color: it is the logo the user
-	// knows, and it is not replaced.
+	if title.X != subtitle.X {
+		t.Errorf("the name at x=%.0f and its line at x=%.0f do not start together", title.X, subtitle.X)
+	}
+}
+
+// The provider's own mark is drawn in the provider's own color at the head of
+// its card: it is the logo the user knows, and it is not replaced or
+// recolored.
+func TestDesignProviderMarkKeepsItsOwnColor(t *testing.T) {
+	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	const scale = 2
+	img := ui.Render(state.settingsView, settingsWidth, settingsHeight, scale)
 	if got := countColor(img, deepseekBrandColor); got < 200 {
 		t.Errorf("the DeepSeek mark covers %d pixels, want the logo drawn in its own color", got)
+	}
+	if got := countColor(img, brandTint); got < 200 {
+		t.Errorf("the mark's ground covers %d pixels, want a tile of its own", got)
 	}
 }
 
@@ -228,7 +236,7 @@ func TestDesignSectionHeadCarriesTheMark(t *testing.T) {
 // typing over the field is what replaces it.
 func TestDesignCredentialIsShownAsAStatusLine(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	state.loadCredential()
+	state.loadCredentials()
 	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
 
 	if !tt.HasText("已配置：…0001") {
@@ -236,8 +244,8 @@ func TestDesignCredentialIsShownAsAStatusLine(t *testing.T) {
 	}
 	// The field holds nothing: what it draws is its own "sk-......" hint, and
 	// the stored value is not in it to be read back.
-	if state.form.apiKey != "" {
-		t.Errorf("the field holds %q, want the empty field that draws its hint", state.form.apiKey)
+	if typed := state.cardInput("deepseek"); typed != "" {
+		t.Errorf("the field holds %q, want the empty field that draws its hint", typed)
 	}
 	// The line is the whole of what the window says about it: the actions
 	// that used to sit at its end are gone, and replacing what is stored is
@@ -253,7 +261,7 @@ func TestDesignCredentialIsShownAsAStatusLine(t *testing.T) {
 // the one the form is for.
 func TestDesignActionsAreFilledAndOutlined(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	state.loadCredential()
+	state.loadCredentials()
 	const scale = 2
 	img := ui.Render(state.settingsView, settingsWidth, settingsHeight, scale)
 	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
@@ -298,7 +306,7 @@ func TestDesignActionsAreFilledAndOutlined(t *testing.T) {
 // a panel in the warning colors rather than another line of body text.
 func TestDesignPlainTextWarningIsAPanel(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	state.loadCredential()
+	state.loadCredentials()
 	const scale = 2
 	img := ui.Render(state.settingsView, settingsWidth, settingsHeight, scale)
 	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)

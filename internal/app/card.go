@@ -222,6 +222,31 @@ func disclosure(c *ui.Context, label string, open *bool) {
 	}
 }
 
+// cardDisclosure is disclosure for the translation card, which reports the
+// click instead of flipping a flag: the card is as tall as what is in it, so
+// whoever opens it has to ask for the frames that measure it again.
+//
+// It is the same control — a chevron and a label on a face of their own — and
+// it is not drawn at the end of a line, so it does not wear the offset the
+// panels' headlines give theirs.
+func cardDisclosure(c *ui.Context, label string, open bool) bool {
+	button := ui.ButtonBase(c).Focusable().Cursor(ui.CursorPointer).
+		Role(ui.RoleDisclosure).Expanded(open).
+		Radius(999).Padding(float32(2), float32(8)).
+		AlignItems(ui.Center).Gap(float32(4))
+	switch {
+	case button.Pressed():
+		button = button.Background(colorActive)
+	case button.Hovered():
+		button = button.Background(colorHover)
+	}
+	button.Children(func() {
+		ui.Text(c, label).FontSize(sizeSmall).TextColor(colorTextMuted).SingleLine()
+		disclosureArrow(c, turn(open))
+	})
+	return button.Clicked()
+}
+
 // turn is how far the chevron of a disclosure is turned: pointing right while
 // closed, down while open.
 func turn(open bool) float32 {

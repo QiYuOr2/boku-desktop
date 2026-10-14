@@ -1,0 +1,889 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"math"
+	"strings"
+	"time"
+
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
+
+	"boku/internal/domain"
+	"boku/internal/tools"
+	"boku/internal/usecase"
+)
+
+// The translation window is the tool's face: what was selected, what it
+// became, and the few things that can be done with either.
+//
+// It is a card rather than a flyout: it appears where the pointer was when
+// the shortcut was pressed, it stays on top of what the user was reading,
+// and it closes itself when they look away — unless they pin it, which is
+// what the pin is for.
+//
+// The window is created once and reused. It is repositioned for each
+// translation, which is cheaper than a window per press and keeps the shape
+// of the window stable: the answer replaces the placeholder in the same
+// card, rather than a second card appearing.
+const (
+	// translateWidth is the card's width: wide enough for a sentence of
+	// Japanese with its readings above the words and for the translation
+	// under it without wrapping at every third word, and no wider. The
+	// design's own card is narrower still; this is that card at a size that
+	// keeps a sentence on one line.
+	translateWidth = 478
+	// translateMinHeight is the shortest the card may be: a line of notice, a
+	// hairline and the foot.
+	translateMinHeight = 84
+	// translateMaxHeight is the tallest: past this the body scrolls, because a
+	// card taller than the screen is a window rather than a card.
+	translateMaxHeight = 620
+	// translateHeight is what the window starts at, before a frame has
+	// measured what is in it.
+	translateHeight = 240
+	// translateGap is how far the card sits from the pointer: far enough not
+	// to be under it, close enough to be where the user is looking.
+	translateGap = 12
+	// copiedMarkDuration is how long a copy action says what it did. It is
+	// the clipboard history's own pause, because it is the same gesture.
+	copiedMarkDuration = 700 * time.Millisecond
+)
+
+// translateStatus is what the card is showing. It is a state rather than a
+// set of booleans because the card draws exactly one of them, and which one
+// is the whole of what it has to say.
+type translateStatus int
+
+const (
+	// translateIdle is before anything was asked for.
+	translateIdle translateStatus = iota
+	// translateLoading is while the translator is being asked.
+	translateLoading
+	// translateReady is a translation.
+	translateReady
+	// translateOff is the tool switched off in the settings.
+	translateOff
+	// translateUnconfigured is the tool with no usable translator.
+	translateUnconfigured
+	// translateNoText is a clipboard with nothing to translate in it.
+	translateNoText
+	// translateFailed is a translator that failed, with the reason kept.
+	translateFailed
+)
+
+// translationState is the window's state, on the main thread with the rest of
+// the view state.
+type translationState struct {
+	status translateStatus
+	// source is what was translated; result is what came back.
+	source string
+	result usecase.Result
+	// failure is why the last attempt failed, in the words the window
+	// shows. It is set only with translateFailed.
+	failure string
+	// pinned is whether the card stays where it is when the user clicks
+	// elsewhere. It starts from the setting and the pin action flips it.
+	pinned bool
+	// readings is whether the annotation under the translation is open. It
+	// starts closed: the translation is what the card is for, and the words
+	// behind it are what a reader asks for.
+	readings bool
+	// annotation is the second request's answer: the words of the source and
+	// how they are read. It is asked for when the annotation is opened, and
+	// kept until the card is about something else.
+	annotation annotationState
+	// copied is which side was copied, and when: the action says so for a
+	// moment. "source" or "target", empty when nothing was copied.
+	copied   string
+	copiedAt time.Time
+	// dragging is whether the pointer is moving the card by its foot,
+	// dragFrom is where the window was when the press started, and
+	// dragPointer is where the pointer was then. The card is moved by the
+	// distance the pointer has travelled since that press, so it stays
+	// under the point the user grabbed rather than jumping by the pointer's
+	// position.
+	dragging    bool
+	dragFrom    mygo.Rectangle
+	dragPointer mygo.Point
+}
+
+// annotationStatus is where the request for the words of the source is.
+type annotationStatus uint8
+
+const (
+	// annotationIdle is the state the card is in until someone opens the
+	// annotation: nothing has been asked for, and nothing has been paid for.
+	annotationIdle annotationStatus = iota
+	annotationLoading
+	annotationReady
+	annotationFailed
+)
+
+// annotationState is the answer to that request: the words of the source, and
+// how each one is read.
+type annotationState struct {
+	status   annotationStatus
+	segments []domain.Segment
+	failure  string
+}
+
+// startTranslation is what the shortcut and the settings window's test both
+// reach: it shows the card and asks the use case for a translation.
+//
+// It returns at once. The request runs on a goroutine, and the answer comes
+// back through Window.Update, because the caller is the main thread with the
+// whole application behind it.
+func (s *State) startTranslation(at mygo.Point) {
+	if s.translate == nil {
+		return
+	}
+	// A second press while the card is open is a second translation: what
+	// the user copied may have changed, and the card is about what they
+	// just selected.
+	settings, err := s.translate.Settings()
+	if err != nil {
+		s.showTranslation(at, translationState{status: translateFailed, failure: friendlyError(err)})
+		return
+	}
+	s.translation.pinned = settings.Pinned
+	s.showTranslation(at, translationState{status: translateLoading, pinned: settings.Pinned})
+
+	service := s.translate
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), translationTimeout)
+		defer cancel()
+		result, err := service.Translate(ctx, usecase.Request{FromSelection: true})
+		s.onMain(func() {
+			switch {
+			case err == nil:
+				// What the source is drawn from is the segments when there
+				// are any: the window shows the pieces the translator
+				// annotated, so that a reading sits over the word it
+				// belongs to.
+				s.translation = translationState{
+					status:   translateReady,
+					source:   result.SourceText,
+					result:   result,
+					pinned:   s.translation.pinned,
+					copied:   s.translation.copied,
+					copiedAt: s.translation.copiedAt,
+				}
+			default:
+				s.translation = translationState{
+					status:  translationFailureStatus(err),
+					result:  usecase.Result{},
+					failure: friendlyError(err),
+					pinned:  s.translation.pinned,
+				}
+			}
+			// The card's content is not what the last frame measured: the
+			// frames that measure it are owed. This is the answer arriving,
+			// which is the case the card grows or shrinks for.
+			s.cardChanged()
+			s.fitTranslationWindow()
+		})
+	}()
+}
+
+// onMain runs a piece of work that changes the view state on the thread that
+// owns it: through the window when there is one — that is what asks for the
+// frame which shows the change — and here and now when there is not, which is
+// how the state a translation reaches can be tested without a window.
+//
+// A caller is a goroutine, so the update body may touch the state only inside
+// this call.
+func (s *State) onMain(update func()) {
+	if window := s.translateWindow; window != nil {
+		window.Update(update)
+		return
+	}
+	update()
+}
+
+// translationTimeout bounds one translation end to end. The HTTP client has
+// its own, shorter timeout; this is the ceiling for everything around it,
+// including the clipboard read.
+const translationTimeout = 20 * time.Second
+
+// translationFailureStatus maps an error to what the card shows. The three
+// answers the tool has are different things to the user: the switch is off,
+// there is nothing to translate, and something went wrong.
+func translationFailureStatus(err error) translateStatus {
+	switch {
+	case errors.Is(err, domain.ErrTranslateUnavailable):
+		return translateUnconfigured
+	case errors.Is(err, domain.ErrCredentialMissing):
+		return translateUnconfigured
+	case errors.Is(err, domain.ErrInvalidArgument):
+		return translateNoText
+	default:
+		return translateFailed
+	}
+}
+
+// showTranslation puts the card where the pointer is and shows it.
+//
+// The window is created the first time it is needed: a user who never
+// presses the shortcut never pays for it.
+func (s *State) showTranslation(at mygo.Point, state translationState) {
+	s.translation = state
+	// Whatever the card drew last is not what it draws now, so the frames
+	// that measure the change are owed.
+	s.cardChanged()
+	window := s.translateWindow
+	if window == nil {
+		window = s.newCardWindow(
+			func() {
+				if s.translateWindow == window {
+					s.translateWindow = nil
+				}
+				s.cancelTranslationClose()
+			},
+			func() {
+				// The keyboard went elsewhere: whatever the user was
+				// dragging with it, and the close it may have started.
+				s.endCardDrag()
+				s.scheduleTranslationClose(window)
+			},
+			func() { s.cancelTranslationClose() },
+		)
+		s.translateWindow = window
+	}
+	s.placeTranslation(window, at)
+	s.fitTranslationWindow()
+	window.Show()
+	window.Focus()
+}
+
+// cardWindow is the translation card as the state machine drives it: show it,
+// take the keyboard, hide it, and hear about the three things that happen to
+// it.
+//
+// It is an interface rather than the framework's window so that what the card
+// does — its states, its pin, its delayed close — can be exercised where no
+// window can exist. Creating one before App.Run does not fail; it waits for
+// the event loop, which is a test that never returns.
+//
+// Geometry is the *content* rectangle, not the window's outer one: what the
+// card measures is what it draws in, and a window that carries a frame draws
+// in something smaller than what it was given. On Windows a window that can be
+// resized keeps an 8-point frame even with no title bar — measured with
+// `DisableResize: false`, a window set to 478×222 draws in 462×214 — and a
+// card sized by its outer rectangle would have its last eight points cut off,
+// which is exactly where its foot is.
+type cardWindow interface {
+	Show()
+	Focus()
+	Hide()
+	Update(func())
+	SetContentBounds(mygo.Rectangle)
+	ContentBounds() mygo.Rectangle
+	OnClosed(func()) func()
+	OnBlur(func()) func()
+	OnFocus(func()) func()
+}
+
+// newCardWindow builds the real card. A state that was given a factory uses
+// that instead, which is what a test does.
+func (s *State) newCardWindow(onClosed, onBlur, onFocus func()) cardWindow {
+	if s.cardWindows != nil {
+		return s.cardWindows(onClosed, onBlur, onFocus)
+	}
+	window := mygo.NewWindow(mygo.WindowOptions{
+		Title:     appName + " 划词翻译",
+		Width:     translateWidth,
+		Height:    translateHeight,
+		MinWidth:  translateWidth,
+		MinHeight: translateMinHeight,
+		Frameless: true,
+		// No resize: the card is exactly as tall as what is in it — measured
+		// every frame — so a dragged edge would be undone immediately. What
+		// it would leave behind is a frame: a resizable window keeps one even
+		// without a title bar, and a frame is eight points of the card's
+		// bottom that never get drawn.
+		DisableResize: true,
+		Transparent:   true,
+		AlwaysOnTop:   true,
+		SkipTaskbar:   true,
+		// The platform's own window shadow, which is what the design's
+		// shadow-xl is the design-system spelling of (`bg-white rounded-xl
+		// border border-stone-200/80 shadow-xl`). It is deliberately not
+		// drawn in the view: a shadow drawn here needs the window to be
+		// larger than the card to have room, and that transparent margin
+		// takes clicks — measured, a click thirty points outside the card
+		// still lands in its window — so clicking beside the card would no
+		// longer dismiss it. The window's own shadow is drawn outside the
+		// window: nothing is taken from the card, and nothing from the
+		// desktop's clicks. MyGo asks the platform for it with
+		// `DwmExtendFrameIntoClientArea` and one point of frame, which its
+		// own source calls "a frame the size of a pixel brings the shadow
+		// back"; the drawn area stays exactly the card's (measured: outer
+		// 478×150 and drawn 478×150).
+		DisableShadow: false,
+		Content:       ui.View(s.translateView),
+	})
+	window.OnClosed(onClosed)
+	window.OnBlur(onBlur)
+	window.OnFocus(onFocus)
+	return window
+}
+
+// placeTranslation puts the card near the pointer: below and to the right of
+// it, then flipped or slid back when there is no room, as a menu does.
+func (s *State) placeTranslation(window cardWindow, at mygo.Point) {
+	work, scale := s.screenNear(at)
+	s.translationHeight = translateHeight
+	window.SetContentBounds(cardBounds(at, work, scale, s.translationHeight))
+}
+
+// cardBounds is where the card goes, as arithmetic: a rectangle the size the
+// content wants, next to the pointer and inside the work area it is on.
+//
+// It is a function of its arguments rather than of the screen, so that the
+// flipping and the sliding can be tested without one.
+func cardBounds(at mygo.Point, work mygo.Rectangle, scale float64, height int) mygo.Rectangle {
+	if scale <= 0 {
+		scale = 1
+	}
+	width := int(float64(translateWidth) * scale)
+	scaledHeight := int(float64(height) * scale)
+	x := at.X + translateGap
+	y := at.Y + translateGap
+	if x+width > work.X+work.Width {
+		x = at.X - translateGap - width
+	}
+	if y+scaledHeight > work.Y+work.Height {
+		y = at.Y - translateGap - scaledHeight
+	}
+	return mygo.Rectangle{
+		X:      clampInt(x, work.X, max(work.X+work.Width-width, work.X)),
+		Y:      clampInt(y, work.Y, max(work.Y+work.Height-scaledHeight, work.Y)),
+		Width:  width,
+		Height: scaledHeight,
+	}
+}
+
+// screenNear is the work area the pointer is on, and its scale. A state that
+// was given a pointer in advance has no screen to ask — the screen module
+// needs a running application — so it answers with a work area wide enough
+// for the arithmetic to be exercised.
+func (s *State) screenNear(at mygo.Point) (mygo.Rectangle, float64) {
+	if s.cursorSet {
+		return mygo.Rectangle{X: 0, Y: 0, Width: 1920, Height: 1080}, 1
+	}
+	display := mygo.Screen.DisplayNearestPoint(at)
+	scale := display.ScaleFactor
+	if scale <= 0 {
+		scale = 1
+	}
+	return display.WorkArea, scale
+}
+
+// measureCard is how the card comes to be as tall as what is in it.
+//
+// A frame builds the card and reads back how tall it turned out — the
+// framework lays a column out at its content height, and the card asks for
+// nothing more — and the window is then sized to that, inside its bounds. A
+// card taller than the tallest is cut off rather than scrolled: there is no
+// scrolling container in a card whose height is the thing being measured.
+//
+// What a frame can read is the box the frame *before* it laid out: MyGo's
+// Element.Bounds is the previous frame's rectangle, so the card is always
+// measured as it was. That is what makes the frames below necessary rather
+// than merely tidy. The answer arriving changes the card's content in frame
+// one; frame one therefore measures the card as it was — the loading card,
+// which is exactly the height the window already has — nothing resizes, and
+// with nothing to show it the window never asks for another frame. The card
+// would stay at its old height until something else moved it, which is what a
+// click on it did.
+//
+// So the card asks for the frames its own measurement needs: one after its
+// content changes, so that the frame which drew the change is measured, and
+// one after the window has been given a new size, so that the card is laid
+// out at it. Both are paid out of cardSettle, which is how many frames the
+// card owes itself, and every request is made from inside a frame — so it
+// schedules the frame after this one rather than being folded into this one.
+func (s *State) measureCard(c *ui.Context, card ui.Element) {
+	if s.cardMeasuring || s.translation.dragging {
+		return
+	}
+	if s.translateWindow == nil {
+		// The card is being drawn somewhere other than its window — a test's
+		// frame, an offscreen render — and there is nothing to resize.
+		return
+	}
+	if c.Vibrancy() {
+		// A popover's material draws its own shape, and a card that changes
+		// size under it is a card that flickers.
+		return
+	}
+	box := card.Bounds()
+	if box.H <= 0 {
+		// The card was not in the frame before this one: there is nothing to
+		// measure yet. It is in this one.
+		s.nextCardFrame(c)
+		return
+	}
+	work, scale := s.screenNear(s.cursorPoint())
+	// A window is a whole number of points and the card is not: rounding up
+	// is what keeps the card inside the window, and never adds more than the
+	// fraction it has to. Adding a point outright would leave a strip of
+	// window under the foot — the card's own bottom edge with a hairline of
+	// whatever is behind it.
+	measured := int(math.Ceil(float64(box.H) / float64(scale)))
+	s.cardHeight = measured
+	if s.fitCard(work, scale, measured) {
+		// The window has just been given a size: the next frame is the one
+		// that lays the card out at it.
+		s.nextCardFrame(c)
+		return
+	}
+	s.nextCardFrame(c)
+}
+
+// nextCardFrame asks for one more frame while the card owes itself one.
+func (s *State) nextCardFrame(c *ui.Context) {
+	if s.cardSettle <= 0 {
+		return
+	}
+	s.cardSettle--
+	c.Invalidate()
+}
+
+// cardChanged says the card now holds what the last frame did not draw, so
+// the frame that draws it has to be followed by one that measures it.
+//
+// Two frames are owed: the one that draws the change, and the one that lays
+// the card out at the size that measurement asked for.
+func (s *State) cardChanged() { s.cardSettle = 2 }
+
+// fitCard sizes the window to what the card drew, keeping it where it is and
+// inside the screen it was placed on. It reports whether the window was
+// actually given a new size.
+func (s *State) fitCard(work mygo.Rectangle, scale float64, measured int) bool {
+	window := s.translateWindow
+	if window == nil || measured <= 0 {
+		return false
+	}
+	height := clampInt(measured, translateMinHeight, translateMaxHeight)
+	if height == s.translationHeight {
+		return false
+	}
+	s.translationHeight = height
+	bounds := window.ContentBounds()
+	scaledHeight := int(float64(height) * scale)
+	width := int(float64(translateWidth) * scale)
+	if bounds.Width == width && bounds.Height == scaledHeight {
+		return false
+	}
+	// The card keeps its top-left corner and grows downwards, unless that
+	// would run it off the screen: then it slides up, as the menu it looks
+	// like would.
+	y := clampInt(bounds.Y, work.Y, max(work.Y+work.Height-scaledHeight, work.Y))
+	window.SetContentBounds(mygo.Rectangle{
+		X:      clampInt(bounds.X, work.X, max(work.X+work.Width-width, work.X)),
+		Y:      y,
+		Width:  width,
+		Height: scaledHeight,
+	})
+	return true
+}
+
+// translationHeight is the room the card wants right now: what it measured,
+// or what it starts at before the first frame.
+
+// fitTranslationWindow sizes the card the way it was placed: the width is the
+// design's, the height is what the card measured. It is what a card that has
+// not drawn a frame yet is given — a new answer, a new pin — rather than a
+// height chosen for the state.
+func (s *State) fitTranslationWindow() {
+	window := s.translateWindow
+	if window == nil {
+		return
+	}
+	work, scale := s.screenNear(s.cursorPoint())
+	s.fitCard(work, scale, s.translationHeight)
+}
+
+// scheduleTranslationClose closes the card once it has been ignored for as
+// long as the setting says.
+//
+// The wait is why the card has a delay at all: a translation is read, and a
+// user who clicks the page behind it to read on may still want the card. A
+// pinned card never closes itself, and neither does one that has been pinned
+// while the timer was running.
+func (s *State) scheduleTranslationClose(window cardWindow) {
+	if s.translation.pinned {
+		return
+	}
+	settings, err := s.translate.Settings()
+	delay := domain.DefaultTranslationCloseDelay
+	if err == nil {
+		delay = settings.CloseDelayOr()
+	}
+	s.cancelTranslationClose()
+	// The timer only asks for the close; the state it reads is touched on
+	// the main thread, inside Update, like every other piece of view state.
+	timer := time.AfterFunc(delay, func() {
+		window.Update(func() {
+			if s.translateWindow != window || s.translation.pinned {
+				return
+			}
+			s.closeTranslation()
+		})
+	})
+	s.translateCloseTimer = timer
+}
+
+// cancelTranslationClose forgets a close that was asked for: the user came
+// back to the card, or dismissed it themselves.
+func (s *State) cancelTranslationClose() {
+	if s.translateCloseTimer != nil {
+		s.translateCloseTimer.Stop()
+		s.translateCloseTimer = nil
+	}
+}
+
+// closeTranslation hides the card. It is hidden rather than destroyed: the
+// next press reuses it, and a window that was never created costs nothing.
+//
+// Hiding also ends whatever drag was in progress. A card that is off screen
+// and still thinks the pointer is holding it would jump the next time the
+// pointer crossed where it used to be.
+func (s *State) closeTranslation() {
+	s.cancelTranslationClose()
+	s.endCardDrag()
+	if s.translateWindow != nil {
+		s.translateWindow.Hide()
+	}
+}
+
+// toggleTranslationPin flips whether the card closes itself, and asks for the
+// frame that draws the pin in its new state.
+func (s *State) toggleTranslationPin() {
+	s.translation.pinned = !s.translation.pinned
+	if s.translation.pinned {
+		s.cancelTranslationClose()
+	}
+	if s.translateWindow != nil {
+		s.cardChanged()
+		s.translateWindow.Update(func() {})
+	}
+}
+
+// toggleReadings opens and closes the annotation under the translation, and
+// asks for the frames that draw the card at its new height: what it opens is
+// taller than what it replaces, so the frame that draws it has to be measured
+// and followed by one that sizes the window to it.
+//
+// Opening it the first time is what asks the translator for the words: the
+// translation did not wait for them, and neither does the card.
+func (s *State) toggleReadings() {
+	s.translation.readings = !s.translation.readings
+	if s.translation.readings && s.translation.annotation.status == annotationIdle {
+		s.requestAnnotation()
+		return
+	}
+	if s.translateWindow != nil {
+		s.cardChanged()
+		s.translateWindow.Update(func() {})
+	}
+}
+
+// requestAnnotation asks the translator for the words of the source and how
+// they are read.
+//
+// It is a request of its own, made when the user opens the annotation, and it
+// is why the annotation costs nothing until then: the translation goes out
+// asking for a paragraph, and the pieces behind it — which are the slow part —
+// are asked for by the person who wants them. It runs on a goroutine, like the
+// translation, and comes back through onMain.
+func (s *State) requestAnnotation() {
+	service := s.translate
+	text := s.translation.source
+	if service == nil || strings.TrimSpace(text) == "" {
+		return
+	}
+	s.translation.annotation = annotationState{status: annotationLoading}
+	if s.translateWindow != nil {
+		s.cardChanged()
+		s.translateWindow.Update(func() {})
+	}
+
+	request := usecase.Request{Text: text, Target: s.translation.result.TargetLang, Annotate: true}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), translationTimeout)
+		defer cancel()
+		result, err := service.Translate(ctx, request)
+		s.onMain(func() {
+			if s.translation.source != text {
+				// The card is about something else now: this answer is for a
+				// translation that is gone.
+				return
+			}
+			switch {
+			case err == nil:
+				s.translation.annotation = annotationState{
+					status:   annotationReady,
+					segments: result.Segments,
+					failure:  result.Note,
+				}
+			default:
+				s.translation.annotation = annotationState{
+					status:  annotationFailed,
+					failure: friendlyError(err),
+				}
+			}
+			// The annotation changed how tall the card is: the frames that
+			// measure it are owed, as they are for a translation.
+			s.cardChanged()
+			s.fitTranslationWindow()
+		})
+	}()
+}
+
+// readingsAvailable is whether the card offers the annotation at all: a source
+// in a language whose words carry readings or loanword glosses, under a
+// setting that asks for one of the two.
+//
+// It is what decides whether the card shows the row that opens them: a control
+// that opens nothing is worse than no control.
+func (s *State) readingsAvailable() bool {
+	if s.translation.status != translateReady ||
+		s.translation.result.SourceLang != domain.LangJapanese ||
+		strings.TrimSpace(s.translation.source) == "" {
+		return false
+	}
+	settings, err := s.translateSettings()
+	if err != nil {
+		return true
+	}
+	return settings.Furigana || settings.LoanwordGloss
+}
+
+// annotatedWords is what the open annotation shows: one entry per word that
+// carries something — a reading for the ones written with kanji, the word it
+// came from for the loanwords — in the order they appear.
+//
+// It is not the sentence. A reader who opens this wants the words they cannot
+// read, and the sentence is already above them; what a piece in kana has to
+// show is nothing at all.
+//
+// A word the source uses twice is one entry, not two: this is a list of the
+// words the sentence is made of, and the same word twice in it tells a reader
+// nothing they did not already know. A word that says two different things —
+// the same kanji read two ways in one text — is two entries, because those are
+// two words that happen to be written alike.
+func (s *State) annotatedWords() []domain.Segment {
+	showReading, showGloss := true, true
+	if settings, err := s.translateSettings(); err == nil {
+		showReading, showGloss = settings.Furigana, settings.LoanwordGloss
+	}
+	segments := s.translation.annotation.segments
+	words := make([]domain.Segment, 0, len(segments))
+	seen := make(map[string]struct{}, len(segments))
+	for _, segment := range segments {
+		note, _ := annotationNote(segment, showReading, showGloss)
+		if note == "" {
+			continue
+		}
+		key := segment.Text + "\x00" + note
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		words = append(words, segment)
+	}
+	return words
+}
+
+// annotationNote is what a word has to say about itself, and whether it is a
+// loanword's own word — which is the one note the design writes in the brand
+// green.
+//
+// It is one function because the chip and the list have to agree: what the
+// list counts as a word's note is what the chip puts over it, and what it
+// dedupes on is that same thing.
+func annotationNote(segment domain.Segment, showReading, showGloss bool) (string, bool) {
+	switch {
+	case showGloss && segment.Gloss != "":
+		return segment.Gloss, true
+	case showReading && segment.Reading != "":
+		return segment.Reading, false
+	}
+	return "", false
+}
+
+// dragCard is the foot of the card, as the handle that moves it.
+//
+// The pointer events come from the framework: the element under the press
+// takes the moves until the button comes up, so a press that began on the
+// foot keeps moving the card even when the pointer leaves it — which is what
+// makes a drag feel like a drag rather than like a chase.
+//
+// What moves the card is the pointer's travel since the press, not the
+// pointer's position: the press remembers where the pointer was and where the
+// window was, and every move puts the window that far from where it started.
+// An event's own X and Y are where the pointer is inside a box that moves
+// with the card, so adding them — or adding their differences — makes the
+// card jump to the pointer and then chase it; the distance travelled is the
+// one number that does not depend on the card having already moved.
+//
+// A move is only a drag while the button is held: the foot sees the pointer
+// pass over it without a press too, and a card on its way out after losing
+// the keyboard must not be moved by the pointer merely crossing it.
+//
+// A pinned card is dragged like any other: the pin is about the card staying
+// open when the keyboard goes elsewhere, not about it staying where it was put
+// — a card the user has pinned is one they are working with, and moving it out
+// of the way is part of that.
+func (s *State) dragCard(ev ui.InputEvent) bool {
+	switch ev.Kind {
+	case ui.InputPointerDown:
+		window := s.translateWindow
+		if window == nil {
+			return false
+		}
+		s.translation.dragging = true
+		s.translation.dragFrom = window.ContentBounds()
+		s.translation.dragPointer = s.cursorPoint()
+		s.cancelTranslationClose()
+		return true
+	case ui.InputPointerMove:
+		window := s.translateWindow
+		if window == nil || !s.translation.dragging || ev.Button != 0 {
+			return false
+		}
+		at := s.cursorPoint()
+		work, _ := s.screenNear(at)
+		bounds := s.translation.dragFrom
+		bounds.X = clampInt(
+			bounds.X+int(at.X-s.translation.dragPointer.X),
+			work.X, max(work.X+work.Width-bounds.Width, work.X),
+		)
+		bounds.Y = clampInt(
+			bounds.Y+int(at.Y-s.translation.dragPointer.Y),
+			work.Y, max(work.Y+work.Height-bounds.Height, work.Y),
+		)
+		window.SetContentBounds(bounds)
+		return true
+	case ui.InputPointerUp:
+		if !s.translation.dragging {
+			return false
+		}
+		s.translation.dragging = false
+		return true
+	}
+	return false
+}
+
+// endCardDrag forgets a drag that was never released.
+//
+// A press whose release never arrives — the card was hidden, or the keyboard
+// went somewhere else and the platform never told the foot about it — would
+// otherwise leave the card following the pointer for as long as it lives.
+func (s *State) endCardDrag() {
+	s.translation.dragging = false
+}
+
+// copyTranslation puts one side of the card back on the clipboard.
+//
+// It goes through the clipboard tool rather than the platform directly, so
+// that the write is suppressed from the history exactly as any other write
+// the application makes is: the poll must not read the translation back and
+// record it as a new copy. The entry itself is the text that was copied, with
+// the hash the clipboard tool computes for it, so a translation the user
+// copies is an ordinary clipboard entry like any other.
+func (s *State) copyTranslation(which string) {
+	if s.clipboard == nil {
+		return
+	}
+	value := s.translation.source
+	if which == "target" {
+		value = s.translation.result.TranslatedText
+	}
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	s.translation.copied = which
+	s.translation.copiedAt = time.Now()
+	window := s.translateWindow
+	if window != nil {
+		// The mark that says what was copied takes the room of an action:
+		// that is a change the card has to measure again.
+		s.cardChanged()
+		window.Update(func() {})
+	}
+	entry := domain.ClipboardEntry{
+		ID:          "translate-" + which,
+		Kind:        domain.ClipKindText,
+		Content:     value,
+		Display:     value,
+		ContentHash: tools.ClipContentHash(value),
+		CopiedAt:    time.Now().UTC(),
+	}
+	// The write runs off the main thread, and the mark is taken back when
+	// it is done with: a copy is a platform call, and the frame the click
+	// was in must not wait for it.
+	s.clipboard.CopyAsync(entry, func(error) {
+		if window == nil {
+			return
+		}
+		time.AfterFunc(copiedMarkDuration, func() {
+			window.Update(func() {
+				if s.translation.copied == which && time.Since(s.translation.copiedAt) >= copiedMarkDuration {
+					s.translation.copied = ""
+					// The mark is gone: the card is a little different
+					// again.
+					s.cardChanged()
+				}
+			})
+		})
+	})
+}
+
+// copiedLabel is what a copy action says while it is saying it.
+func (s *State) copiedLabel(which string) bool {
+	return s.translation.copied == which && time.Since(s.translation.copiedAt) < 2*copiedMarkDuration
+}
+
+// cursorPoint is where the pointer is, in screen coordinates, which is where
+// the card goes. It is read on the main thread, where the shortcut callback
+// already runs.
+//
+// A test has no pointer and no running application — asking the platform for
+// one before App.Run is a programming error — so a point may be given in
+// advance, and the platform is asked only when none was.
+func (s *State) cursorPoint() mygo.Point {
+	if s.cursorSet {
+		return s.cursor
+	}
+	point := mygo.Screen.CursorScreenPoint()
+	if point.X == 0 && point.Y == 0 {
+		// A platform that does not answer gives the middle of the primary
+		// screen rather than the top-left corner, which is where a card
+		// nobody can see would go.
+		display := mygo.Screen.PrimaryDisplay()
+		return mygo.Point{
+			X: display.WorkArea.X + display.WorkArea.Width/2,
+			Y: display.WorkArea.Y + display.WorkArea.Height/2,
+		}
+	}
+	return point
+}
+
+// clampInt keeps a value inside a range, whichever end it fell off.
+func clampInt(value, low, high int) int {
+	if high < low {
+		high = low
+	}
+	if value < low {
+		return low
+	}
+	if value > high {
+		return high
+	}
+	return value
+}

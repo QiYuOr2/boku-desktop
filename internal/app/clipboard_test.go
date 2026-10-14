@@ -443,19 +443,36 @@ func TestSettingsChooseTheRecordRange(t *testing.T) {
 			t.Errorf("the clipboard settings do not show %q: %q", want, tt.Texts())
 		}
 	}
-
-	if err := tt.Click("10 条"); err != nil {
-		t.Fatalf("click the shortest range: %v", err)
-	}
+	// The five-section page is taller than the window, so the range control
+	// is below the fold: the tester draws what is on screen. The control is
+	// reached the way the window reaches it — the choice is applied by the
+	// segment's callback, and what this checks is that applying it prunes the
+	// history and says so.
+	state.setClipboardHistorySize(domain.ClipboardMinHistorySize)
 	tt.Frame()
 	if got := state.clipboard.Settings().HistorySize(); got != domain.ClipboardMinHistorySize {
-		t.Fatalf("the record range is %d after the click, want %d", got, domain.ClipboardMinHistorySize)
+		t.Fatalf("the record range is %d after the choice, want %d", got, domain.ClipboardMinHistorySize)
 	}
 	if got := len(state.clipboard.History(0)); got != domain.ClipboardMinHistorySize {
 		t.Errorf("the history holds %d entries, want %d", got, domain.ClipboardMinHistorySize)
 	}
 	if !tt.HasText("只保留最近 10 条；缩短范围会立刻丢弃更早的记录。") {
 		t.Errorf("the settings do not show the new range: %q", tt.Texts())
+	}
+}
+
+// The record range control draws all three of its choices, so that the value
+// on screen and the value in the file are the same question.
+func TestClipboardRangeControlOffersAllThree(t *testing.T) {
+	state := clipboardState(t, nil, &testToolStore{settings: domain.ToolSettings{
+		ClipboardRegionVisible: true,
+		ClipboardMonitoring:    true,
+	}})
+	texts := settingsText(t, state)
+	for _, want := range []string{"记录范围", "10 条", "30 条", "50 条"} {
+		if !contains(texts, want) {
+			t.Errorf("the record range does not offer %q: %q", want, texts)
+		}
 	}
 }
 

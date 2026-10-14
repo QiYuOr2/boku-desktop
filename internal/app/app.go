@@ -52,6 +52,13 @@ type Deps struct {
 	// quick window's clipboard line and the history window show; a State
 	// without one draws neither.
 	Clipboard *usecase.Clipboard
+	// Translate is the selection-translation tool. A State without one
+	// draws no translation window and binds no shortcut for it.
+	Translate *usecase.Translate
+	// Shortcuts binds the global shortcuts. A State without one still runs:
+	// a shortcut that cannot be bound is a tray application with one way in
+	// fewer, not a failure to start.
+	Shortcuts ShortcutRegistrar
 	// Version is the application version, shown in the footer.
 	Version string
 	// Quit is how the tray application leaves: it has no main window to
@@ -66,6 +73,8 @@ type State struct {
 	panelService  *usecase.Panels
 	secretService *usecase.Secrets
 	clipboard     *usecase.Clipboard
+	translate     *usecase.Translate
+	shortcuts     ShortcutRegistrar
 	version       string
 	quit          func()
 
@@ -93,11 +102,27 @@ type State struct {
 	// they mean is their label.
 	settingsMark *ui.SVG
 	quitMark     *ui.SVG
+	// copyMark, pinMark and closeMark are the translation window's actions.
+	// They are parsed once for the same reason as the rest: a view is built
+	// several times per frame, and parsing a document is not a view's work.
+	copyMark  *ui.SVG
+	pinMark   *ui.SVG
+	closeMark *ui.SVG
+	// translationMark heads the settings window's translation section: the
+	// design gives it a mark of its own, and it is the application's own
+	// drawing rather than a brand's.
+	translationMark *ui.SVG
 
 	tray           *mygo.Tray
 	panel          *mygo.Window // the open quick window, or nil when closed
 	settingsWindow *mygo.Window // the open settings window, or nil
 	historyWindow  *mygo.Window // the open clipboard history window, or nil
+	// translateWindow is the translation card, created the first time the
+	// shortcut is pressed and hidden afterwards.
+	translateWindow cardWindow
+	// cardWindows builds the translation card. A test supplies its own, so
+	// that what the card does can be exercised without a window.
+	cardWindows func(onClosed, onBlur, onFocus func()) cardWindow
 
 	// form is the settings window's state, on the main thread like the
 	// rest.
@@ -105,6 +130,46 @@ type State struct {
 	// clipboardStatus is the last thing the clipboard switches said, shown
 	// under them.
 	clipboardStatus string
+	// translateNotice is the last thing the translation switches said,
+	// shown under them.
+	translateNotice string
+	// delayInput is the close-delay field as typed. It is a string rather
+	// than a number because a field is built several times per frame, and
+	// what the user has typed is what it has to keep.
+	delayInput string
+	// alwaysOnTop is the general switch: whether the quick window is
+	// created above other windows.
+	alwaysOnTop bool
+	// translation is the translation card's state.
+	translation translationState
+	// translationHeight is how tall the card is, which is what it measured
+	// the last time it drew itself rather than a number chosen here.
+	translationHeight int
+	// cardHeight is what the card measured as it drew, in points.
+	cardHeight int
+	// cardMeasuring keeps the measurement from resizing the window from
+	// inside the frame that is being measured.
+	cardMeasuring bool
+	// cardSettle is how many more frames the card owes its own measurement.
+	// What a frame reads from the card is what the frame before it laid out
+	// (MyGo's Element.Bounds is the previous frame's box), so a card whose
+	// content has just changed needs a frame after the change to be measured
+	// as it now is, and one more after the window takes the size that
+	// measurement asked for. Without them the window keeps the height it had
+	// — the stale measurement is exactly that height — and never asks for
+	// another frame. See measureCard.
+	cardSettle int
+	// cursor and cursorSet are where the pointer was when the shortcut was
+	// pressed. A point given in advance stands in for the platform's own,
+	// which a test has no way to ask for: the screen module needs a running
+	// application.
+	cursor    mygo.Point
+	cursorSet bool
+	// translateCloseTimer is the close the card asked for and has not
+	// reached yet, or nil.
+	translateCloseTimer *time.Timer
+	// shortcut is what became of the translation shortcut.
+	shortcut shortcutState
 	// copiedEntry is the row that was last clicked in the history, and
 	// copiedAt is when: the row says so for a moment.
 	copiedEntry string
@@ -171,23 +236,48 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the quit mark: %w", err)
 	}
+	copyMark, err := ui.ParseSVG(assets.Copy())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the copy mark: %w", err)
+	}
+	pinMark, err := ui.ParseSVG(assets.Pin())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the pin mark: %w", err)
+	}
+	closeMark, err := ui.ParseSVG(assets.Close())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the close mark: %w", err)
+	}
+	// The translation section's mark is the application's own drawing, not a
+	// brand's: it heads a section of Boku's settings rather than standing for
+	// a service.
+	translationMark, err := ui.ParseSVG(assets.Translate())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the translation mark: %w", err)
+	}
 	return &State{
-		app:           app,
-		panelService:  deps.Panels,
-		secretService: deps.Secrets,
-		clipboard:     deps.Clipboard,
-		version:       deps.Version,
-		quit:          deps.Quit,
-		trayIcon:      trayIcon,
-		deepseekMark:  mark,
-		clipboardMark: clipMark,
-		refreshMark:   refreshMark,
-		historyText:   historyText,
-		historyImage:  historyImage,
-		historyLink:   historyLink,
-		historyCode:   historyCode,
-		settingsMark:  settingsMark,
-		quitMark:      quitMark,
+		app:             app,
+		panelService:    deps.Panels,
+		secretService:   deps.Secrets,
+		clipboard:       deps.Clipboard,
+		translate:       deps.Translate,
+		shortcuts:       deps.Shortcuts,
+		version:         deps.Version,
+		quit:            deps.Quit,
+		trayIcon:        trayIcon,
+		deepseekMark:    mark,
+		clipboardMark:   clipMark,
+		refreshMark:     refreshMark,
+		historyText:     historyText,
+		historyImage:    historyImage,
+		historyLink:     historyLink,
+		historyCode:     historyCode,
+		settingsMark:    settingsMark,
+		quitMark:        quitMark,
+		copyMark:        copyMark,
+		pinMark:         pinMark,
+		closeMark:       closeMark,
+		translationMark: translationMark,
 	}, nil
 }
 
@@ -266,6 +356,9 @@ func (s *State) Refresh() {
 	}
 	if s.historyWindow != nil {
 		s.historyWindow.Update(func() {})
+	}
+	if s.translateWindow != nil {
+		s.translateWindow.Update(func() {})
 	}
 }
 

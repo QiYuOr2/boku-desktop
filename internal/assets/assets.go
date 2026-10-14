@@ -74,10 +74,38 @@ var (
 	historyCodeSVG []byte
 )
 
+// The translation window's own marks: what it copies, what keeps it open,
+// and how it closes. They are drawn as marks rather than words because the
+// window is a card the size of a sentence, and a row of words at its foot
+// would outweigh what it is showing.
+var (
+	//go:embed copy.svg
+	copySVG []byte
+	//go:embed pin.svg
+	pinSVG []byte
+	//go:embed close.svg
+	closeSVG []byte
+	//go:embed translate.svg
+	translateSVG []byte
+)
+
 // DeepSeek returns the DeepSeek mark as the SVG document it is. The caller
 // parses it once and keeps the result: parsing belongs to the framework,
 // and this package depends on the standard library alone.
 func DeepSeek() []byte { return deepseekSVG }
+
+// Copy returns the mark for copying a value.
+func Copy() []byte { return copySVG }
+
+// Pin returns the mark for keeping a window open.
+func Pin() []byte { return pinSVG }
+
+// Close returns the mark for dismissing a window.
+func Close() []byte { return closeSVG }
+
+// Translate returns the mark that heads the translation section: the
+// application's own drawing rather than a brand's.
+func Translate() []byte { return translateSVG }
 
 // Clipboard returns the clipboard mark as the SVG document it is.
 func Clipboard() []byte { return clipboardSVG }

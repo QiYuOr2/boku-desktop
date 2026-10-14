@@ -148,7 +148,7 @@ func (c *Client) do(ctx context.Context, method, endpoint string, headers map[st
 			Endpoint:   safe,
 			HTTPStatus: response.StatusCode,
 			Reason:     "the response is not JSON",
-			Snippet:    domain.Snippet(data),
+			Snippet:    RedactText(domain.Snippet(data)),
 		}
 	}
 	return result, nil
@@ -182,7 +182,7 @@ func statusError(status int, endpoint string, payload []byte) error {
 			Endpoint:   endpoint,
 			HTTPStatus: status,
 			Reason:     "the request was rejected",
-			Snippet:    domain.Snippet(payload),
+			Snippet:    RedactText(domain.Snippet(payload)),
 		}
 	}
 }
@@ -242,8 +242,15 @@ func Redact(endpoint string) string {
 
 var secretAssignment = regexp.MustCompile(`(?i)\b(key|api_key|apikey|api-key|access_token|token|secret|password|passwd|auth|authorization|sig|signature|client_secret)=([^&\s"']+)`)
 
+// secretField is the same names as a JSON or query field: a service that
+// answers with its own error often echoes the credential back inside the
+// body, and a response fragment must not carry one into a log or a window.
+var secretField = regexp.MustCompile(`(?i)("?(?:key|api_key|apikey|api-key|access_token|token|secret|password|passwd|auth|authorization|sig|signature|client_secret)"?\s*:\s*)("[^"]*"|[^,}\s]+)`)
+
 // RedactText removes credential values from arbitrary text, such as a
-// transport error message that quotes a URL.
+// transport error message that quotes a URL, or a response fragment an error
+// carries.
 func RedactText(text string) string {
-	return secretAssignment.ReplaceAllString(text, "$1=redacted")
+	redacted := secretAssignment.ReplaceAllString(text, "$1=redacted")
+	return secretField.ReplaceAllString(redacted, "$1\"redacted\"")
 }

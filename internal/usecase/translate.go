@@ -1,0 +1,532 @@
+package usecase
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"boku/internal/domain"
+	"boku/internal/tools"
+)
+
+// Translate is the selection-translation tool: it reads what the user
+// selected, asks the configured translator for the answer, and keeps the
+// switches that decide all of it.
+//
+// It is the only place the tool's rules live: which translator is used, what
+// happens when nothing is configured, which language a text is translated
+// into, and what the user's own service was configured with. Every method is
+// safe to call from any goroutine.
+type Translate struct {
+	translators domain.TranslatorRegistry
+	secrets     domain.SecretStore
+	tools       domain.ToolStore
+	clipboard   domain.ClipboardDevice
+	selection   domain.SelectionDevice
+	now         func() time.Time
+}
+
+// TranslateOptions is what the service is assembled from. Everything is
+// required except the two devices that read what the user chose: a
+// translation that is handed its text needs neither, and a build with neither
+// answers that there is nothing to translate.
+type TranslateOptions struct {
+	Translators domain.TranslatorRegistry
+	Secrets     domain.SecretStore
+	Tools       domain.ToolStore
+	// Selection reads what the user has selected in another application,
+	// when the platform can say. It is asked first: it is about what the
+	// user is looking at, where the clipboard is about what they copied
+	// last.
+	Selection domain.SelectionDevice
+	// Clipboard reads what is on the clipboard when the caller did not
+	// bring text of its own and the platform cannot say what is selected.
+	Clipboard domain.ClipboardDevice
+	Clock     Clock
+}
+
+// NewTranslate returns the service.
+func NewTranslate(opts TranslateOptions) (*Translate, error) {
+	if opts.Translators == nil {
+		return nil, fmt.Errorf("%w: no translator registry", domain.ErrInvalidArgument)
+	}
+	if opts.Secrets == nil {
+		return nil, fmt.Errorf("%w: no secret store", domain.ErrInvalidArgument)
+	}
+	clock := opts.Clock
+	if clock == nil {
+		clock = SystemClock{}
+	}
+	return &Translate{
+		translators: opts.Translators,
+		secrets:     opts.Secrets,
+		tools:       opts.Tools,
+		clipboard:   opts.Clipboard,
+		selection:   opts.Selection,
+		now:         clock.Now,
+	}, nil
+}
+
+// Request is one translation the interface asks for.
+type Request struct {
+	// Text is what to translate. Empty means "read what the user chose",
+	// which is what the shortcut asks for.
+	Text string
+	// FromSelection reads what the user selected in another application
+	// whatever Text says. The window sets it when the shortcut was pressed,
+	// because the text the user means is the one they have in front of them
+	// — the platform's own answer to what is selected when it has one, and
+	// the clipboard when it does not.
+	FromSelection bool
+	// Target overrides the language the text would be translated into. It
+	// is empty in practice; the tool decides from the source text.
+	Target domain.Language
+	// Annotate asks for the words of the text and how they are read, and for
+	// no translation at all.
+	//
+	// It is the card's second request: the translation goes out with no
+	// annotation to wait for, and the words behind it are asked for when the
+	// user opens them. Both requests are the same call to the translator —
+	// the annotation is what the prompt asks for instead of the paragraph —
+	// so what tells them apart is this.
+	Annotate bool
+}
+
+// Result is one answer, in the shape the window draws.
+type Result struct {
+	SourceText     string
+	TranslatedText string
+	// Segments is the piece-by-piece annotation, when the translator gave
+	// one. Empty means the source is drawn as one line.
+	Segments   []domain.Segment
+	SourceLang domain.Language
+	TargetLang domain.Language
+	// ProviderID and ProviderName are what the window's footer says the
+	// translation came from.
+	ProviderID   string
+	ProviderName string
+	// Note is what the translator noticed: text it had to shorten, pieces
+	// it could not annotate.
+	Note string
+	At   time.Time
+}
+
+// TranslatorView is one translator as the settings window shows it.
+type TranslatorView struct {
+	ID          string
+	DisplayName string
+	// DocsURL is where the user gets a credential.
+	DocsURL string
+	// Endpoint is the address as the settings stand now, or empty when the
+	// user has not named one yet.
+	Endpoint string
+	// CredentialKey is the credential the translator asks for, without the
+	// provider prefix.
+	CredentialKey string
+	// NeedsCredential is false for a translator that works without a key.
+	NeedsCredential bool
+	// Configured is whether what the translator needs is there now.
+	Configured bool
+}
+
+// Settings returns the translation configuration as it stands.
+func (t *Translate) Settings() (domain.TranslationSettings, error) {
+	if t.tools == nil {
+		return domain.TranslationDefaults(), nil
+	}
+	settings, err := t.tools.Load(context.Background())
+	if err != nil {
+		return domain.TranslationDefaults(), err
+	}
+	return settings.Normalize().Translation, nil
+}
+
+// SaveSettings changes the configuration through a function, so that every
+// switch is written the same way: read what is there, change one thing, put
+// it back. A switch that cannot be saved is reported, and the settings the
+// application runs on are the ones on disk rather than the ones that were
+// meant to be written.
+func (t *Translate) SaveSettings(ctx context.Context, change func(*domain.TranslationSettings)) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if t.tools == nil {
+		return nil // kept in memory only, which is what a test wants
+	}
+	settings, err := t.tools.Load(ctx)
+	if err != nil {
+		return err
+	}
+	settings = settings.Normalize()
+	change(&settings.Translation)
+	settings.Translation = settings.Translation.Normalize()
+	return t.tools.Save(ctx, settings)
+}
+
+// SetEnabled turns the tool on or off.
+func (t *Translate) SetEnabled(ctx context.Context, enabled bool) error {
+	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.Enabled = enabled })
+}
+
+// SetAccelerator remembers the shortcut that starts a translation, so that
+// the next launch registers the same one.
+//
+// It does not judge the combination: whether the platform will take it is the
+// platform's answer, and the window that recorded it has already had that
+// answer. What is stored is what was bound.
+func (t *Translate) SetAccelerator(ctx context.Context, accelerator string) error {
+	trimmed := strings.TrimSpace(accelerator)
+	if trimmed == "" {
+		return fmt.Errorf("%w: the shortcut is empty", domain.ErrInvalidArgument)
+	}
+	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.Accelerator = trimmed })
+}
+
+// SetProvider chooses the translator to use. An id no translator answers to
+// is refused here rather than stored: the settings window offers only the
+// ones that exist, and a file that names another was edited by hand.
+func (t *Translate) SetProvider(ctx context.Context, id string) error {
+	if _, err := t.translators.Translator(id); err != nil {
+		return err
+	}
+	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.Provider = id })
+}
+
+// SetFurigana turns the reading of Japanese kanji on or off.
+func (t *Translate) SetFurigana(ctx context.Context, on bool) error {
+	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.Furigana = on })
+}
+
+// SetLoanwordGloss turns the English original of a katakana loanword on or
+// off.
+func (t *Translate) SetLoanwordGloss(ctx context.Context, on bool) error {
+	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.LoanwordGloss = on })
+}
+
+// SetPinned decides whether the window starts pinned.
+func (t *Translate) SetPinned(ctx context.Context, pinned bool) error {
+	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.Pinned = pinned })
+}
+
+// SetCloseDelay decides how long the window waits before closing itself once
+// it loses the keyboard.
+func (t *Translate) SetCloseDelay(ctx context.Context, delay time.Duration) error {
+	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.CloseDelay = delay })
+}
+
+// SetCustomTranslator records where the user's own service is and what to
+// call it. The address is cleaned the way the domain cleans it, so that what
+// is stored is what will be asked.
+func (t *Translate) SetCustomTranslator(ctx context.Context, settings domain.CustomTranslatorSettings) error {
+	settings = settings.Normalize()
+	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.Custom = settings })
+}
+
+// Providers lists the translators the settings window offers, in the order
+// it shows them, with what each one is configured with and whether it can be
+// used right now.
+func (t *Translate) Providers(ctx context.Context) ([]TranslatorView, error) {
+	settings, err := t.Settings()
+	if err != nil {
+		return nil, err
+	}
+	ids := t.translators.TranslatorIDs()
+	views := make([]TranslatorView, 0, len(ids))
+	for _, id := range ids {
+		reply, err := t.translators.Translator(id)
+		if err != nil {
+			continue
+		}
+		descriptor := reply.Descriptor()
+		view := TranslatorView{
+			ID:              descriptor.ID,
+			DisplayName:     descriptor.DisplayName,
+			DocsURL:         descriptor.DocsURL,
+			Endpoint:        descriptor.Endpoint,
+			NeedsCredential: !descriptor.AllowEmptyCredential && len(descriptor.CredentialKeys) > 0,
+		}
+		if len(descriptor.CredentialKeys) > 0 {
+			view.CredentialKey = descriptor.CredentialKeys[0]
+		}
+		// A translator the user points at a service of their own is
+		// configured when the address is there; the address lives in the
+		// settings rather than in a credential.
+		hasAddress := true
+		if descriptor.BaseURLSetting != "" {
+			hasAddress = settings.Custom.BaseURL != ""
+		}
+		view.Configured = hasAddress && (!view.NeedsCredential || t.credentialStored(ctx, descriptor))
+		views = append(views, view)
+	}
+	// The translator in use comes first: it is the one the section is about.
+	sort.SliceStable(views, func(i, j int) bool {
+		left, right := views[i].ID == settings.ProviderOr(), views[j].ID == settings.ProviderOr()
+		if left != right {
+			return left
+		}
+		return views[i].ID < views[j].ID
+	})
+	return views, nil
+}
+
+// credentialStored reports whether what a translator asked for is in the
+// credential store. It never returns the value: a view only needs to know
+// that one is there.
+func (t *Translate) credentialStored(ctx context.Context, descriptor domain.TranslatorDescriptor) bool {
+	for _, key := range descriptor.CredentialKeys {
+		secret, err := t.secrets.Get(ctx, domain.CredentialKey(descriptor.ID, key))
+		if err != nil || strings.TrimSpace(secret.Text()) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// Descriptor returns what one translator is called and where it asks, so the
+// settings window can show it without knowing which translator it is.
+func (t *Translate) Descriptor(id string) (domain.TranslatorDescriptor, error) {
+	reply, err := t.translators.Translator(id)
+	if err != nil {
+		return domain.TranslatorDescriptor{}, err
+	}
+	return reply.Descriptor(), nil
+}
+
+// TestTranslator checks a configuration without storing it: it translates a
+// short text and reports what happened. The settings window uses it to tell
+// the user whether a key works before saving it.
+//
+// The key is taken from override when the user typed one, and from the
+// credential store otherwise, so that "test what is stored" and "test what I
+// just typed" are the same call.
+func (t *Translate) TestTranslator(ctx context.Context, providerID string, override map[string]string) error {
+	reply, err := t.translators.Translator(providerID)
+	if err != nil {
+		return err
+	}
+	descriptor := reply.Descriptor()
+	// A translator the user points at a service of their own has nothing to
+	// test until they name it. Saying so here, rather than letting the
+	// translator answer, keeps the message the user reads the same for every
+	// implementation.
+	if descriptor.BaseURLSetting != "" {
+		settings, err := t.Settings()
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(settings.Custom.BaseURL) == "" {
+			return fmt.Errorf("%w: 还没有填写自定义服务的地址", domain.ErrTranslateUnavailable)
+		}
+	}
+	creds := domain.Credentials{
+		ProviderID: descriptor.ID,
+		Secrets:    map[string]string{},
+		Settings:   map[string]string{},
+	}
+	for _, key := range descriptor.CredentialKeys {
+		if value := strings.TrimSpace(override[key]); value != "" {
+			creds.Secrets[key] = value
+			continue
+		}
+		if descriptor.AllowEmptyCredential {
+			continue
+		}
+		secret, err := t.secrets.Get(ctx, domain.CredentialKey(descriptor.ID, key))
+		if errors.Is(err, domain.ErrSecretNotFound) {
+			return fmt.Errorf("%w: %s", domain.ErrCredentialMissing, domain.CredentialKey(descriptor.ID, key))
+		}
+		if err != nil {
+			return err
+		}
+		creds.Secrets[key] = secret.Text()
+	}
+	// A test is a translation of a short sentence: a service that answers
+	// this is a service that will answer the real thing. It is not the
+	// user's text, and it asks for no annotation.
+	request := domain.TranslationRequest{
+		Text:       testText,
+		SourceLang: domain.LangEnglish,
+		TargetLang: domain.LangChinese,
+	}
+	if _, err := reply.Translate(ctx, creds, request); err != nil {
+		return err
+	}
+	return nil
+}
+
+// testText is what a connection test translates. It is short, it is
+// unmistakably a test rather than the user's own text, and an answer to it
+// costs almost nothing.
+const testText = "Hello, this is a connection test."
+
+// Translate answers one request.
+//
+// The order below is the tool's rules, and it is the same order the window
+// expects: a switch that is off, a translator that is not configured and a
+// text that is not there are three different answers, and none of them is a
+// request to a service.
+func (t *Translate) Translate(ctx context.Context, req Request) (Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	settings, err := t.Settings()
+	if err != nil {
+		return Result{}, err
+	}
+	if !settings.Enabled {
+		return Result{}, fmt.Errorf("%w: 划词翻译已关闭", domain.ErrTranslateUnavailable)
+	}
+	providerID := settings.ProviderOr()
+	reply, err := t.translators.Translator(providerID)
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: 还没有配置翻译服务", domain.ErrTranslateUnavailable)
+	}
+	descriptor := reply.Descriptor()
+
+	text := req.Text
+	if req.FromSelection || strings.TrimSpace(text) == "" {
+		text = t.selectionText(ctx)
+		if strings.TrimSpace(text) == "" {
+			text, err = t.clipboardText(ctx)
+			if err != nil {
+				return Result{}, err
+			}
+		}
+	}
+	text = normalizeText(text)
+	if text == "" {
+		// The clipboard held nothing readable, or held a file list or an
+		// image: there is no text to translate, and the user has to copy
+		// some.
+		return Result{}, fmt.Errorf("%w: 先选中文本并复制，再按快捷键", domain.ErrInvalidArgument)
+	}
+
+	creds, err := t.credentials(ctx, descriptor)
+	if err != nil {
+		return Result{}, err
+	}
+	source := domain.Language(tools.DetectLanguage(text))
+	target := req.Target
+	if target == "" || !target.Valid() {
+		target = domain.Language(tools.TargetLanguage(string(source)))
+	}
+	// The annotation is asked for, and paid for, only by the request that
+	// wants it: a translation with no annotation is a shorter prompt and a
+	// shorter answer, which is the whole reason the card makes two requests.
+	annotation := domain.AnnotationOptions{}
+	if req.Annotate {
+		annotation = domain.AnnotationOptions{
+			Furigana:      settings.Furigana,
+			LoanwordGloss: settings.LoanwordGloss,
+		}
+	}
+	translation, err := reply.Translate(ctx, creds, domain.TranslationRequest{
+		Text:       text,
+		SourceLang: source,
+		TargetLang: target,
+		Annotation: annotation,
+	})
+	if err != nil {
+		return Result{}, err
+	}
+	result := Result{
+		SourceText:     translation.SourceText,
+		TranslatedText: translation.TranslatedText,
+		Segments:       translation.Segments,
+		SourceLang:     translation.SourceLang,
+		TargetLang:     translation.TargetLang,
+		ProviderID:     descriptor.ID,
+		ProviderName:   descriptor.DisplayName,
+		Note:           translation.Note,
+		At:             translation.CreatedAt,
+	}
+	if result.At.IsZero() {
+		result.At = t.now()
+	}
+	return result, nil
+}
+
+// normalizeText is the text as it is sent and drawn: the line breaks the user
+// copied are kept, and they are made one kind of break.
+//
+// What a selection or the clipboard carries on Windows is \r\n, and the
+// paragraphs the window draws are split on \n: a carriage return left inside
+// one is a character nothing asked for, and the format the user copied — the
+// lines of a poem, the rows of a list — is what they expect to see again.
+func normalizeText(text string) string {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	return strings.TrimSpace(text)
+}
+
+// clipboardText reads what is on the clipboard, as text. A clipboard holding
+// a file list or an image is not a text to translate: it answers with the
+// same error as an empty one, because that is what the user has to fix.
+func (t *Translate) clipboardText(ctx context.Context) (string, error) {
+	if t.clipboard == nil {
+		return "", fmt.Errorf("%w: 剪贴板不可用", domain.ErrUnsupportedClipboardFormat)
+	}
+	content, err := t.clipboard.Read(ctx)
+	if err != nil {
+		return "", err
+	}
+	switch content.Kind {
+	case domain.ClipKindFile, domain.ClipKindImage:
+		return "", nil
+	}
+	return content.Text, nil
+}
+
+// selectionText asks the platform what is selected, and answers with nothing
+// when it cannot say.
+//
+// Nothing here is an error. A platform with no API for it, a control that does
+// not publish its text, a selection of nothing and a call that took too long
+// are the same thing to the user: the older question — what is on the
+// clipboard — is asked instead, and it is the one that always has an answer.
+func (t *Translate) selectionText(ctx context.Context) string {
+	if t.selection == nil {
+		return ""
+	}
+	text, err := t.selection.SelectedText(ctx)
+	if err != nil {
+		return ""
+	}
+	return text
+}
+
+// credentials collects what a translator asked for. A missing one is
+// ErrCredentialMissing before the translator is called at all: a request
+// with no key would only teach the service that the key is wrong.
+func (t *Translate) credentials(ctx context.Context, descriptor domain.TranslatorDescriptor) (domain.Credentials, error) {
+	creds := domain.Credentials{
+		ProviderID: descriptor.ID,
+		Secrets:    make(map[string]string, len(descriptor.CredentialKeys)),
+		Settings:   map[string]string{},
+	}
+	for _, key := range descriptor.CredentialKeys {
+		ref := domain.CredentialKey(descriptor.ID, key)
+		secret, err := t.secrets.Get(ctx, ref)
+		if errors.Is(err, domain.ErrSecretNotFound) {
+			if descriptor.AllowEmptyCredential {
+				continue
+			}
+			return creds, fmt.Errorf("%w: %s is not configured", domain.ErrCredentialMissing, ref)
+		}
+		if err != nil {
+			return creds, err
+		}
+		value := strings.TrimSpace(secret.Text())
+		if value == "" {
+			if descriptor.AllowEmptyCredential {
+				continue
+			}
+			return creds, fmt.Errorf("%w: %s is empty", domain.ErrCredentialMissing, ref)
+		}
+		creds.Secrets[key] = value
+	}
+	return creds, nil
+}
