@@ -135,6 +135,14 @@ type annotationState struct {
 // It returns at once. The request runs on a goroutine, and the answer comes
 // back through Window.Update, because the caller is the main thread with the
 // whole application behind it.
+//
+// The card appears before the keyboard is taken, and the text to translate is
+// read in between: what has to be read is what the user selected in the
+// application they were working in, and an application that has just lost the
+// keyboard cannot be asked what is selected in it (docs/tools.md §2.2). The
+// wait is the read — the platform's own call, bounded by the selection device —
+// not the translation: the card has the keyboard while the request is in
+// flight.
 func (s *State) startTranslation(at mygo.Point) {
 	if s.translate == nil {
 		return
@@ -148,13 +156,23 @@ func (s *State) startTranslation(at mygo.Point) {
 		return
 	}
 	s.translation.pinned = settings.Pinned
-	s.showTranslation(at, translationState{status: translateLoading, pinned: settings.Pinned})
+	s.showTranslationInactive(at, translationState{status: translateLoading, pinned: settings.Pinned})
+	window := s.translateWindow
 
 	service := s.translate
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), translationTimeout)
 		defer cancel()
-		result, err := service.Translate(ctx, usecase.Request{FromSelection: true})
+		text, err := service.Source(ctx)
+		// The read is done, and the card may take the keyboard. It takes it
+		// now rather than when the answer arrives so that it is a card the
+		// user can dismiss while they wait — Escape and the close the
+		// settings ask for are both about having the keyboard.
+		s.onMain(func() { s.focusTranslation(window) })
+		var result usecase.Result
+		if err == nil {
+			result, err = service.Translate(ctx, usecase.Request{Text: text})
+		}
 		s.onMain(func() {
 			switch {
 			case err == nil:
@@ -223,11 +241,23 @@ func translationFailureStatus(err error) translateStatus {
 	}
 }
 
-// showTranslation puts the card where the pointer is and shows it.
-//
-// The window is created the first time it is needed: a user who never
-// presses the shortcut never pays for it.
+// showTranslation puts the card where the pointer is, shows it and gives it the
+// keyboard.
 func (s *State) showTranslation(at mygo.Point, state translationState) {
+	s.showTranslationInactive(at, state)
+	s.focusTranslation(s.translateWindow)
+}
+
+// showTranslationInactive puts the card where the pointer is and shows it
+// without taking the keyboard.
+//
+// It is what the shortcut asks for, and the card keeps the keyboard out of it
+// only until the text to translate has been read: the read is what the
+// application the user was working in still answers, and this call is the one
+// that would stop it answering (docs/tools.md §2.2). focusTranslation is the
+// other half, and the two are always a pair — the card is on screen the moment
+// the shortcut is pressed, the keyboard follows the read.
+func (s *State) showTranslationInactive(at mygo.Point, state translationState) {
 	s.translation = state
 	// Whatever the card drew last is not what it draws now, so the frames
 	// that measure the change are owed.
@@ -253,7 +283,20 @@ func (s *State) showTranslation(at mygo.Point, state translationState) {
 	}
 	s.placeTranslation(window, at)
 	s.fitTranslationWindow()
-	window.Show()
+	window.ShowInactive()
+}
+
+// focusTranslation gives the card the keyboard: it is the second half of
+// showTranslationInactive, called when the text the card is about has been
+// read.
+//
+// The card a caller read for may be gone by then — closed while the read ran,
+// or replaced by a newer one — and a request that is over must not put an old
+// card back in front of the user.
+func (s *State) focusTranslation(window cardWindow) {
+	if window == nil || window != s.translateWindow {
+		return
+	}
 	window.Focus()
 }
 
@@ -274,7 +317,14 @@ func (s *State) showTranslation(at mygo.Point, state translationState) {
 // card sized by its outer rectangle would have its last eight points cut off,
 // which is exactly where its foot is.
 type cardWindow interface {
-	Show()
+	// ShowInactive puts the window on screen without taking the keyboard,
+	// and Focus gives it the keyboard. They are separate because the text
+	// a translation is about is read out of the application the user is
+	// working in, and the card must not take that application's keyboard
+	// until the read is done (docs/tools.md §2.2). The framework's own
+	// Show is not part of this: it shows and focuses in one step, which is
+	// the pair this is meant to keep apart.
+	ShowInactive()
 	Focus()
 	Hide()
 	Update(func())
@@ -297,6 +347,12 @@ func (s *State) newCardWindow(onClosed, onBlur, onFocus func()) cardWindow {
 		Height:    translateHeight,
 		MinWidth:  translateWidth,
 		MinHeight: translateMinHeight,
+		// The window is created hidden and shown by the state machine. A
+		// window created without this is shown *and focused* by the
+		// framework as it is built, which is the keyboard taken before the
+		// selection has been read — the card would be shown by the very
+		// call that makes it unreadable (docs/tools.md §2.2).
+		Hidden:    true,
 		Frameless: true,
 		// No resize: the card is exactly as tall as what is in it — measured
 		// every frame — so a dragged edge would be undone immediately. What
@@ -333,52 +389,80 @@ func (s *State) newCardWindow(onClosed, onBlur, onFocus func()) cardWindow {
 // placeTranslation puts the card near the pointer: below and to the right of
 // it, then flipped or slid back when there is no room, as a menu does.
 func (s *State) placeTranslation(window cardWindow, at mygo.Point) {
-	work, scale := s.screenNear(at)
 	s.translationHeight = translateHeight
-	window.SetContentBounds(cardBounds(at, work, scale, s.translationHeight))
+	window.SetContentBounds(cardBounds(at, s.screenNear(at), s.translationHeight))
 }
 
 // cardBounds is where the card goes, as arithmetic: a rectangle the size the
-// content wants, next to the pointer and inside the work area it is on.
+// content wants, next to the pointer and inside the room it has.
 //
 // It is a function of its arguments rather than of the screen, so that the
 // flipping and the sliding can be tested without one.
-func cardBounds(at mygo.Point, work mygo.Rectangle, scale float64, height int) mygo.Rectangle {
-	if scale <= 0 {
-		scale = 1
-	}
-	width := int(float64(translateWidth) * scale)
-	scaledHeight := int(float64(height) * scale)
+//
+// Everything here is in the points the window API takes, which is the same unit
+// the design's sizes are written in. There is deliberately no scale factor:
+// `SetContentBounds` and `ContentBounds` are DIP already, and multiplying by the
+// display's scale — which is what this did until 2026-10-15 — asked for a window
+// `scale` times too wide (478 points became 717 on a 150% display), because the
+// scale was applied on the way in and the value compared on the way out was the
+// unscaled one.
+func cardBounds(at mygo.Point, work mygo.Rectangle, height int) mygo.Rectangle {
 	x := at.X + translateGap
 	y := at.Y + translateGap
-	if x+width > work.X+work.Width {
-		x = at.X - translateGap - width
+	if x+translateWidth > work.X+work.Width {
+		x = at.X - translateGap - translateWidth
 	}
-	if y+scaledHeight > work.Y+work.Height {
-		y = at.Y - translateGap - scaledHeight
+	if y+height > work.Y+work.Height {
+		y = at.Y - translateGap - height
 	}
 	return mygo.Rectangle{
-		X:      clampInt(x, work.X, max(work.X+work.Width-width, work.X)),
-		Y:      clampInt(y, work.Y, max(work.Y+work.Height-scaledHeight, work.Y)),
-		Width:  width,
-		Height: scaledHeight,
+		X:      clampInt(x, work.X, max(work.X+work.Width-translateWidth, work.X)),
+		Y:      clampInt(y, work.Y, max(work.Y+work.Height-height, work.Y)),
+		Width:  translateWidth,
+		Height: height,
 	}
 }
 
-// screenNear is the work area the pointer is on, and its scale. A state that
-// was given a pointer in advance has no screen to ask — the screen module
-// needs a running application — so it answers with a work area wide enough
-// for the arithmetic to be exercised.
-func (s *State) screenNear(at mygo.Point) (mygo.Rectangle, float64) {
+// screenNear is the room the card has to live in: every display's work area,
+// united.
+//
+// It used to be the work area of the display the pointer is on, and that is
+// where the other half of the 2026-10-15 bug was. MyGo reports each display's
+// rectangle in points converted by that display's *own* scale, so two displays
+// whose physical rectangles are merely side by side overlap once converted: on
+// the machine this was reported from, the primary display's right third (its
+// last 853 of 2560 points) lies inside the 150 % display's rectangle. A card
+// placed there was clamped into that other display's work area — it jumped to
+// its left edge and then did not move at all while the pointer kept travelling,
+// which is the "position changes unnaturally" the user saw.
+//
+// The union answers the same thing on a single display, and on several it only
+// means the card may sit across the seam — which is where the user put it.
+func (s *State) screenNear(at mygo.Point) mygo.Rectangle {
 	if s.cursorSet {
-		return mygo.Rectangle{X: 0, Y: 0, Width: 1920, Height: 1080}, 1
+		// A state that was given a pointer in advance has no screen to ask —
+		// the screen module needs a running application — so it answers with
+		// a work area wide enough for the arithmetic to be exercised.
+		return mygo.Rectangle{X: 0, Y: 0, Width: 1920, Height: 1080}
 	}
-	display := mygo.Screen.DisplayNearestPoint(at)
-	scale := display.ScaleFactor
-	if scale <= 0 {
-		scale = 1
+	return workAreaOf(mygo.Screen.Displays())
+}
+
+// workAreaOf is every display's work area, united: the room the card may be
+// placed in, whichever display the framework attributes the pointer to.
+func workAreaOf(displays []mygo.Display) mygo.Rectangle {
+	if len(displays) == 0 {
+		return mygo.Rectangle{}
 	}
-	return display.WorkArea, scale
+	work := displays[0].WorkArea
+	for _, display := range displays[1:] {
+		area := display.WorkArea
+		left, top := min(work.X, area.X), min(work.Y, area.Y)
+		right := max(work.X+work.Width, area.X+area.Width)
+		bottom := max(work.Y+work.Height, area.Y+area.Height)
+		work = mygo.Rectangle{X: left, Y: top, Width: right - left, Height: bottom - top}
+	}
+	return work
 }
 
 // measureCard is how the card comes to be as tall as what is in it.
@@ -426,15 +510,15 @@ func (s *State) measureCard(c *ui.Context, card ui.Element) {
 		s.nextCardFrame(c)
 		return
 	}
-	work, scale := s.screenNear(s.cursorPoint())
+	work := s.screenNear(s.cursorPoint())
 	// A window is a whole number of points and the card is not: rounding up
 	// is what keeps the card inside the window, and never adds more than the
 	// fraction it has to. Adding a point outright would leave a strip of
 	// window under the foot — the card's own bottom edge with a hairline of
 	// whatever is behind it.
-	measured := int(math.Ceil(float64(box.H) / float64(scale)))
+	measured := int(math.Ceil(float64(box.H)))
 	s.cardHeight = measured
-	if s.fitCard(work, scale, measured) {
+	if s.fitCard(work, measured) {
 		// The window has just been given a size: the next frame is the one
 		// that lays the card out at it.
 		s.nextCardFrame(c)
@@ -460,9 +544,12 @@ func (s *State) nextCardFrame(c *ui.Context) {
 func (s *State) cardChanged() { s.cardSettle = 2 }
 
 // fitCard sizes the window to what the card drew, keeping it where it is and
-// inside the screen it was placed on. It reports whether the window was
-// actually given a new size.
-func (s *State) fitCard(work mygo.Rectangle, scale float64, measured int) bool {
+// inside the room it has. It reports whether the window was actually given a new
+// size.
+//
+// Both sizes are in points, like everything else here: see cardBounds for why
+// nothing is multiplied by a scale factor.
+func (s *State) fitCard(work mygo.Rectangle, measured int) bool {
 	window := s.translateWindow
 	if window == nil || measured <= 0 {
 		return false
@@ -473,20 +560,18 @@ func (s *State) fitCard(work mygo.Rectangle, scale float64, measured int) bool {
 	}
 	s.translationHeight = height
 	bounds := window.ContentBounds()
-	scaledHeight := int(float64(height) * scale)
-	width := int(float64(translateWidth) * scale)
-	if bounds.Width == width && bounds.Height == scaledHeight {
+	if bounds.Width == translateWidth && bounds.Height == height {
 		return false
 	}
 	// The card keeps its top-left corner and grows downwards, unless that
 	// would run it off the screen: then it slides up, as the menu it looks
 	// like would.
-	y := clampInt(bounds.Y, work.Y, max(work.Y+work.Height-scaledHeight, work.Y))
+	y := clampInt(bounds.Y, work.Y, max(work.Y+work.Height-height, work.Y))
 	window.SetContentBounds(mygo.Rectangle{
-		X:      clampInt(bounds.X, work.X, max(work.X+work.Width-width, work.X)),
+		X:      clampInt(bounds.X, work.X, max(work.X+work.Width-translateWidth, work.X)),
 		Y:      y,
-		Width:  width,
-		Height: scaledHeight,
+		Width:  translateWidth,
+		Height: height,
 	})
 	return true
 }
@@ -503,8 +588,8 @@ func (s *State) fitTranslationWindow() {
 	if window == nil {
 		return
 	}
-	work, scale := s.screenNear(s.cursorPoint())
-	s.fitCard(work, scale, s.translationHeight)
+	work := s.screenNear(s.cursorPoint())
+	s.fitCard(work, s.translationHeight)
 }
 
 // scheduleTranslationClose closes the card once it has been ignored for as
@@ -757,7 +842,7 @@ func (s *State) dragCard(ev ui.InputEvent) bool {
 			return false
 		}
 		at := s.cursorPoint()
-		work, _ := s.screenNear(at)
+		work := s.screenNear(at)
 		bounds := s.translation.dragFrom
 		bounds.X = clampInt(
 			bounds.X+int(at.X-s.translation.dragPointer.X),

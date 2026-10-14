@@ -72,15 +72,12 @@ func NewTranslate(opts TranslateOptions) (*Translate, error) {
 
 // Request is one translation the interface asks for.
 type Request struct {
-	// Text is what to translate. Empty means "read what the user chose",
-	// which is what the shortcut asks for.
+	// Text is what to translate, and it is the text itself: the request
+	// carries no hint to go and find one. What the user has in front of
+	// them is read by Source, before the request is made — reading it means
+	// asking the application the user is working in, and the card that
+	// shows the answer takes that application's keyboard away.
 	Text string
-	// FromSelection reads what the user selected in another application
-	// whatever Text says. The window sets it when the shortcut was pressed,
-	// because the text the user means is the one they have in front of them
-	// — the platform's own answer to what is selected when it has one, and
-	// the clipboard when it does not.
-	FromSelection bool
 	// Target overrides the language the text would be translated into. It
 	// is empty in practice; the tool decides from the source text.
 	Target domain.Language
@@ -362,6 +359,36 @@ func (t *Translate) TestTranslator(ctx context.Context, providerID string, overr
 // costs almost nothing.
 const testText = "Hello, this is a connection test."
 
+// Source is the text one translation is about, read the way the tool reads it:
+// what the user has selected when the platform can say, and what is on the
+// clipboard when it cannot.
+//
+// It is a step of its own rather than the first thing Translate does, because
+// the order matters to the window that asks for it: reading the selection means
+// asking the application the user is working in, and the card that shows the
+// translation takes the keyboard away from that application. Read first, show
+// the card, then translate — the translation the shortcut asks for is about the
+// text this answered (docs/tools.md §2.2).
+//
+// Nothing readable in either place is an empty answer, not an error: the
+// platform saying "nothing is selected" and the clipboard holding a file list
+// are both "the user has to select or copy some text". The one error is a
+// clipboard that cannot be read at all, which is a fault worth showing.
+func (t *Translate) Source(ctx context.Context) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	// The selection is asked first: it is about what the user is looking at,
+	// where the clipboard is about what they copied last. An element that
+	// does not publish its text, a platform with no such interface and a
+	// call that took too long are all the same answer here — nothing — and
+	// the clipboard is asked instead.
+	if text := t.selectionText(ctx); strings.TrimSpace(text) != "" {
+		return text, nil
+	}
+	return t.clipboardText(ctx)
+}
+
 // Translate answers one request.
 //
 // The order below is the tool's rules, and it is the same order the window
@@ -386,21 +413,11 @@ func (t *Translate) Translate(ctx context.Context, req Request) (Result, error) 
 	}
 	descriptor := reply.Descriptor()
 
-	text := req.Text
-	if req.FromSelection || strings.TrimSpace(text) == "" {
-		text = t.selectionText(ctx)
-		if strings.TrimSpace(text) == "" {
-			text, err = t.clipboardText(ctx)
-			if err != nil {
-				return Result{}, err
-			}
-		}
-	}
-	text = normalizeText(text)
+	text := normalizeText(req.Text)
 	if text == "" {
-		// The clipboard held nothing readable, or held a file list or an
-		// image: there is no text to translate, and the user has to copy
-		// some.
+		// Nothing to translate: Source read nothing out of the selection and
+		// nothing usable out of the clipboard — an empty one, a file list, an
+		// image — so the user has to select or copy some text.
 		return Result{}, fmt.Errorf("%w: 先选中文本并复制，再按快捷键", domain.ErrInvalidArgument)
 	}
 

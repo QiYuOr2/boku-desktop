@@ -51,6 +51,11 @@ type Clipboard struct {
 	writeAt    time.Time
 	writeValue string
 	writeKind  domain.ClipKind
+	// ignoreUntil is the end of a window in which the clipboard is not
+	// recorded at all, whoever wrote it. It is what a synthetic copy — the
+	// one the selection tool makes to read a text that no application
+	// publishes — asks for (see IgnoreTheNextCopy).
+	ignoreUntil time.Time
 	// lastCopy is what the last click on a recorded copy wrote, and why it
 	// failed when it did.
 	lastCopy    string
@@ -388,6 +393,26 @@ func (c *Clipboard) Suppress() {
 	c.mu.Unlock()
 }
 
+// copyIgnoreWindow is how long a synthetic copy's value is kept out of the
+// history. It covers the copy, the read that takes the text out of it and the
+// write that puts the clipboard back, with room for a poll that was already on
+// its way.
+const copyIgnoreWindow = 2 * time.Second
+
+// IgnoreTheNextCopy keeps what the clipboard reports for the next moment out of
+// the history, whoever wrote it.
+//
+// It is what the selection tool calls just before it asks an application to
+// copy: that copy is not something the user asked to record — it is a question
+// put to the application in front — and the tool puts the clipboard back as it
+// found it straight afterwards. Unlike Suppress this does not compare the
+// reading with a value this application wrote, because it did not write it.
+func (c *Clipboard) IgnoreTheNextCopy() {
+	c.mu.Lock()
+	c.ignoreUntil = c.now().Add(copyIgnoreWindow)
+	c.mu.Unlock()
+}
+
 // record turns a reading into the current content and, when it is new,
 // into a history entry. It is the watcher's callback and runs on the
 // watcher's goroutine.
@@ -673,6 +698,11 @@ func (c *Clipboard) suppressed(reading domain.ClipContent) bool {
 
 // suppresses is suppressed without the lock, for callers that hold it.
 func (c *Clipboard) suppresses(reading domain.ClipContent) bool {
+	if !c.ignoreUntil.IsZero() && c.now().Before(c.ignoreUntil) {
+		// A window a synthetic copy opened: nothing read inside it is a copy
+		// the user made.
+		return true
+	}
 	if c.writeValue == "" {
 		return false
 	}

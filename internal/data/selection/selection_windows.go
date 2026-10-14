@@ -4,6 +4,7 @@ package selection
 
 import (
 	"context"
+	"os"
 	"runtime"
 	"strings"
 	"syscall"
@@ -48,44 +49,79 @@ const textPatternID = 10014
 // that is not allowed.
 type comPtr = unsafe.Pointer
 
-// New returns the device. It holds no state: every reading is taken from the
-// system as it is at that moment, because the answer is about what the user
-// has in front of them now.
-func New() domain.SelectionDevice { return Device{} }
+// New returns the device: UI Automation reads what publishes its text, and a
+// synthetic copy is what asks the applications that publish nothing.
+func New(opts Options) domain.SelectionDevice {
+	return Device{clipboard: opts.Clipboard, beforeCopy: opts.BeforeCopy}
+}
 
-// Device reads the selection through Windows' UI Automation.
-type Device struct{}
+// Device reads the selection through Windows' UI Automation, and asks the
+// application to copy it when UI Automation has nothing to say.
+type Device struct {
+	// clipboard is what the copy fallback reads and puts back, and is nil in
+	// a build that was given none.
+	clipboard domain.ClipboardDevice
+	// beforeCopy is called just before the synthetic copy, so that the
+	// clipboard tool can keep the copied value out of the history.
+	beforeCopy func()
+}
 
 // SelectedText asks the system what is selected in the application the user
 // is working in.
 //
-// The work runs on a thread of its own, and this waits for it with a bound:
-// a call into another application's UI Automation provider is a call that can
-// hang, and the tool has an older answer — the clipboard — it can fall back
-// on rather than keep the user waiting. The reading left behind finishes by
-// itself and gives its thread back.
-func (Device) SelectedText(ctx context.Context) (string, error) {
+// It is not one call. The applications being read turn their accessibility on
+// when they are first asked — a browser builds its tree a moment after the
+// first query arrives — so a single reading of a browser answers "nothing is
+// selected" when a selection is right there on screen. The reading is therefore
+// attempted a few times (DefaultAttempts, DefaultRetryGap), and each attempt
+// runs on a thread of its own and is waited for with a bound: a call into
+// another application's UI Automation provider is a call that can hang, and the
+// tool has an older answer — the clipboard — it can fall back on rather than
+// keep the user waiting. A reading left behind finishes by itself and gives its
+// thread back.
+//
+// When UI Automation has nothing to say, the application is asked to copy
+// (see readWithACopy): that is what reaches the applications that do not
+// publish their text — a chat window, the Windows 11 Notepad — and it is the
+// one path here that the user can notice, because it borrows the clipboard and
+// gives it back.
+func (d Device) SelectedText(ctx context.Context) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	type answer struct {
-		text string
-		err  error
+	deadline := time.Now().Add(DefaultTimeout)
+	if text := readUntilAnswered(ctx, readWithin, DefaultAttempts, DefaultRetryGap, deadline); text != "" {
+		return text, nil
 	}
-	done := make(chan answer, 1)
+	if d.clipboard != nil && safeToCopy() {
+		if text := readWithACopy(ctx, d.clipboard, d.beforeCopy, clipboardSequence, pressCopy); text != "" {
+			return text, nil
+		}
+	}
+	// Every attempt said the same thing, which is the ordinary answer for an
+	// application that publishes no text and for nothing being selected at
+	// all. It is not a failure: the caller asks the clipboard.
+	return "", domain.ErrSelectionUnavailable
+}
+
+// readWithin is one reading of the selection — an attempt, as readUntilAnswered
+// asks for it: the reading runs on a thread of its own and this waits for it
+// with a bound, because the call it makes belongs to another application.
+func readWithin(ctx context.Context, within time.Duration) string {
+	done := make(chan string, 1)
 	go func() {
-		text, err := readSelection()
-		done <- answer{text: text, err: err}
+		text, _ := readSelection()
+		done <- text
 	}()
-	timer := time.NewTimer(DefaultTimeout)
+	timer := time.NewTimer(within)
 	defer timer.Stop()
 	select {
-	case got := <-done:
-		return got.text, got.err
+	case text := <-done:
+		return text
 	case <-ctx.Done():
-		return "", domain.ErrSelectionUnavailable
+		return ""
 	case <-timer.C:
-		return "", domain.ErrSelectionUnavailable
+		return ""
 	}
 }
 
@@ -289,4 +325,118 @@ func decodeBSTR(value comPtr) string {
 		return ""
 	}
 	return string(utf16.Decode(unsafe.Slice((*uint16)(value), bytes/2)))
+}
+
+// --- asking the application to copy ----------------------------------------
+
+// The key codes and record flags of a synthetic copy, from winuser.h.
+const (
+	vkShift        = 0x10
+	vkControl      = 0x11
+	vkMenu         = 0x12
+	vkLWin         = 0x5B
+	vkRWin         = 0x5C
+	vkC            = 0x43
+	inputKeyboard  = 1
+	keyeventfKeyUp = 0x0002
+)
+
+// inputRecord is one INPUT of SendInput, laid out the way the platform lays it
+// out. It is a record rather than a union of mouse, keyboard and hardware input
+// because only the keyboard half is used here: the union is as large as its
+// largest member — 32 bytes on a 64-bit build — and a record SendInput is told
+// is a different size is refused.
+type inputRecord struct {
+	kind  uint32
+	_     uint32
+	vk    uint16
+	scan  uint16
+	flags uint32
+	time  uint32
+	_     uint32
+	extra uintptr
+	_     [8]byte
+}
+
+// user32 is the window manager: the foreground window, the clipboard's write
+// counter and the synthetic key press all come from it.
+var (
+	user32 = syscall.NewLazyDLL("user32.dll")
+
+	procGetForegroundWindow        = user32.NewProc("GetForegroundWindow")
+	procGetWindowThreadProcessID   = user32.NewProc("GetWindowThreadProcessId")
+	procGetClassNameW              = user32.NewProc("GetClassNameW")
+	procGetClipboardSequenceNumber = user32.NewProc("GetClipboardSequenceNumber")
+	procSendInput                  = user32.NewProc("SendInput")
+)
+
+// clipboardSequence is the clipboard's own write counter: the system raises it
+// every time the clipboard is written to, whoever wrote it. It is what says
+// whether an application answered a copy at all — an application with nothing
+// selected answers with nothing, and the counter does not move.
+func clipboardSequence() uint32 {
+	value, _, _ := procGetClipboardSequenceNumber.Call()
+	return uint32(value)
+}
+
+// safeToCopy reports whether the application in front may be asked to copy.
+//
+// Two windows may not. This application's own: asking it to copy would be a
+// copy of nothing, and it is not the window the user selected in. And a
+// console: there the copy combination is a signal that interrupts whatever is
+// running, not a copy.
+func safeToCopy() bool {
+	foreground, _, _ := procGetForegroundWindow.Call()
+	if foreground == 0 {
+		return false
+	}
+	var owner uint32
+	procGetWindowThreadProcessID.Call(foreground, uintptr(unsafe.Pointer(&owner)))
+	if owner == uint32(os.Getpid()) {
+		return false
+	}
+	switch windowClass(foreground) {
+	case "ConsoleWindowClass", "CASCADIA_HOSTING_WINDOW_CLASS", "mintty":
+		return false
+	}
+	return true
+}
+
+// windowClass is the class name of a window: what a console is told apart from
+// an editor by.
+func windowClass(hwnd uintptr) string {
+	buffer := make([]uint16, 256)
+	length, _, _ := procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&buffer[0])), uintptr(len(buffer)))
+	return syscall.UTF16ToString(buffer[:length])
+}
+
+// pressCopy presses Ctrl+C, having first let go of whatever the user is still
+// holding: the combination that got here is one of those, and a copy made while
+// Ctrl and Shift are down is a copy the application may read as something else.
+func pressCopy() {
+	releaseHeldModifiers()
+	sendKey(vkControl, false)
+	sendKey(vkC, false)
+	sendKey(vkC, true)
+	sendKey(vkControl, true)
+}
+
+// releaseHeldModifiers sends a key-up for every modifier, which is what the
+// other desktop translation tools do before a synthetic copy: a modifier the
+// user is still holding would otherwise stay down through it.
+func releaseHeldModifiers() {
+	for _, key := range []uint16{vkShift, vkControl, vkMenu, vkLWin, vkRWin} {
+		sendKey(key, true)
+	}
+	time.Sleep(10 * time.Millisecond)
+}
+
+// sendKey presses or releases one key. The size is what SendInput checks before
+// it presses anything.
+func sendKey(vk uint16, up bool) {
+	record := inputRecord{kind: inputKeyboard, vk: vk}
+	if up {
+		record.flags = keyeventfKeyUp
+	}
+	procSendInput.Call(1, uintptr(unsafe.Pointer(&record)), unsafe.Sizeof(record))
 }

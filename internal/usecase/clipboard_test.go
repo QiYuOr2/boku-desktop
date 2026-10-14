@@ -27,6 +27,30 @@ func TestNewClipboardRequiresItsDependencies(t *testing.T) {
 
 // Both switches are off until the user turns them on: the clipboard is the
 // most sensitive thing the application can read.
+// A synthetic copy — the one the selection tool makes to read a text that no
+// application publishes — is not a copy the user made, and the history is not
+// where it belongs.
+func TestASyntheticCopyIsNotRecorded(t *testing.T) {
+	clock := newTestClock()
+	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{Clock: clock})
+	device.set(textReading("what the selection tool asked an application for"))
+	clipboard.IgnoreTheNextCopy()
+	clipboard.poll(context.Background())
+	if got := len(clipboard.History(10)); got != 0 {
+		t.Errorf("the history recorded %d entries of a synthetic copy", got)
+	}
+
+	// The window is a moment, not a rule: a copy the user makes afterwards is
+	// recorded as any other.
+	clock.advance(copyIgnoreWindow + time.Second)
+	device.set(textReading("what the user copied themselves"))
+	clipboard.poll(context.Background())
+	history := clipboard.History(10)
+	if len(history) != 1 || history[0].Content != "what the user copied themselves" {
+		t.Errorf("the history holds %+v, want the copy the user made", history)
+	}
+}
+
 func TestClipboardDefaultsToOff(t *testing.T) {
 	clipboard, _, _, _ := newTestClipboard(t, ClipboardOptions{})
 	settings := clipboard.Settings()

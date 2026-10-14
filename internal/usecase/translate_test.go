@@ -238,10 +238,21 @@ func newTranslate(t *testing.T) *translateFixture {
 	}
 }
 
+// source reads what the user chose, the way the window does before the card
+// takes the keyboard: the platform first, the clipboard when it cannot say.
+func source(t *testing.T, f *translateFixture) string {
+	t.Helper()
+	text, err := f.translate.Source(context.Background())
+	if err != nil {
+		t.Fatalf("Source failed: %v", err)
+	}
+	return text
+}
+
 func TestTranslateNormal(t *testing.T) {
 	f := newTranslate(t)
 	f.device.set(textReading("A compiler converts source code."))
-	result, err := f.translate.Translate(context.Background(), Request{FromSelection: true})
+	result, err := f.translate.Translate(context.Background(), Request{Text: source(t, f)})
 	if err != nil {
 		t.Fatalf("Translate failed: %v", err)
 	}
@@ -263,7 +274,8 @@ func TestTranslateNormal(t *testing.T) {
 	if f.deepseek.count() != 1 {
 		t.Errorf("the translator was asked %d times", f.deepseek.count())
 	}
-	// The clipboard is read once, and only because the request asked for it.
+	// The clipboard answers once, and once only: the read that comes before
+	// the request. The request itself asks no device anything.
 	if f.device.readCount() != 1 {
 		t.Errorf("the clipboard was read %d times", f.device.readCount())
 	}
@@ -272,17 +284,13 @@ func TestTranslateNormal(t *testing.T) {
 // What the user has selected is what the tool translates: the platform is
 // asked first, and the clipboard — which holds what was copied last, and may
 // be something else entirely — is not consulted at all when it can answer.
-func TestTranslatePrefersTheSelection(t *testing.T) {
+func TestSourcePrefersTheSelection(t *testing.T) {
 	f := newTranslate(t)
 	f.device.set(textReading("what was copied an hour ago"))
 	f.selection.err, f.selection.text = nil, "コンパイラはソフトです。"
 
-	result, err := f.translate.Translate(context.Background(), Request{FromSelection: true})
-	if err != nil {
-		t.Fatalf("Translate failed: %v", err)
-	}
-	if result.SourceText != "コンパイラはソフトです。" {
-		t.Errorf("source = %q", result.SourceText)
+	if got := source(t, f); got != "コンパイラはソフトです。" {
+		t.Errorf("source = %q", got)
 	}
 	if f.selection.asks() != 1 {
 		t.Errorf("the platform was asked %d times what is selected", f.selection.asks())
@@ -296,7 +304,7 @@ func TestTranslatePrefersTheSelection(t *testing.T) {
 // selected, one whose call failed and a build with no such device at all are
 // the same thing to the user: the clipboard answers, as it did before there
 // was a selection to read.
-func TestTranslateFallsBackToTheClipboard(t *testing.T) {
+func TestSourceFallsBackToTheClipboard(t *testing.T) {
 	cases := []struct {
 		name    string
 		prepare func(*translateFixture)
@@ -320,17 +328,24 @@ func TestTranslateFallsBackToTheClipboard(t *testing.T) {
 			f.device.set(textReading("A compiler converts source code."))
 			tc.prepare(f)
 
-			result, err := f.translate.Translate(context.Background(), Request{FromSelection: true})
-			if err != nil {
-				t.Fatalf("Translate failed: %v", err)
-			}
-			if result.SourceText != "A compiler converts source code." {
-				t.Errorf("source = %q", result.SourceText)
+			if got := source(t, f); got != "A compiler converts source code." {
+				t.Errorf("source = %q", got)
 			}
 			if f.device.readCount() != 1 {
 				t.Errorf("the clipboard was read %d times", f.device.readCount())
 			}
 		})
+	}
+}
+
+// A clipboard that cannot be read at all is a fault rather than an empty
+// answer: the window shows it, rather than telling the user to copy something
+// they may already have copied.
+func TestSourceReportsAClipboardThatCannotBeRead(t *testing.T) {
+	f := newTranslate(t)
+	f.device.fail(errors.New("the clipboard is held by another application"))
+	if _, err := f.translate.Source(context.Background()); err == nil {
+		t.Fatal("Source answered nothing for a clipboard it could not read")
 	}
 }
 
@@ -343,6 +358,9 @@ func TestTranslateDoesNotAskForASelectionWithItsOwnText(t *testing.T) {
 	}
 	if f.selection.asks() != 0 {
 		t.Errorf("the platform was asked %d times for a request with its own text", f.selection.asks())
+	}
+	if f.device.readCount() != 0 {
+		t.Errorf("the clipboard was read %d times for a request with its own text", f.device.readCount())
 	}
 }
 
@@ -425,7 +443,7 @@ func TestTranslateWhenTheToolIsOff(t *testing.T) {
 	if err := f.translate.SetEnabled(context.Background(), false); err != nil {
 		t.Fatalf("SetEnabled failed: %v", err)
 	}
-	_, err := f.translate.Translate(context.Background(), Request{FromSelection: true})
+	_, err := f.translate.Translate(context.Background(), Request{Text: "hello"})
 	if !errors.Is(err, domain.ErrTranslateUnavailable) {
 		t.Fatalf("error = %v, want ErrTranslateUnavailable", err)
 	}
@@ -475,11 +493,11 @@ func TestTranslateWithoutACredential(t *testing.T) {
 	}
 }
 
-// An empty clipboard is a user problem with its own words: they have to copy
-// something first.
-func TestTranslateWithAnEmptyClipboard(t *testing.T) {
+// Nothing selected and nothing usable on the clipboard is a user problem with
+// its own words: they have to select or copy something first.
+func TestTranslateWithNothingToTranslate(t *testing.T) {
 	f := newTranslate(t)
-	_, err := f.translate.Translate(context.Background(), Request{FromSelection: true})
+	_, err := f.translate.Translate(context.Background(), Request{Text: source(t, f)})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("error = %v, want ErrInvalidArgument", err)
 	}
@@ -499,7 +517,7 @@ func TestTranslateWithANonTextClipboard(t *testing.T) {
 	} {
 		f := newTranslate(t)
 		f.device.set(reading)
-		_, err := f.translate.Translate(context.Background(), Request{FromSelection: true})
+		_, err := f.translate.Translate(context.Background(), Request{Text: source(t, f)})
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("kind %s = %v, want ErrInvalidArgument", reading.Kind, err)
 		}

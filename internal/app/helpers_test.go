@@ -287,11 +287,71 @@ func testStateWith(t testing.TB, provider *testProvider, store *testStore, versi
 // testTranslateFixture is the translation tool with the fakes it was built
 // over, so that a test can change what it answers.
 type testTranslateFixture struct {
-	service  *usecase.Translate
-	deepseek *testTranslator
-	custom   *testTranslator
-	tools    *testToolStore
-	device   *testDevice
+	service   *usecase.Translate
+	deepseek  *testTranslator
+	custom    *testTranslator
+	tools     *testToolStore
+	device    *testDevice
+	selection *testSelection
+	// timeline is what happened, in the order it happened. The selection
+	// device, the card and the translator all write to it, which is how a
+	// test says that the text to translate was read before the card took
+	// the keyboard.
+	timeline *timeline
+}
+
+// timeline is an ordered record the fakes write to, for the tests that are
+// about an order rather than about a value.
+type timeline struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (l *timeline) add(event string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.events = append(l.events, event)
+}
+
+// all is everything that happened, oldest first.
+func (l *timeline) all() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.events...)
+}
+
+// testSelection is the platform's answer to what is selected: the text a test
+// decides, and a note in the timeline that it was asked.
+type testSelection struct {
+	mu       sync.Mutex
+	text     string
+	err      error
+	asked    int
+	timeline *timeline
+}
+
+func (s *testSelection) SelectedText(context.Context) (string, error) {
+	if s.timeline != nil {
+		s.timeline.add("read the selection")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.asked++
+	return s.text, s.err
+}
+
+// set is what the platform says is selected, from now on.
+func (s *testSelection) set(text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.text, s.err = text, nil
+}
+
+// asks is how many times the platform was asked.
+func (s *testSelection) asks() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.asked
 }
 
 // testTranslate assembles the translation tool over the fakes: a translator
@@ -299,7 +359,8 @@ type testTranslateFixture struct {
 // and a clipboard device that never touches the system's.
 func testTranslate(t testing.TB, store *testStore, device *testDevice) *testTranslateFixture {
 	t.Helper()
-	reply := &testTranslator{id: "deepseek", name: "DeepSeek", descriptor: domain.TranslatorDescriptor{
+	timeline := &timeline{}
+	reply := &testTranslator{id: "deepseek", name: "DeepSeek", timeline: timeline, descriptor: domain.TranslatorDescriptor{
 		Endpoint: "https://api.deepseek.com/chat/completions",
 	}}
 	custom := &testTranslator{id: "custom", name: "自定义", descriptor: domain.TranslatorDescriptor{
@@ -310,21 +371,28 @@ func testTranslate(t testing.TB, store *testStore, device *testDevice) *testTran
 	// the translation defaults in when the file has no such key, so the fake
 	// stands in for a store that has already been read once.
 	tools := &testToolStore{settings: domain.ToolSettings{Translation: domain.TranslationDefaults()}}
+	selection := &testSelection{timeline: timeline}
 	service, err := usecase.NewTranslate(usecase.TranslateOptions{
 		Translators: testTranslators{reply, custom},
 		Secrets:     store,
 		Tools:       tools,
-		Clipboard:   device,
+		// The platform's own answer is faked here, so that a test can say
+		// what the user has selected in another application — and, through
+		// the timeline, when it was read.
+		Selection: selection,
+		Clipboard: device,
 	})
 	if err != nil {
 		t.Fatalf("NewTranslate failed: %v", err)
 	}
 	return &testTranslateFixture{
-		service:  service,
-		deepseek: reply,
-		custom:   custom,
-		tools:    tools,
-		device:   device,
+		service:   service,
+		deepseek:  reply,
+		custom:    custom,
+		tools:     tools,
+		device:    device,
+		selection: selection,
+		timeline:  timeline,
 	}
 }
 
@@ -352,6 +420,9 @@ type testTranslator struct {
 	// requests is every request the translator was given, in order, so a
 	// test can say what was asked and how often.
 	requests []domain.TranslationRequest
+	// timeline, when a test sets one, records that the request went out —
+	// which is what says whether the card had the keyboard before it did.
+	timeline *timeline
 }
 
 func (t *testTranslator) ID() string { return t.id }
@@ -373,6 +444,9 @@ func (t *testTranslator) Descriptor() domain.TranslatorDescriptor {
 }
 
 func (t *testTranslator) Translate(_ context.Context, _ domain.Credentials, req domain.TranslationRequest) (domain.TranslationResult, error) {
+	if t.timeline != nil {
+		t.timeline.add("asked the translator")
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.replies++

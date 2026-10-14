@@ -27,14 +27,33 @@ type testCard struct {
 	hides  int
 	bounds mygo.Rectangle
 
+	// timeline, when a test sets one, records the two moments that matter to
+	// a translation: the card appearing without the keyboard, and taking it.
+	timeline *timeline
+
 	onClosed func()
 	onBlur   func()
 	onFocus  func()
 }
 
-func (c *testCard) Show()  { c.mu.Lock(); c.shown = true; c.mu.Unlock() }
-func (c *testCard) Focus() { c.mu.Lock(); c.focuse++; c.mu.Unlock() }
-func (c *testCard) Hide()  { c.mu.Lock(); c.hides++; c.shown = false; c.mu.Unlock() }
+func (c *testCard) ShowInactive() {
+	c.mu.Lock()
+	c.shown = true
+	c.mu.Unlock()
+	if c.timeline != nil {
+		c.timeline.add("the card appeared without the keyboard")
+	}
+}
+
+func (c *testCard) Focus() {
+	c.mu.Lock()
+	c.focuse++
+	c.mu.Unlock()
+	if c.timeline != nil {
+		c.timeline.add("the card took the keyboard")
+	}
+}
+func (c *testCard) Hide() { c.mu.Lock(); c.hides++; c.shown = false; c.mu.Unlock() }
 func (c *testCard) Update(fn func()) {
 	// The card has no frame of its own, so the update runs where it is
 	// asked for: that is the state the next frame would draw.
@@ -76,7 +95,7 @@ func (c *testCard) focus() {
 func translateState(t testing.TB) (*State, *testTranslateFixture, *testCard) {
 	t.Helper()
 	state, translate, _ := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	card := &testCard{}
+	card := &testCard{timeline: translate.timeline}
 	state.cardWindows = func(onClosed, onBlur, onFocus func()) cardWindow {
 		card.onClosed, card.onBlur, card.onFocus = onClosed, onBlur, onFocus
 		return card
@@ -122,6 +141,47 @@ func await(t *testing.T, done func() bool, format string, args ...any) {
 		time.Sleep(2 * time.Millisecond)
 	}
 	t.Fatalf(format, args...)
+}
+
+// The order the shortcut runs in is the whole reason the read is a step of its
+// own: what the user selected is read out of the application they were working
+// in, and the card takes that application's keyboard away the moment it is
+// activated. A card shown first and read afterwards asks an application that
+// has already lost the keyboard, which answers nothing and leaves the
+// clipboard to answer instead — the tool reads as a clipboard tool, in a
+// browser as much as anywhere else.
+//
+// The timeline is the fakes writing down what happened, in order. The request
+// being last is the other half of the rule: the card has the keyboard while
+// the answer is waited for, so a card the user does not want can be dismissed
+// without waiting for the network.
+func TestTheSelectionIsReadBeforeTheCardTakesTheKeyboard(t *testing.T) {
+	state, translate, card := translateState(t)
+	// The clipboard holds something else entirely — what was copied an hour
+	// ago — so a card that shows it is a card whose read failed.
+	translate.device.set(domain.ClipContent{
+		Kind: domain.ClipKindText, Text: "what was copied an hour ago", Display: "what was copied an hour ago",
+	})
+	translate.selection.set("what the user selected in another application")
+
+	start(t, state)
+	awaitStatus(t, state, translateReady)
+
+	want := []string{
+		"the card appeared without the keyboard",
+		"read the selection",
+		"the card took the keyboard",
+		"asked the translator",
+	}
+	if got := translate.timeline.all(); strings.Join(got, " | ") != strings.Join(want, " | ") {
+		t.Errorf("what happened, in order:\n  %q\nwant\n  %q", got, want)
+	}
+	if got := state.translation.source; got != "what the user selected in another application" {
+		t.Errorf("the card is about %q, want what was selected rather than what was copied", got)
+	}
+	if !card.visible() {
+		t.Error("the card was not shown")
+	}
 }
 
 func TestTranslationCardShowsTheAnswer(t *testing.T) {
@@ -488,14 +548,84 @@ func TestFittingTheCardReportsAResize(t *testing.T) {
 	state.showTranslation(mygo.Point{X: 10, Y: 10}, translationState{status: translateReady})
 	work := mygo.Rectangle{Width: 1920, Height: 1080}
 
-	if state.fitCard(work, 1, translateHeight) {
+	if state.fitCard(work, translateHeight) {
 		t.Error("fitting the card to the height it already has was reported as a resize")
 	}
-	if !state.fitCard(work, 1, translateHeight+80) {
+	if !state.fitCard(work, translateHeight+80) {
 		t.Error("growing the card was not reported as a resize")
 	}
 	if got := card.ContentBounds().Height; got != translateHeight+80 {
 		t.Errorf("the card is %d tall, want %d", got, translateHeight+80)
+	}
+}
+
+// The card is as wide as the design says on every display.
+//
+// This is the width half of the 2026-10-15 bug: the size handed to
+// SetContentBounds was multiplied by the display's scale factor, although that
+// call takes points (DIP) and multiplies by the window's own DPI itself. On a
+// 150% display the card therefore came out 717 points wide instead of 478 —
+// and, worse, `fitCard` compared that 717 against the 478 it read back, so the
+// mismatch was paid every frame: the window was resized, the next frame
+// measured something else, and the card's width and position both moved under
+// the pointer while the user dragged it.
+func TestTheCardIsTheWidthTheDesignSays(t *testing.T) {
+	work := mygo.Rectangle{X: -2000, Y: -2000, Width: 8000, Height: 5000}
+	got := cardBounds(mygo.Point{X: 100, Y: 100}, work, translateHeight)
+	if got.Width != translateWidth {
+		t.Errorf("the card is %d wide, want the design's %d", got.Width, translateWidth)
+	}
+	if got.Height != translateHeight {
+		t.Errorf("the card is %d tall, want the %d it was given", got.Height, translateHeight)
+	}
+}
+
+// The room the card may be placed in does not depend on which display the
+// framework attributes the pointer to.
+//
+// The two displays here are the ones the bug was reported from, in the points
+// MyGo reports: the 100% primary (2560×1440, work 2560×1392) and the 150%
+// display beside it, whose *converted* rectangle starts at x=1707 — inside the
+// primary's right third. The pointer at 2100 is on the primary, 460 points from
+// its right edge, and the card used to be pushed to the other display's left
+// edge (1707) and then pinned there while the pointer kept travelling.
+func TestTheCardDoesNotJumpToAnotherDisplaysEdge(t *testing.T) {
+	primary := mygo.Display{
+		Bounds:      mygo.Rectangle{X: 0, Y: 0, Width: 2560, Height: 1440},
+		WorkArea:    mygo.Rectangle{X: 0, Y: 0, Width: 2560, Height: 1392},
+		ScaleFactor: 1,
+		Primary:     true,
+	}
+	scaled := mygo.Display{
+		Bounds:      mygo.Rectangle{X: 1707, Y: -338, Width: 960, Height: 1659},
+		WorkArea:    mygo.Rectangle{X: 1707, Y: -338, Width: 960, Height: 1659},
+		ScaleFactor: 1.5,
+	}
+	work := workAreaOf([]mygo.Display{scaled, primary})
+	if want := (mygo.Rectangle{X: 0, Y: -338, Width: 2667, Height: 1730}); work != want {
+		t.Errorf("the room is %+v, want the two displays united %+v", work, want)
+	}
+
+	// The pointer is on the primary, inside the region the second display's
+	// converted rectangle covers.
+	got := cardBounds(mygo.Point{X: 2100, Y: 700}, work, translateHeight)
+	if want := 2100 + translateGap; got.X != want {
+		t.Errorf("the card is at x=%d, want %d — beside the pointer, not at the other display's edge", got.X, want)
+	}
+	if got.Width != translateWidth {
+		t.Errorf("the card is %d wide, want %d", got.Width, translateWidth)
+	}
+}
+
+// One display is its own room, and no displays at all is an empty one: the
+// union is not a new notion of where a window may go.
+func TestTheRoomIsTheWorkAreaOfOneDisplay(t *testing.T) {
+	only := mygo.Display{WorkArea: mygo.Rectangle{X: 0, Y: 0, Width: 1920, Height: 1040}}
+	if got := workAreaOf([]mygo.Display{only}); got != only.WorkArea {
+		t.Errorf("the room is %+v, want the display's own work area %+v", got, only.WorkArea)
+	}
+	if got := workAreaOf(nil); got != (mygo.Rectangle{}) {
+		t.Errorf("no displays gave %+v, want nothing", got)
 	}
 }
 

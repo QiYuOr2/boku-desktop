@@ -76,6 +76,6 @@ func TestReadTheSelectionByHand(t *testing.T) {
 	if os.Getenv("BOKU_SELECTION_PROBE") == "" {
 		t.Skip("set BOKU_SELECTION_PROBE=1, select text in another window, then run this")
 	}
-	text, err := New().SelectedText(context.Background())
+	text, err := New(Options{}).SelectedText(context.Background())
 	fmt.Printf("selection: %q\nerror:     %v\n", text, err)
 }

@@ -248,8 +248,14 @@ func services(userData, version string) (*usecase.Panels, *usecase.Secrets, *use
 		Tools:       store,
 		// The selection is asked first and the clipboard second: what the
 		// user has selected is what they mean, and what is on the clipboard
-		// is what they copied last.
-		Selection: selection.New(),
+		// is what they copied last. The clipboard is also what the selection
+		// device borrows when an application publishes nothing — it asks the
+		// application to copy, then puts the clipboard back — so the tool is
+		// told to keep that borrowed value out of the history.
+		Selection: selection.New(selection.Options{
+			Clipboard:  device,
+			BeforeCopy: clipboard.IgnoreTheNextCopy,
+		}),
 		Clipboard: device,
 		Clock:     usecase.SystemClock{},
 	})
