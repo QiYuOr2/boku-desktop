@@ -3,6 +3,11 @@
 // cancellation, a ceiling on the response, an error the caller can classify
 // instead of a raw status code, and never a credential in a message.
 //
+// It also decides where a request goes: the environment's proxy setting first,
+// and the machine's own if the environment names none (proxy.go). A program
+// that asks only the environment reaches nothing on a machine whose proxy is
+// set in Windows, which is how the Codex quota panel first failed.
+//
 // Providers use it; nothing else in the application does.
 package httpx
 
@@ -54,6 +59,10 @@ type Client struct {
 }
 
 // New returns a client with the options applied, filling in the defaults.
+//
+// A caller that brings its own *http.Client brings its own transport, and with
+// it its own decision about proxies; a client built here gets the standard
+// transport with the proxy decision the machine's own setting adds (proxy.go).
 func New(opts Options) *Client {
 	c := &Client{
 		http:      opts.HTTPClient,
@@ -62,7 +71,7 @@ func New(opts Options) *Client {
 		timeout:   opts.Timeout,
 	}
 	if c.http == nil {
-		c.http = &http.Client{}
+		c.http = &http.Client{Transport: proxyTransport()}
 	}
 	if c.userAgent == "" {
 		c.userAgent = "Boku"
@@ -76,6 +85,23 @@ func New(opts Options) *Client {
 	return c
 }
 
+// proxyTransport is the transport a client built here uses: the standard one,
+// which knows how to dial and how long to wait, with the proxy decision drawn
+// from the environment and then from the machine itself.
+//
+// It is a clone rather than a replacement, so that everything else about it —
+// the dial timeouts, the connection reuse, the TLS settings — stays what the
+// platform's own defaults are.
+func proxyTransport() *http.Transport {
+	standard, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Transport{Proxy: ProxyFunc()}
+	}
+	transport := standard.Clone()
+	transport.Proxy = ProxyFunc()
+	return transport
+}
+
 // GetJSON asks for a JSON document.
 func (c *Client) GetJSON(ctx context.Context, endpoint string, headers map[string]string) (domain.FetchResult, error) {
 	return c.do(ctx, http.MethodGet, endpoint, headers, nil)
@@ -84,6 +110,17 @@ func (c *Client) GetJSON(ctx context.Context, endpoint string, headers map[strin
 // PostJSON sends a JSON document and asks for one back.
 func (c *Client) PostJSON(ctx context.Context, endpoint string, headers map[string]string, body []byte) (domain.FetchResult, error) {
 	return c.do(ctx, http.MethodPost, endpoint, headers, body)
+}
+
+// PostForm sends an application/x-www-form-urlencoded body and asks for a
+// JSON answer. It is for the one OAuth token exchange the application makes
+// (the Codex login), which is the one endpoint that does not take JSON.
+func (c *Client) PostForm(ctx context.Context, endpoint string, headers map[string]string, form url.Values) (domain.FetchResult, error) {
+	merged := map[string]string{"Content-Type": "application/x-www-form-urlencoded"}
+	for name, value := range headers {
+		merged[name] = value
+	}
+	return c.do(ctx, http.MethodPost, endpoint, merged, []byte(form.Encode()))
 }
 
 // do performs one request and translates everything that can go wrong into

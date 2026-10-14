@@ -40,7 +40,7 @@ func TestCardShowsTheBalance(t *testing.T) {
 	loaded(t, state)
 	texts := cardText(t, state)
 
-	for _, want := range []string{"DeepSeek 余额", "总余额", "¥42.10", "明细", "已更新"} {
+	for _, want := range []string{"DeepSeek 余额", "总余额", "¥42.10", "明细", fetchedClock(t, state)} {
 		if !contains(texts, want) {
 			t.Errorf("the card does not show %q; it shows %q", want, texts)
 		}
@@ -50,16 +50,17 @@ func TestCardShowsTheBalance(t *testing.T) {
 	}
 }
 
-// The panel's first line is its name, and beside it how old the numbers are
-// with the action that fetches them again — one line, one request. The
-// action is a mark rather than a word, so it is found by its label.
+// The panel's first line is its name, and beside it the age of the numbers
+// with the action that fetches them again — one line, one request. The design
+// writes that age as the clock alone, and the action as a mark rather than a
+// word, so it is found by its label.
 func TestCardTitleCarriesTheTimeAndTheAction(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
 	loaded(t, state)
 	tt := ui.NewTester(state.View, panelWidth, panelHeight)
 
 	title := findText(t, tt, "DeepSeek 余额")
-	updated := findTextPrefix(t, tt, "已更新")
+	updated := findText(t, tt, fetchedClock(t, state))
 	refresh := findText(t, tt, "刷新")
 
 	if updated.Y < title.Y-1 || updated.Y > title.Y+title.H {

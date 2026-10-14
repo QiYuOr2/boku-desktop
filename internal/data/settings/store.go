@@ -88,6 +88,12 @@ type tool struct {
 	// by Normalize.
 	ClipboardHistorySize int `json:"clipboardHistorySize"`
 
+	// Panels holds what the user chose about the panels that can be turned
+	// off, by panel id. It is only written when there is a choice in it: a
+	// panel with no key is on, which is what every panel is until somebody
+	// turns one off, and what a file written before the switch existed says.
+	Panels map[string]bool `json:"panels,omitempty"`
+
 	// The selection-translation tool. Every field is optional in the file:
 	// one this build wrote always has them, and one a person wrote — or one
 	// from before the tool existed — gets its defaults from Normalize.
@@ -213,6 +219,7 @@ func (s *Settings) Load(ctx context.Context) (domain.ToolSettings, error) {
 		ClipboardMonitoring:    doc.Tools.ClipboardMonitoring,
 		ClipboardPollInterval:  time.Duration(doc.Tools.ClipboardPollIntervalMs) * time.Millisecond,
 		ClipboardHistorySize:   doc.Tools.ClipboardHistorySize,
+		Panels:                 panelChoices(doc.Tools.Panels),
 		Translation:            translation,
 	}.Normalize()
 	s.mu.Lock()
@@ -245,6 +252,7 @@ func (s *Settings) Save(ctx context.Context, settings domain.ToolSettings) error
 			ClipboardMonitoring:     settings.ClipboardMonitoring,
 			ClipboardPollIntervalMs: settings.Interval().Milliseconds(),
 			ClipboardHistorySize:    settings.HistorySize(),
+			Panels:                  panelChoices(settings.Panels),
 
 			TranslateEnabled:       &enabled,
 			TranslateAccelerator:   translation.AcceleratorOr(),
@@ -360,6 +368,20 @@ func (s *Settings) SaveEntries(ctx context.Context, entries []domain.ClipboardEn
 	}
 	s.entries = append([]domain.ClipboardEntry(nil), entries...)
 	return nil
+}
+
+// panelChoices copies the panels the user chose about, so that a caller can
+// never write into a map the store is holding. A file that holds no choice is
+// nil rather than an empty map: both mean the same thing — every panel is on.
+func panelChoices(choices map[string]bool) map[string]bool {
+	if len(choices) == 0 {
+		return nil
+	}
+	copied := make(map[string]bool, len(choices))
+	for id, on := range choices {
+		copied[id] = on
+	}
+	return copied
 }
 
 // writeFile writes data through a temporary file in the same directory. A

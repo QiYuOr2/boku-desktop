@@ -215,9 +215,24 @@ type ToolSettings struct {
 	// ClipboardDefaultHistorySize.
 	ClipboardHistorySize int
 
+	// Panels holds what the user chose about the panels that can be turned
+	// off, by panel id: false is off, true is on, and a panel whose id is not
+	// here is on. An absent key is not a choice — a file written before a
+	// panel existed must not read as somebody having turned it off, and the
+	// switches in the settings window are the only thing that puts a key
+	// here at all.
+	Panels map[string]bool
+
 	// Translation is the selection-translation tool's own configuration,
 	// held in the same file for the same reason.
 	Translation TranslationSettings
+}
+
+// PanelOn reports whether a panel is on. The default is on, because a panel
+// is listed by the assembly and the user's switches are what take one away.
+func (s ToolSettings) PanelOn(panelID string) bool {
+	on, chosen := s.Panels[strings.TrimSpace(panelID)]
+	return !chosen || on
 }
 
 // TranslationSettings is what the selection-translation tool was told to do.

@@ -256,6 +256,7 @@ func testStateWith(t testing.TB, provider *testProvider, store *testStore, versi
 	panels, err := usecase.NewPanels(
 		testRegistry{provider: provider, adapter: testAdapter{provider: provider}},
 		store,
+		nil,
 		[]usecase.PanelDef{{Panel: deepseek.Panel(), Metrics: deepseek.Metrics()}},
 	)
 	if err != nil {
@@ -750,6 +751,7 @@ func emptyPanelService(t *testing.T) *usecase.Panels {
 		testRegistry{provider: provider, adapter: testAdapter{provider: provider}},
 		newTestStore(),
 		nil,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("NewPanels failed: %v", err)
@@ -787,6 +789,34 @@ func findTextPrefix(t *testing.T, tt *ui.Tester, prefix string) ui.Rect {
 	}
 	t.Fatalf("no text starts with %q; the frame shows %q", prefix, tt.Texts())
 	return ui.Rect{}
+}
+
+// textWithPrefix returns the whole of the text starting with prefix, for a
+// test that wants to read what a line says rather than where it is.
+func textWithPrefix(texts []string, prefix string) (string, bool) {
+	for _, text := range texts {
+		if strings.HasPrefix(text, prefix) {
+			return text, true
+		}
+	}
+	return "", false
+}
+
+// fetchedClock is the clock the quick window writes for its first panel: the
+// moment those numbers were taken, as the block shows it. The design writes
+// the clock alone beside the refresh action, so a test that looks for that
+// line has to know which moment it was.
+func fetchedClock(t *testing.T, state *State) string {
+	t.Helper()
+	listed := state.panelService.List()
+	if len(listed) == 0 {
+		t.Fatal("the state has no panel to take a clock from")
+	}
+	view := state.panelService.View(listed[0].ID)
+	if !view.HasSnapshot {
+		t.Fatal("the panel has no snapshot to take a clock from")
+	}
+	return clock(view.FetchedAt)
 }
 
 func contains(texts []string, want string) bool {

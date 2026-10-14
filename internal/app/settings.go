@@ -12,28 +12,73 @@ import (
 
 	"boku/internal/domain"
 	"boku/internal/tools"
+	"boku/internal/usecase"
 )
 
-// The settings window is a page of sections, and the sections are peers:
-// the keys, the translation tool, the clipboard, the general switches and
-// the about box. Nothing nests inside anything else, and no section wears a
-// card of its own — a line between two sections is what says they are two.
+// The settings window is a sidebar and the page it navigates: the sidebar
+// names every chapter of the page, and the page is the sections themselves,
+// one under the other. The sections are still peers — the sidebar does not
+// nest them — and the line between two of them still says where one ends.
 //
 // The window is created when it is first asked for and closed for real
 // afterwards: a tray application should cost nothing while nobody is
 // configuring it.
 const (
-	settingsWidth = 560
+	// settingsWidth is the page plus the room the sidebar keeps. The page is
+	// the width it has always been (560): a column of words beside it must
+	// not narrow the forms underneath, which are the thing being configured.
+	settingsSidebarWidth = 132
+	settingsPageWidth    = 560
+	settingsWidth        = settingsPageWidth + settingsSidebarWidth
+	// settingsAnchor is the room the page keeps above the section the
+	// sidebar was just asked for: it is what tells the user that the section
+	// begins there rather than at the window's edge. The design's own
+	// scrollToSection keeps 16 above the target.
+	settingsAnchor = 16
 	// settingsHeight is the room the page wants: five sections and the
 	// footer. A page with more on it scrolls rather than growing the window
 	// past the screen.
 	settingsHeight = 660
 )
 
-// deepseekBrandColor draws the DeepSeek mark. The brand's blue, written
-// here because it is what the provider's logo is drawn in, and not the
-// theme's accent, which the user's system decides.
-var deepseekBrandColor = ui.Hex("#4D6BFE")
+// settingsSectionKind names one chapter of the settings page: what the
+// sidebar says and what the page shows.
+type settingsSectionKind int
+
+const (
+	sectionAPIKey settingsSectionKind = iota
+	sectionTranslate
+	sectionClipboard
+	sectionGeneral
+	sectionAbout
+)
+
+// settingsPage is one section of the settings page and the sidebar entry that
+// reaches it: the entry's name, the mark beside it, and what the section
+// draws.
+//
+// The two are one thing rather than two lists kept in step by hand: a section
+// added here is in the sidebar and on the page, and an entry can therefore
+// never point at a section that is not there. The entry's name is the
+// section's own, which is what tells the user where it goes.
+type settingsPage struct {
+	kind  settingsSectionKind
+	name  string
+	mark  *ui.SVG
+	build func(c *ui.Context, head *ui.Handle)
+}
+
+// settingsPages is the settings page as the sidebar and the page both read
+// it, in the order they show it.
+func (s *State) settingsPages() []*settingsPage {
+	return []*settingsPage{
+		{kind: sectionAPIKey, name: "API Key", mark: s.keyMark, build: s.apiKeySection},
+		{kind: sectionTranslate, name: "划词翻译", mark: s.translationMark, build: s.translateSection},
+		{kind: sectionClipboard, name: "剪贴板", mark: s.clipboardMark, build: s.clipboardSection},
+		{kind: sectionGeneral, name: "通用", mark: s.bookMark, build: s.generalSection},
+		{kind: sectionAbout, name: "关于", mark: s.infoMark, build: s.aboutSection},
+	}
+}
 
 // customTranslatorID is the translator whose settings the user fills in
 // themselves. It is named here as well as in the storage package because the
@@ -57,8 +102,8 @@ type cardStatus struct {
 }
 
 // connectForm is the settings window's state: what the user typed in each
-// card, what is already stored (masked, never in the clear), and what the
-// last attempt answered.
+// card, which providers have a credential stored, and what the last attempt
+// answered.
 //
 // A card per provider rather than one form: the providers are configured
 // independently, and the key one of them holds must not look like the key
@@ -67,9 +112,6 @@ type connectForm struct {
 	// keys is what the user typed, per translator id, and only that. A
 	// stored credential never goes into a field.
 	keys map[string]string
-	// stored is the stored credential as the store reports it to the
-	// interface — its last four characters.
-	stored map[string]string
 	// hasCredential is whether each provider has one.
 	hasCredential map[string]bool
 	// customName and customURL are the user's own service, as typed. They
@@ -78,6 +120,13 @@ type connectForm struct {
 	customURL  string
 	// busy is the card that is being tested or saved, or empty.
 	busy string
+	// busyNote says what that card is busy with, as the line under it reads.
+	// A card does three things — connect, save, remove — and only the first
+	// of them is a connection.
+	busyNote string
+	// deleteArmed is the card whose stored credential has been asked about
+	// and not yet confirmed: the card that is one press away from losing it.
+	deleteArmed string
 	// status is what each card's last attempt said.
 	status map[string]cardStatus
 	// inputCard is the card the credential field is showing, and input is
@@ -127,50 +176,288 @@ func (s *State) openSettings() {
 	})
 }
 
-// settingsView builds the settings window: a column of sections with a
-// hairline between them, and the version at its foot.
+// settingsView builds the settings window: the sidebar that names every
+// section, the page those sections are on, and the version at its foot.
 //
 // The window draws no title bar of its own: the system's title bar already
-// names it, and repeating that name inside the window is a second title. It
-// draws no navigation either: the sections are a scroll away from each
-// other, and a window this size has no room to give a column of its own to
-// five words.
+// names it, and repeating that name inside the window is a second title.
+// The sidebar is not a second title either: it says where each section is,
+// and what is drawn at the top of the page is the section itself.
 func (s *State) settingsView(c *ui.Context) {
 	useDesign(c)
 	windowFrame(c).Children(func() {
-		body := ui.Scroll(c).FillWidth().Grow(1)
-		body.Children(func() {
-			content(c, false, func() {
-				s.apiKeySection(c)
-				betweenSections(c)
-				s.translateSection(c)
-				betweenSections(c)
-				s.clipboardSection(c)
-				betweenSections(c)
-				s.generalSection(c)
-				betweenSections(c)
-				s.aboutSection(c)
+		ui.Row(c).FillWidth().Grow(1).AlignItems(ui.Stretch).Children(func() {
+			s.settingsSidebar(c)
+			ui.Column(c).Fill().Grow(1).Children(func() {
+				// The page takes the room that is left of the column and
+				// scrolls inside it: a scroll container sized by its content
+				// has nothing to scroll.
+				body := ui.Scroll(c).FillWidth().Grow(1).TrackScroll(&s.settingsScroll)
+				body.Children(func() {
+					content(c, false, func() {
+						s.settingsPageContent(c, body)
+					})
+				})
 			})
 		})
 		footer(c, s.versionLine())
 	})
 }
 
+// settingsPageContent draws the sections, one under the other, and then puts
+// the page where the sidebar last asked for it.
+//
+// The walk is the sidebar's own list, so the page and the sidebar can only
+// agree: the sections are drawn in the order the entries are, and the boxes
+// of the sections and of their headings are what the sidebar reads.
+func (s *State) settingsPageContent(c *ui.Context, body ui.Element) {
+	pages := s.settingsPages()
+	sections := make([]settingsSectionBox, 0, len(pages))
+	for index, page := range pages {
+		if index > 0 {
+			betweenSections(c)
+		}
+		// Each section is one box, so that the arithmetic has the box's own
+		// top to work from: MyGo gives an element the box the frame before it
+		// laid out, which is the first one a click can act on. Its head is a
+		// box of its own inside it: what the sidebar follows is where the
+		// heading is, not where the section begins.
+		//
+		// What is kept of the two is a handle rather than the element: an
+		// element belongs to the frame that built it, and a handle is how a
+		// piece of a view is found again in the next one.
+		section := ui.Box(c).FillWidth()
+		record := settingsSectionBox{kind: page.kind}
+		section.Bind(&record.box)
+		build := page.build
+		section.Children(func() { build(c, &record.head) })
+		sections = append(sections, record)
+	}
+	s.settingsScrollTo(c, sections, body)
+}
+
+// settingsSectionBox is one section as the sidebar reads it: what it is, and
+// the handles to the box it is drawn in and to the box its heading is drawn
+// in. Handles rather than elements: an element is the frame that built it, and
+// the sidebar reads these again in every frame.
+type settingsSectionBox struct {
+	kind settingsSectionKind
+	box  ui.Handle
+	head ui.Handle
+}
+
+// settingsScrollTo puts the page on its way to the section the sidebar asked
+// for, and keeps that entry open until the page has arrived.
+//
+// The page travels rather than jumps: the offset is handed to the scroll
+// container as a ScrollTo, so MyGo glides to it frame by frame, as the
+// design's own scroll-behavior does.
+func (s *State) settingsScrollTo(c *ui.Context, sections []settingsSectionBox, body ui.Element) {
+	s.settingsRoom = body.Bounds().H
+	s.settingsSection = s.sectionInView(c, sections, body)
+	// The sidebar's own request, if there is one: a section's box is where it
+	// is drawn with the page where it is, so moving the page down by that much
+	// puts the section at the anchor. MyGo gives an element the box of the
+	// frame before, which is why this runs in the frame after the click and
+	// not in the frame of it.
+	if pending := s.settingsReveal; pending != nil {
+		// The entry the user clicked is the open one for as long as the page
+		// is moving: where the page is on the way says nothing about where it
+		// is going, and lighting the sections it passes is what the user sees
+		// as a flicker.
+		s.settingsSection = *pending
+		s.settingsAim(c, *pending, sections)
+		if !s.settingsScroll.Scrolling() {
+			// The page has arrived when the scroll it was given has stopped.
+			// The entry is left to the scroll from the frame after — the one
+			// whose boxes are laid out where the page now is — so that the
+			// entry and the section never disagree.
+			s.settingsReveal, s.settingsAiming, s.settingsAimAt = nil, false, 0
+		}
+	}
+}
+
+// settingsAim points the page at a section, or at the section clicked after
+// it: a second click while the first one is still travelling retargets the
+// scroll from where the page is now, which is what makes the last entry
+// clicked the one that wins.
+//
+// A section's box moves with the page it is drawn on, so where the page is
+// going is worked out once per destination and then left alone: re-aiming
+// every frame would chase a target running away from the scroll. A section
+// the page has no room to bring to the anchor — the ones at the end of a page
+// never reach its top — leaves the page resting at its end, which the
+// container does for itself.
+//
+// The box is where the section is drawn at the offset the frame before laid
+// the page out at, and the target is an offset: the two are added with the
+// page where it is now, which is the offset the box was measured at.
+func (s *State) settingsAim(c *ui.Context, kind settingsSectionKind, sections []settingsSectionBox) {
+	if s.settingsAiming && s.settingsAimAt == kind {
+		return
+	}
+	index := int(kind)
+	if index >= len(sections) {
+		return
+	}
+	box := c.Resolve(sections[index].box)
+	if box.Bounds().H <= 0 {
+		return
+	}
+	s.settingsAiming, s.settingsAimAt = true, kind
+	s.settingsScroll.ScrollTo(0, s.settingsScroll.Y+box.Bounds().Y-settingsAnchor, ui.Smooth)
+}
+
+// sectionInView is the section the sidebar marks open: the last one whose
+// heading has crossed the middle of the page. A reader is looking at a
+// section once its heading is in the upper half of the page, so the entry
+// changes when the next heading comes up past the middle of it rather than
+// only when it reaches the top.
+//
+// The comparison is on the screen: a box is where the element is drawn, and
+// the middle of the page is the middle of the room the page scrolls in.
+//
+// One exception at the end of the page: the last sections are never brought
+// to the middle — there is nothing below them to scroll — so the page resting
+// at its end opens the last section whose heading it managed to show. Without
+// it, the entries at the foot of the sidebar could never be lit at all.
+func (s *State) sectionInView(c *ui.Context, sections []settingsSectionBox, body ui.Element) settingsSectionKind {
+	active := settingsSectionKind(0)
+	if len(sections) == 0 {
+		return active
+	}
+	middle := body.Bounds().Y + body.Bounds().H/2
+	atEnd := s.settingsScroll.Y >= s.settingsScroll.MaxY-1
+	last := len(sections) - 1
+	for _, section := range sections {
+		// A section the frame before this one did not lay out has no box to
+		// read, and nothing may be concluded from a zero: it is not a heading
+		// at the top of the page, it is one that has not been drawn yet.
+		head := c.Resolve(section.head)
+		if head.Bounds().H <= 0 {
+			continue
+		}
+		if head.Bounds().Y > middle {
+			break
+		}
+		active = section.kind
+	}
+	if atEnd && active != sections[last].kind {
+		if head := c.Resolve(sections[last].head); head.Bounds().Y <= body.Bounds().H {
+			active = sections[last].kind
+		}
+	}
+	return active
+}
+
+// settingsSidebar is the column of entries down the left of the window: one
+// per section of the page, with the one the page is showing filled in the
+// brand green.
+func (s *State) settingsSidebar(c *ui.Context) {
+	active := s.settingsSection
+	ui.Column(c).
+		Width(float32(settingsSidebarWidth)).
+		Shrink(0).
+		Background(colorSidebar).
+		// The sidebar's own edge: the line is only on the side that faces the
+		// page, because that is the side where the two regions meet.
+		BorderWidth(0, 0, 0, 1).
+		BorderColor(colorBorder).
+		Padding(float32(12), float32(8)).
+		Gap(float32(2)).
+		Children(func() {
+			for _, page := range s.settingsPages() {
+				if s.settingsNav(c, page, page.kind == active) {
+					s.openSettingsSection(page.kind)
+				}
+			}
+		})
+}
+
+// settingsNav is one entry of the sidebar: the section's mark and its name,
+// filled in the brand green while the page is showing that section.
+//
+// The whole entry is the target rather than the words in it: a row that is
+// about one place should answer anywhere on it. The green is the same green
+// the picked segment of a form wears, because it means the same thing.
+func (s *State) settingsNav(c *ui.Context, page *settingsPage, open bool) bool {
+	row := ui.ButtonBase(c).Label(page.name).
+		FillWidth().
+		Focusable().
+		Role(ui.RoleTab).
+		Selected(open).
+		Cursor(ui.CursorPointer).
+		Padding(float32(6), float32(8)).
+		Radius(radiusField).
+		Justify(ui.Start).
+		AlignItems(ui.Center).
+		Gap(float32(8))
+	ink := colorTextBody
+	switch {
+	case open:
+		row.Background(colorBrand)
+		ink = colorOnBrand
+	case row.Hovered() || row.Focused():
+		row.Background(colorHover)
+	}
+	if !open && row.Pressed() {
+		row.Background(colorActive)
+	}
+	icon := colorTextMuted
+	if open {
+		icon = colorOnBrand
+	}
+	row.Children(func() {
+		if page.mark != nil {
+			ui.Icon(c, page.mark).Size(float32(16), float32(16)).Shrink(0).TextColor(icon)
+		}
+		ui.Text(c, page.name).
+			FontSize(sizeSmall).
+			FontWeight(500).
+			TextColor(ink).
+			SingleLine()
+	})
+	return row.Clicked()
+}
+
+// openSettingsSection answers a click on the sidebar: the page is taken to
+// that section, and the entry is marked open from this frame rather than from
+// where the scroll has reached.
+//
+// Both halves matter. Reading the scroll alone would mark the entry the page
+// has not left yet while it travels; and the click has to leave the section
+// behind, because the travel is worked out in the next frame, once the box of
+// the section it is going to exists.
+func (s *State) openSettingsSection(kind settingsSectionKind) {
+	pages := s.settingsPages()
+	for index, page := range pages {
+		if page.kind != kind {
+			continue
+		}
+		s.settingsSection = kind
+		s.settingsReveal = &pages[index].kind
+		break
+	}
+	// The click was answered in this frame, and the page moves in the next
+	// one: a frame is what carries the request to the scroll container.
+	s.Refresh()
+}
+
 // apiKeySection is where the services are configured: one card per
 // translator, each with what it needs, where to get it, and whether what is
 // stored works.
 //
-// Every card is the same shape, so that a second service is a second card
-// rather than a second form: the name and its state at the top, the field
-// under it, the two actions under that, and one line saying where the
-// credential comes from.
-func (s *State) apiKeySection(c *ui.Context) {
+// The section is the settings page's dense one. The design packs a service
+// into two lines — its name and state, then its field with the actions beside
+// it — so the head above the cards is a size down as well, and the plain-text
+// warning is one small line rather than a panel with a title.
+func (s *State) apiKeySection(c *ui.Context, head *ui.Handle) {
 	inset(c, func() {
 		stacked(c, float32(16), func() {
-			sectionHead(c, s.clipboardMark, colorStoneInk, "API Key", "配置各 AI 服务密钥")
+			sectionHeadSmall(c, head, s.keyMark, colorStoneInk, "API Key", "配置各 AI 服务密钥")
 
-			noticePanel(c, "凭据目前以明文保存",
-				"存放在 "+s.credentialPath()+"。加密密钥库（Task 008）完成前，请不要把别人的 Key 存在这里。")
+			noticePanel(c, "凭据明文保存在 "+s.credentialFile()+
+				"。加密密钥库完成前，请勿存放他人 Key。")
 
 			cards := s.translateCards()
 			if len(cards) == 0 {
@@ -186,65 +473,115 @@ func (s *State) apiKeySection(c *ui.Context) {
 	})
 }
 
-// apiKeyCard is one service: its name, its state, its credential, and the
-// two things that can be done with it.
+// apiKeyCard is one service: its name and its state on the first line, the
+// field with the actions that act on it on the second, and one small line
+// under them saying where the value comes from.
+//
+// Everything the card can do is on the field's own row, because the card is
+// two lines: a service is read at a glance rather than scrolled through, and
+// two of them still fit above the fold.
 func (s *State) apiKeyCard(c *ui.Context, card translateCard) {
 	ui.Column(c).FillWidth().
 		Background(colorSurface).
 		Border(1, colorBorder).
 		Radius(radiusField).
-		Padding(float32(12)).
+		Padding(float32(10), float32(12)).
 		Children(func() {
-			stacked(c, float32(10), func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
-					// A provider's own mark heads its card: it is the logo the
-					// user knows, drawn in the provider's own color on a wash
-					// of it, and never replaced by a generic picture.
-					s.brandMark(c, card.id)
-					ui.Text(c, card.displayName).
-						FontSize(sizeBody).
-						FontWeight(600).
-						TextColor(colorTextSoft).
-						SingleLine()
-					ui.Spacer(c)
-					configuredBadge(c, card.configured)
-				})
+			stacked(c, float32(6), func() {
+				s.apiKeyCardHead(c, card)
 
-				// The user's own service needs an address and a name before
+				// The user's own service needs a name and an address before
 				// it has anything to send to: they are the two fields that
-				// make it a service rather than a word.
+				// make it a service rather than a word. They say what they
+				// are where they are written, since the card keeps no room
+				// for a label over each of them.
 				if card.id == customTranslatorID {
-					stacked(c, float32(8), func() {
-						sectionLabel(c, "名称")
+					stacked(c, float32(6), func() {
 						s.customNameField(c)
-						sectionLabel(c, "Base URL")
 						s.customURLField(c)
 					})
 				}
 
-				stacked(c, float32(8), func() {
-					sectionLabel(c, credentialLabel(card.credentialKey))
-					s.credentialField(c, card)
-					if s.credentialIsShown(card) {
-						statusNote(c, "已配置："+s.form.stored[card.id])
-					}
-					ui.Row(c).FillWidth().Gap(float32(8)).Children(func() {
-						if button := designButton(c, "测试连接", buttonSecondary); button.Clicked() {
-							s.testCredential(card)
-						}
-						if button := designButton(c, "保存", buttonPrimary); button.Clicked() {
-							s.saveCredential(card)
-						}
-					})
-					if card.id == customTranslatorID {
-						notice(c, notePlain, "保存后即可作为翻译服务使用；本地服务可以留空 Key。")
-					} else {
-						notice(c, notePlain, "余额可在悬浮窗查看 · "+docsAddress(card.docsURL))
-					}
-					s.cardStatusLine(c, card)
-				})
+				s.credentialRow(c, card)
+				s.cardStatusLine(c, card)
+				s.apiKeyCardNote(c, card)
 			})
 		})
+}
+
+// apiKeyCardHead is the card's first line: what the service is called, whether
+// it can be used, and — once a credential is stored — the way to take that
+// credential away again.
+func (s *State) apiKeyCardHead(c *ui.Context, card translateCard) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
+		ui.Text(c, card.displayName).
+			FontSize(sizeCardName).
+			FontWeight(600).
+			TextColor(colorTextSoft).
+			SingleLine()
+		configuredBadge(c, card.configured)
+		ui.Spacer(c)
+		// The card that holds something is the card that can lose it: a
+		// service with nothing stored has nothing for a 删除 to do.
+		if !s.form.hasCredential[card.id] {
+			return
+		}
+		s.deleteActions(c, card)
+	})
+}
+
+// deleteActions is what can be done with a stored credential, and it asks
+// twice: the first press turns the word into a question, and only the second
+// one removes anything.
+//
+// Removing a credential is the one thing here that typing cannot undo — the
+// key itself is gone — so the design's single red word becomes two, and the
+// user can leave without answering by pressing 取消. It is the two-step
+// confirmation docs/tasks/todo/009-credentials-ui.md asks for, drawn in the
+// card that holds the credential rather than in a dialog over it.
+func (s *State) deleteActions(c *ui.Context, card translateCard) {
+	if s.form.deleteArmed != card.id {
+		if action := textAction(c, "删除", colorDanger); action.Clicked() {
+			s.armDelete(card.id)
+		}
+		return
+	}
+	if action := textAction(c, "确认删除", colorDanger); action.Clicked() {
+		s.deleteCredential(card)
+	}
+	if action := textAction(c, "取消", colorTextMuted); action.Clicked() {
+		s.cancelDelete()
+	}
+}
+
+// credentialRow is the card's second line: the field itself, and everything
+// that can be done with what is in it. The field takes the room that is left
+// of the line and the actions keep their own, so the row reads as the value
+// and then what to do with it.
+func (s *State) credentialRow(c *ui.Context, card translateCard) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(6)).Children(func() {
+		s.credentialField(c, card)
+		if button := cardButton(c, "测试", buttonSecondary); button.Clicked() {
+			s.testCredential(card)
+		}
+		label := "保存"
+		if card.id == customTranslatorID {
+			label = "添加"
+		}
+		if button := cardButton(c, label, buttonPrimary); button.Clicked() {
+			s.saveCredential(card)
+		}
+	})
+}
+
+// apiKeyCardNote is the smallest line under a card: where the key comes from.
+// The user's own service has no page to point at, and its card has said where
+// it asks in the field above.
+func (s *State) apiKeyCardNote(c *ui.Context, card translateCard) {
+	if card.id == customTranslatorID || strings.TrimSpace(card.docsURL) == "" {
+		return
+	}
+	cardHint(c, "余额见悬浮窗 · "+docsAddress(card.docsURL))
 }
 
 // configuredBadge says whether a service is configured, in the color that
@@ -261,12 +598,17 @@ func configuredBadge(c *ui.Context, configured bool) {
 // and never what is stored: a stored credential is a fact about the account
 // rather than a value to retype, so the field stays empty and draws its own
 // hint whether something is stored or not.
+//
+// The card keeps no room for a label over the field, so the field is named
+// where a label would have been read: for assistive technology, and for
+// whoever cannot see the name at the head of the card.
 func (s *State) credentialField(c *ui.Context, card translateCard) {
 	s.showCardInput(card.id)
 	field := ui.TextInput(c, &s.form.input)
 	field.Password().Placeholder(credentialHint(card)).SingleLine()
+	field.Label(card.displayName + " " + credentialLabel(card.credentialKey))
 	field.Disabled(s.form.busy != "")
-	inputFrame(c, field).Font("monospace")
+	fieldFrame(c, field).Grow(1).Font("monospace")
 }
 
 // showCardInput points the one credential field at a card, filing what was
@@ -311,26 +653,36 @@ func (s *State) clearCardInput(id string) {
 // customNameField and customURLField are the two fields of the user's own
 // service. They are not credentials: they are on the window's own face, not
 // masked, and they are stored in the settings file.
+//
+// They are named by their own hint rather than by a label above them — the
+// design's compact card keeps its labels where the value goes — so each
+// carries its name for assistive technology as well.
 func (s *State) customNameField(c *ui.Context) {
 	field := ui.TextInput(c, &s.form.customName)
-	field.Placeholder("例如：本地 Ollama").SingleLine()
+	field.Placeholder("名称，如本地 Ollama").Label("名称").SingleLine()
 	field.Disabled(s.form.busy != "")
-	inputFrame(c, field)
+	fieldFrame(c, field).FillWidth()
 }
 
 func (s *State) customURLField(c *ui.Context) {
 	field := ui.TextInput(c, &s.form.customURL)
-	field.Placeholder("https://api.example.com/v1").SingleLine()
+	field.Placeholder("Base URL  https://api.example.com/v1").Label("Base URL").SingleLine()
 	field.Disabled(s.form.busy != "")
-	inputFrame(c, field).Font("monospace")
+	fieldFrame(c, field).FillWidth().Font("monospace")
 }
 
 // cardStatusLine reports what one card's last attempt said, under that card.
+// A card that is busy says what it is busy with: a removal is not a
+// connection test, and the line must not tell the user it is one.
 func (s *State) cardStatusLine(c *ui.Context, card translateCard) {
 	if s.form.busy == card.id {
+		text := s.form.busyNote
+		if text == "" {
+			text = "正在连接 " + card.displayName + "…"
+		}
 		ui.Row(c).AlignItems(ui.Center).Gap(float32(8)).Children(func() {
 			ui.Spinner(c)
-			ui.Text(c, "正在连接 "+card.displayName+"…").
+			ui.Text(c, text).
 				FontSize(sizeSmall).
 				TextColor(colorTextMuted)
 		})
@@ -348,17 +700,74 @@ func (s *State) cardStatusLine(c *ui.Context, card translateCard) {
 	}
 }
 
+// armDelete asks the user to say it twice: the card's red word becomes the
+// question 确认删除, with 取消 beside it.
+func (s *State) armDelete(id string) {
+	s.form.deleteArmed = id
+	s.Refresh()
+}
+
+// cancelDelete leaves the stored credential where it is, which is what a
+// second press on 取消 is for.
+func (s *State) cancelDelete() {
+	s.form.deleteArmed = ""
+	s.Refresh()
+}
+
+// deleteCredential removes the credential a card holds. The write runs off
+// the main thread like every other write in this file; the answer comes back
+// through Window.Update, which is the only way a goroutine may touch this
+// state.
+//
+// Nothing else about the card is touched: the name and the address of a
+// service the user configured are settings, not credentials, and they stay
+// where they are. What the card loses is the value the 测试 and 保存 buttons
+// act on, which is what the confirmation is about.
+func (s *State) deleteCredential(card translateCard) {
+	if s.form.busy != "" || s.secretService == nil {
+		return
+	}
+	secrets, window := s.secretService, s.settingsWindow
+	id, key := card.id, card.credentialKey
+	s.form.busy, s.form.deleteArmed = card.id, ""
+	s.form.busyNote = "正在删除 " + credentialLabel(key) + "…"
+	s.setCardStatus(id, statusNone, "")
+
+	go func() {
+		err := secrets.Delete(backgroundContext(), id, key)
+		if window == nil {
+			// No window: this state exists only while a test builds the
+			// view, and there is nothing to hand the answer to.
+			return
+		}
+		window.Update(func() { s.credentialForgotten(id, err) })
+	}()
+}
+
+// credentialForgotten is what a card says once its credential is gone: what is
+// stored is read again, so the card stops calling itself configured and the
+// 删除 that had to be confirmed is not drawn any more.
+func (s *State) credentialForgotten(id string, err error) {
+	s.form.busy = ""
+	if err != nil {
+		s.setCardStatus(id, statusError, friendlyError(err))
+		return
+	}
+	s.reloadCredentialsAfterSave()
+	s.setCardStatus(id, statusOK, "已删除。")
+}
+
 // translateSection is the translation tool's own settings: whether it runs,
 // what it asks, how much it annotates, what its window does, and which key
 // opens it.
-func (s *State) translateSection(c *ui.Context) {
+func (s *State) translateSection(c *ui.Context, head *ui.Handle) {
 	if s.translate == nil {
 		return
 	}
 	settings := s.translateSettingsOr()
 	inset(c, func() {
 		stacked(c, float32(16), func() {
-			sectionHead(c, s.translationMark, colorStoneInk, "划词翻译", "任意语言 → 中文 · AI 翻译")
+			sectionHead(c, head, s.translationMark, colorStoneInk, "划词翻译", "任意语言 → 中文 · AI 翻译")
 
 			stacked(c, float32(12), func() {
 				enabled := settings.Enabled
@@ -650,14 +1059,14 @@ func (s *State) shortcutButton(c *ui.Context) ui.Element {
 // sensitive thing Boku can read. Turning monitoring off stops the reading
 // rather than hiding it, and the form says that too, because "off" that
 // still reads would be a lie.
-func (s *State) clipboardSection(c *ui.Context) {
+func (s *State) clipboardSection(c *ui.Context, head *ui.Handle) {
 	if s.clipboard == nil {
 		return
 	}
 	settings := s.clipboard.Settings()
 	inset(c, func() {
 		stacked(c, float32(16), func() {
-			sectionHead(c, s.clipboardMark, colorStoneInk, "剪贴板", "监听与预览设置")
+			sectionHead(c, head, s.clipboardMark, colorStoneInk, "剪贴板", "监听与预览设置")
 
 			stacked(c, float32(12), func() {
 				notice(c, notePlain, "剪贴板内容可能包含密码、验证码与私人对话；默认不读取。")
@@ -749,10 +1158,10 @@ func (s *State) historyButton(c *ui.Context) ui.Element {
 // application cannot register itself to start on this platform yet, and a
 // switch that looks like a switch but does nothing is worse than one that
 // says it is not there.
-func (s *State) generalSection(c *ui.Context) {
+func (s *State) generalSection(c *ui.Context, head *ui.Handle) {
 	inset(c, func() {
 		stacked(c, float32(16), func() {
-			sectionHead(c, s.settingsMark, colorStoneInk, "通用", "启动与外观")
+			sectionHead(c, head, s.settingsMark, colorStoneInk, "通用", "启动与外观")
 
 			stacked(c, float32(10), func() {
 				alwaysOnTop := s.alwaysOnTop
@@ -760,11 +1169,28 @@ func (s *State) generalSection(c *ui.Context) {
 					FontSize(sizeBody).
 					OnClick(func() { s.setAlwaysOnTop(alwaysOnTop) })
 
+				// The panels that read something of the user's own — today
+				// the Codex quota, which comes from the login the command
+				// line already made — are switches here. What the switch
+				// says is the application's words; which panels exist is the
+				// assembly's.
+				for _, panel := range s.panelService.OptionalPanels() {
+					on := panel.On
+					label, note := panelSwitchCopy(panel)
+					ui.Checkbox(c, &on, label).
+						FontSize(sizeBody).
+						OnClick(func() { s.setPanelOn(panel.Panel.ID, on) })
+					notice(c, notePlain, note)
+				}
+				if s.panelStatus != "" {
+					notice(c, notePlain, s.panelStatus)
+				}
+
 				unsupported := false
 				ui.Checkbox(c, &unsupported, "开机自动启动").FontSize(sizeBody).Disabled(true)
 				notice(c, notePlain, "尚未实现：需要平台的自启动注册，会在后续任务里接上。")
-				ui.Checkbox(c, &unsupported, "启动时最小化到托盘").FontSize(sizeBody).Disabled(true)
-				notice(c, notePlain, "尚未实现：应用没有主窗口，启动即常驻托盘。")
+				// ui.Checkbox(c, &unsupported, "启动时最小化到托盘").FontSize(sizeBody).Disabled(true)
+				// notice(c, notePlain, "尚未实现：应用没有主窗口，启动即常驻托盘。")
 			})
 
 			stacked(c, float32(8), func() {
@@ -785,10 +1211,10 @@ func (s *State) generalSection(c *ui.Context) {
 // aboutSection is what the application is: the version, what it was built
 // with, and where its files are. There is no update check: Boku has no server
 // to ask, so a button that offered one would be a button that fails.
-func (s *State) aboutSection(c *ui.Context) {
+func (s *State) aboutSection(c *ui.Context, head *ui.Handle) {
 	inset(c, func() {
 		stacked(c, float32(16), func() {
-			sectionHead(c, s.settingsMark, colorStoneInk, "关于", "版本与构建")
+			sectionHead(c, head, s.infoMark, colorStoneInk, "关于", "版本与构建")
 
 			ui.Column(c).FillWidth().
 				Background(colorField).
@@ -998,48 +1424,10 @@ func (s *State) translateSettingsOr() domain.TranslationSettings {
 	return settings
 }
 
-// providerMark is the icon the header shows for a provider: its own mark,
-// which is what tells the user at a glance which account they are
-// configuring. A provider the application has no mark for gets none, and
-// the header shows its title alone.
-func (s *State) providerMark(providerID string) brandedMark {
-	if providerID != "deepseek" {
-		return brandedMark{}
-	}
-	return brandedMark{svg: s.deepseekMark, color: deepseekBrandColor}
-}
-
-// brandMark is a provider's mark at the head of its card: the logo on a wash
-// of its own brand color, in the room the section heads use for theirs. A
-// provider the application has no mark for gets the wash alone, so that the
-// two cards' names still start at the same place.
-func (s *State) brandMark(c *ui.Context, providerID string) {
-	mark := s.providerMark(providerID)
-	ui.Box(c).Size(float32(28), float32(28)).Shrink(0).
-		Radius(radiusTile).
-		Background(brandTint).
-		Center().
-		Children(func() {
-			if mark.svg == nil {
-				return
-			}
-			ui.Icon(c, mark.svg).Size(float32(18), float32(18)).Shrink(0).TextColor(mark.color)
-		})
-}
-
-// storedCredential says that a credential is already stored, as its last four
-// characters. It is a state to be told about rather than a row of actions:
-// replacing what is stored is done by typing over it, and a save is what
-// replaces it, so there is nothing here to press.
-func (s *State) storedCredential(c *ui.Context, card translateCard) {
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
-		statusNote(c, "已配置："+s.form.stored[card.id])
-	})
-}
-
-// credentialIsShown reports whether a card is still showing only the stored
-// credential: something is stored and the field is empty, so there is nothing
-// new to save or to test. Typing into the field is what leaves this state.
+// credentialIsShown reports whether a card is holding a credential the user
+// has not typed over: something is stored and the field is empty, so there is
+// nothing new to save or to test. Typing into the field is what leaves this
+// state.
 func (s *State) credentialIsShown(card translateCard) bool {
 	return s.form.hasCredential[card.id] && strings.TrimSpace(s.cardInput(card.id)) == ""
 }
@@ -1057,18 +1445,17 @@ func (s *State) cardInput(id string) string {
 	return strings.TrimSpace(s.form.keys[id])
 }
 
-// loadCredentials reads what is already stored, as the interface may show it.
-// It runs on the main thread, over local files, when the window opens.
+// loadCredentials reads which credentials are already stored. It runs on the
+// main thread, over local files, when the window opens.
 //
-// What is stored does not go into a field: the field is where a new key is
-// typed, and a value that is only shown is a value a save could read back as
-// the credential. The stored credential is named by the status line instead —
-// its last four characters — while the field keeps its own hint.
+// Nothing of what is stored is read into the window. The field is where a new
+// key is typed, and the only thing a card says about a stored one is that it is
+// there: its badge, and the 删除 that can take it away. Even the last four
+// characters stay in the store — what the window asks for is a name.
 func (s *State) loadCredentials() {
 	translation := s.translateSettingsOr()
 	s.form = connectForm{
 		keys:          map[string]string{},
-		stored:        map[string]string{},
 		hasCredential: map[string]bool{},
 		status:        map[string]cardStatus{},
 		customName:    translation.Custom.DisplayName,
@@ -1078,19 +1465,31 @@ func (s *State) loadCredentials() {
 		if !card.needsCredential {
 			continue
 		}
-		masked, found, err := s.secretService.Masked(backgroundContext(), card.id, card.credentialKey)
+		names, err := s.secretService.Names(backgroundContext(), card.id)
 		if err != nil {
 			s.form.status[card.id] = cardStatus{status: statusError, text: friendlyError(err)}
 			continue
 		}
-		s.form.stored[card.id] = masked
-		s.form.hasCredential[card.id] = found
+		s.form.hasCredential[card.id] = credentialStored(names, card)
 	}
 }
 
-// reloadCredentialsAfterSave refreshes the masked lines and the cards' state
-// without clearing the message that was just set, nor what the user has typed
-// in the other cards.
+// credentialStored reports whether what a provider has stored includes the
+// credential its card is about. The names are the store's own, provider id and
+// all, so a provider that holds some other credential is not read as
+// configured.
+func credentialStored(names []string, card translateCard) bool {
+	want := domain.CredentialKey(card.id, card.credentialKey)
+	for _, name := range names {
+		if name == want {
+			return true
+		}
+	}
+	return false
+}
+
+// reloadCredentialsAfterSave refreshes the cards' state without clearing the
+// message that was just set, nor what the user has typed in the other cards.
 func (s *State) reloadCredentialsAfterSave() {
 	status, keys := s.form.status, s.form.keys
 	name, url := s.form.customName, s.form.customURL
@@ -1130,6 +1529,7 @@ func (s *State) testCredential(card translateCard) {
 		override[card.credentialKey] = value
 	}
 	s.form.busy = card.id
+	s.form.busyNote = "正在连接 " + card.displayName + "…"
 	s.setCardStatus(card.id, statusNone, "")
 
 	go func() {
@@ -1191,6 +1591,7 @@ func (s *State) saveCredential(card translateCard) {
 	service := s.translate
 	id, credentialKey := card.id, card.credentialKey
 	s.form.busy = card.id
+	s.form.busyNote = "正在保存…"
 	s.setCardStatus(card.id, statusNone, "")
 
 	go func() {
@@ -1236,6 +1637,24 @@ func (s *State) credentialPath() string {
 	return "本机文件"
 }
 
+// credentialFile is that file as the warning names it: the file alone, since
+// the line it sits on is a hint, and the about box spells the whole path out
+// for whoever wants to find it.
+func (s *State) credentialFile() string { return fileOf(s.credentialPath()) }
+
+// fileOf is the last name of a path, or the path itself when it has none. It
+// is a pure function rather than part of the warning, because what a path ends
+// in is the one thing about it a test can decide.
+func fileOf(path string) string {
+	path = strings.TrimSpace(path)
+	if index := strings.LastIndexAny(path, `/\`); index >= 0 {
+		if name := strings.TrimSpace(path[index+1:]); name != "" {
+			return name
+		}
+	}
+	return path
+}
+
 // credentialLabel names a credential the way a person would.
 func credentialLabel(key string) string {
 	switch key {
@@ -1254,10 +1673,11 @@ func credentialLabel(key string) string {
 
 // credentialHint is what an empty credential field shows: the shape of the
 // key the service hands out, so that a user who pastes the wrong thing can
-// see that it is the wrong thing.
+// see that it is the wrong thing. A service that can do without one says so,
+// because the field is the only place its name would be read.
 func credentialHint(card translateCard) string {
 	if !card.needsCredential {
-		return "可选"
+		return "API Key（可选）"
 	}
 	if card.credentialKey == "apiKey" {
 		return "sk-......"
@@ -1322,6 +1742,44 @@ func (s *State) copyVersionInfo() {
 func (s *State) setAlwaysOnTop(on bool) {
 	s.alwaysOnTop = on
 	s.Refresh()
+}
+
+// setPanelOn flips an optional panel's switch and says what happened, so the
+// user is not left guessing whether it worked.
+//
+// Turning a panel off takes it out of the quick window and out of every fetch:
+// nothing is drawn for it, and nothing asks its provider — which, for a panel
+// whose credential is a local login, is also the promise that the login file
+// is not read while the switch is off.
+func (s *State) setPanelOn(panelID string, on bool) {
+	err := s.panelService.SetPanelOn(backgroundContext(), panelID, on)
+	switch {
+	case err != nil:
+		s.panelStatus = "开关没能写进设置文件：" + friendlyError(err) + "（本次运行内已生效）"
+	case on:
+		s.panelStatus = "已开启：悬浮窗会重新显示它。"
+	default:
+		s.panelStatus = "已关闭：悬浮窗不再显示它，也不再读取它的数据。"
+	}
+	s.Refresh()
+}
+
+// panelSwitchCopy is what the switch of one optional panel says: the label on
+// the switch, and the line under it that explains what turning it off does.
+//
+// The words are the application's, which is why they are here and not in the
+// panel's definition: the definition says which panels exist, and the window
+// says how they are described to a person. A panel with no copy of its own
+// gets the panel's own name, so that adding one never leaves a nameless
+// switch.
+func panelSwitchCopy(panel usecase.OptionalPanel) (label, note string) {
+	switch panel.Panel.ProviderID {
+	case "codex":
+		return "本地 Codex 额度监控",
+			"读取本机 Codex 命令行的登录状态，在悬浮窗显示额度；关闭后不再读取。"
+	default:
+		return panel.Panel.Title, "关闭后悬浮窗不再显示它，也不再读取它的数据。"
+	}
 }
 
 // backgroundContext is what a background job with nothing to cancel is

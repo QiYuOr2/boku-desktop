@@ -108,15 +108,17 @@ func TestClipboardRegionIsLabelledByItsMark(t *testing.T) {
 	})
 	state.clipboard.Read(context.Background())
 
-	muted := ui.LightTheme().TextMuted
+	// The mark wears the faint stone the design gives a label on the
+	// quick window's own face.
+	faint := panelFaint
 	withoutIcon := ui.Render(state.View, panelWidth, panelHeight, 2)
-	before := countNear(withoutIcon, muted)
+	before := countNear(withoutIcon, faint)
 
 	// The same region with no mark: whatever the mark draws is the
 	// difference between the two.
 	state.clipboardMark = nil
 	without := ui.Render(state.View, panelWidth, panelHeight, 2)
-	after := countNear(without, muted)
+	after := countNear(without, faint)
 
 	if after >= before {
 		t.Fatalf("the clipboard mark draws nothing: %d quiet pixels with it, %d without", before, after)

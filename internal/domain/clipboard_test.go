@@ -60,3 +60,26 @@ func TestToolSettingsNormalizesTheRecordRange(t *testing.T) {
 		t.Errorf("Normalize changed the interval to %s", settings.Interval())
 	}
 }
+
+// A panel nobody has chosen about is on: the switches in the settings window
+// are the only thing that turns one off, so a file that does not name a panel
+// — every file written before the switch existed — reads as "on".
+func TestAPanelNobodyChoseAboutIsOn(t *testing.T) {
+	var none ToolSettings
+	if !none.PanelOn("panel-1") {
+		t.Error("a panel is off in settings that say nothing about it")
+	}
+	chosen := ToolSettings{Panels: map[string]bool{"panel-1": false, "panel-2": true}}
+	if chosen.PanelOn("panel-1") {
+		t.Error("a panel the file turns off reports itself on")
+	}
+	if !chosen.PanelOn("panel-2") {
+		t.Error("a panel the file turns on reports itself off")
+	}
+	if !chosen.PanelOn("panel-3") {
+		t.Error("a panel the file does not name is off")
+	}
+	if chosen.PanelOn(" panel-1 ") {
+		t.Error("an id with room around it did not find the choice that was stored")
+	}
+}

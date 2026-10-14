@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -128,6 +129,7 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 		ClipboardMonitoring:    true,
 		ClipboardPollInterval:  1500 * time.Millisecond,
 		ClipboardHistorySize:   domain.ClipboardMaxHistorySize,
+		Panels:                 map[string]bool{"0198a1b2-0000-7000-8000-000000000002": false},
 		Translation: domain.TranslationSettings{
 			Enabled:       true,
 			Provider:      "custom",
@@ -162,6 +164,9 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	if !strings.Contains(string(data), `"baseURL": "https://api.example.com/v1"`) {
 		t.Errorf("the settings file does not carry the custom address:\n%s", data)
 	}
+	if !strings.Contains(string(data), `"0198a1b2-0000-7000-8000-000000000002": false`) {
+		t.Errorf("the settings file does not carry the panel the user turned off:\n%s", data)
+	}
 	// Nothing sensitive is written here: the key belongs to the credential
 	// store, and a settings file is a file the user may put in a cloud
 	// folder.
@@ -177,7 +182,7 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Load = %+v, want %+v", got, want)
 	}
 }
@@ -202,6 +207,33 @@ func TestLoadNormalizesTheRecordRange(t *testing.T) {
 		if got := settings.HistorySize(); got != domain.ClipboardDefaultHistorySize {
 			t.Errorf("Load(%s) gave the record range %d, want the default %d",
 				written, got, domain.ClipboardDefaultHistorySize)
+		}
+	}
+}
+
+// A file written before the panel switches existed, or by a build that had
+// none, says nothing about any panel — and saying nothing means every panel is
+// on. Reading an absent key as a choice would turn a panel off for everybody
+// who has never opened that page.
+func TestAFileWithoutPanelChoicesTurnsNothingOff(t *testing.T) {
+	store, settingsPath, _ := newStore(t)
+	for _, written := range []string{
+		`{"version":1,"tools":{}}`,
+		`{"version":1,"tools":{"clipboardMonitoring":true}}`,
+		`{"version":1,"tools":{"panels":{}}}`,
+	} {
+		if err := os.WriteFile(settingsPath, []byte(written), 0o600); err != nil {
+			t.Fatalf("write the settings file: %v", err)
+		}
+		settings, err := store.Load(context.Background())
+		if err != nil {
+			t.Fatalf("Load(%s) failed: %v", written, err)
+		}
+		if len(settings.Panels) != 0 {
+			t.Errorf("Load(%s) invented the choices %v", written, settings.Panels)
+		}
+		if !settings.PanelOn("panel-1") {
+			t.Errorf("Load(%s) turned a panel off", written)
 		}
 	}
 }

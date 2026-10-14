@@ -14,13 +14,6 @@ import (
 // window are peers, so nothing nests inside anything else and no section wears
 // a card of its own.
 
-// brandedMark is a provider's logo and the color it is drawn in: the mark is
-// the provider's own, so the color comes with it and not from the theme.
-type brandedMark struct {
-	svg   *ui.SVG
-	color ui.Color
-}
-
 // content is the region a window's sections live in: the page's own edge above
 // the first section and below the last, and the one line that divides the
 // sections drawn by the caller.
@@ -58,22 +51,24 @@ func betweenSections(c *ui.Context) {
 	})
 }
 
-// quickWindowFooter is the quick window's own foot: the version and the actions
-// that are always available, on the window's own face, so that nothing looks
-// bolted onto the bottom of the card.
+// quickWindowFooter is the quick window's own foot: the version and the
+// actions that are always available, above the window's own edge.
+//
+// The design gives it 14 beside and 6 above and below, the version in 10
+// points of faint ink, and the two actions as marks: two words at the bottom
+// of a card read as content, while two marks read as what they are.
 //
 // The version and the actions keep their own width: the actions are what the
 // footer is for, and a footer that squeezed them into an ellipsis would be a
 // footer nobody could use.
 func quickWindowFooter(c *ui.Context, version string, actions func(c *ui.Context)) {
-	ui.Row(c).FillWidth().Shrink(0).Height(float32(36)).
-		PaddingX(float32(12)).
+	ui.Row(c).FillWidth().Shrink(0).
+		Padding(float32(6), float32(14)).
 		AlignItems(ui.Center).
-		Font("monospace").
 		Children(func() {
 			ui.Text(c, version).
-				FontSize(sizeSmall).
-				TextColor(colorTextMuted).
+				FontSize(sizeQuickTiny).
+				TextColor(panelFaint).
 				SingleLine().
 				Shrink(0)
 			ui.Spacer(c)
@@ -83,28 +78,34 @@ func quickWindowFooter(c *ui.Context, version string, actions func(c *ui.Context
 		})
 }
 
-// chipButton is a text button with a face: a small label on a rounded
-// background, which darkens under the pointer. It is for a row that is about
-// a value rather than about actions — the clipboard line — where a control
-// with no face is easy to miss next to the text it sits beside.
-func chipButton(c *ui.Context, label string) ui.Element {
+// quickEdgeLine is the line the quick window draws above its foot: it runs the
+// window's whole width — it says where the window ends rather than where one
+// block does — and it is the stone that window is drawn on.
+func quickEdgeLine(c *ui.Context) ui.Element {
+	return ui.Row(c).FillWidth().Height(1).Shrink(0).Background(panelLine)
+}
+
+// wordButton is a word that acts: the way into the history from the clipboard
+// line. It wears no face of its own, because the line it sits on is about a
+// value rather than about actions, and it takes the brand green under the
+// pointer — the color the application means "this is the one to press" with.
+func wordButton(c *ui.Context, label string) ui.Element {
 	b := ui.ButtonBase(c).Label(label).
-		Radius(radiusField).
-		Padding(float32(2), float32(8))
+		Radius(float32(4)).
+		Padding(0, float32(4)).
+		Cursor(ui.CursorPointer)
 	switch {
 	case b.Pressed():
-		b = b.Background(colorActive)
+		b = b.Background(panelPress)
 	case b.Hovered() || b.Focused():
-		b = b.Background(colorHover)
-	default:
-		b = b.Background(colorTextFill)
+		b = b.Background(panelField)
 	}
 	b.Children(func() {
-		text := ui.Text(c, label).FontSize(sizeSmall).SingleLine()
+		text := ui.Text(c, label).FontSize(sizeQuickFine).SingleLine()
 		if b.Hovered() || b.Focused() {
-			text.TextColor(colorText)
+			text.TextColor(colorBrand)
 		} else {
-			text.TextColor(colorTextMuted)
+			text.TextColor(panelFaint)
 		}
 	})
 	return b

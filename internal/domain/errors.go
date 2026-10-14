@@ -36,6 +36,12 @@ var (
 	ErrInvalidMagnetURI           = errors.New("invalid magnet uri")
 	ErrUnsupportedClipboardFormat = errors.New("unsupported clipboard format")
 	ErrTranslateUnavailable       = errors.New("translation unavailable")
+
+	// Credentials that belong to another tool: the login Boku reads is the
+	// tool's, so the tool is what has to be logged in, and it may not be
+	// there at all.
+	ErrLoginCommandMissing = errors.New("login command missing")
+	ErrLoginUnsupported    = errors.New("login cannot be started here")
 )
 
 // MaxSnippetBytes is how much of a response an error carries: enough to see

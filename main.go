@@ -17,10 +17,13 @@ import (
 	"github.com/egoist/mygo"
 
 	"boku/internal/app"
+	adaptercodex "boku/internal/data/adapters/codex"
 	adapterdeepseek "boku/internal/data/adapters/deepseek"
 	clipboarddevice "boku/internal/data/clipboard"
+	"boku/internal/data/codexlogin"
 	"boku/internal/data/httpx"
 	"boku/internal/data/provider"
+	providercodex "boku/internal/data/providers/codex"
 	providerdeepseek "boku/internal/data/providers/deepseek"
 	translatedefault "boku/internal/data/providers/translate/custom"
 	translatedeepseek "boku/internal/data/providers/translate/deepseek"
@@ -29,6 +32,7 @@ import (
 	"boku/internal/data/settings"
 	"boku/internal/data/translator"
 	"boku/internal/domain"
+	panelcodex "boku/internal/domain/codex"
 	paneldeepseek "boku/internal/domain/deepseek"
 	"boku/internal/usecase"
 )
@@ -150,20 +154,47 @@ func services(userData, version string) (*usecase.Panels, *usecase.Secrets, *use
 	); err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
 	}
+	if err := registry.Register(
+		providercodex.New(client),
+		adaptercodex.NewAdapter(),
+	); err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("register the codex provider: %w", err)
+	}
 	if err := registry.Validate(); err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
 	}
 
+	// The Codex quota's credential is not one of Boku's: it is the ChatGPT
+	// login the Codex CLI already made, read where it lies and refreshed in
+	// memory (docs/security.md §9).
+	codexLogin := codexlogin.New(codexlogin.Options{Client: client})
+
 	// The panels the application shows. Adding one means adding a definition
 	// here; the use case checks it against the provider's own contract.
-	panels, err := usecase.NewPanels(registry, secretStore, []usecase.PanelDef{
+	// The panels the application shows. Adding one means adding a definition
+	// here; the use case checks it against the provider's own contract. A
+	// panel marked optional is one the user can turn off in the settings
+	// window, and its switch is stored in the same settings file as the rest
+	// of the application's choices.
+	panels, err := usecase.NewPanels(registry, secretStore, store, []usecase.PanelDef{
 		{
 			Panel:   paneldeepseek.Panel(),
 			Metrics: paneldeepseek.Metrics(),
 		},
-	})
+		{
+			Panel:   panelcodex.Panel(),
+			Metrics: panelcodex.Metrics(),
+			// The quota comes from the Codex CLI's own login on this
+			// machine, so reading it is the user's to allow.
+			Optional: true,
+		},
+	}, codexLogin)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
+	}
+	// The switches are read once, here: a frame must not read a file.
+	if err := panels.LoadChoices(context.Background()); err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("read the panel switches: %w", err)
 	}
 
 	// The clipboard reads and writes on the thread the platform owns, so

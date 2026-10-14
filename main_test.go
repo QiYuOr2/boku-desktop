@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"boku/internal/domain"
+	panelcodex "boku/internal/domain/codex"
 	paneldeepseek "boku/internal/domain/deepseek"
 	"boku/internal/usecase"
 )
@@ -13,7 +14,7 @@ import (
 // The assembly is the one place a provider and its adapter, or a panel and
 // its provider, can be paired wrongly. That is a startup error, and it can
 // be checked without a window.
-func TestServicesAssembleTheDeepSeekPanel(t *testing.T) {
+func TestServicesAssembleThePanels(t *testing.T) {
 	panels, secrets, clipboard, translate, err := services(t.TempDir(), "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
@@ -28,11 +29,14 @@ func TestServicesAssembleTheDeepSeekPanel(t *testing.T) {
 	}
 
 	listed := panels.List()
-	if len(listed) != 1 {
-		t.Fatalf("the application has %d panels, want 1", len(listed))
+	if len(listed) != 2 {
+		t.Fatalf("the application has %d panels, want the balance and the quota: %+v", len(listed), listed)
 	}
 	if listed[0].ProviderID != paneldeepseek.ProviderID {
-		t.Errorf("panel provider = %q, want %q", listed[0].ProviderID, paneldeepseek.ProviderID)
+		t.Errorf("the first panel's provider = %q, want %q", listed[0].ProviderID, paneldeepseek.ProviderID)
+	}
+	if listed[1].ProviderID != panelcodex.ProviderID {
+		t.Errorf("the second panel's provider = %q, want %q", listed[1].ProviderID, panelcodex.ProviderID)
 	}
 
 	descriptor, err := panels.Descriptor(paneldeepseek.ProviderID)
@@ -55,8 +59,30 @@ func TestServicesAssembleTheDeepSeekPanel(t *testing.T) {
 		t.Errorf("the panel opens %q, want the provider's page %q", view.UsageURL, paneldeepseek.UsageURL)
 	}
 
-	// With no credential stored, the panel says so instead of asking the
-	// network: nothing here reaches out.
+	// The quota panel is assembled the same way, and its credential is the
+	// one the Codex CLI keeps rather than a key of Boku's: what the
+	// descriptor asks for is the name the source answers to.
+	quota, err := panels.Descriptor(panelcodex.ProviderID)
+	if err != nil {
+		t.Fatalf("Descriptor failed for the quota: %v", err)
+	}
+	if quota.DisplayName == "" || quota.DocsURL == "" || quota.Endpoint == "" {
+		t.Errorf("the quota descriptor = %+v, want a display name, a docs link and an endpoint", quota)
+	}
+	if len(quota.CredentialKeys) != 1 || quota.CredentialKeys[0] != panelcodex.AccessTokenCredential {
+		t.Errorf("the quota asks for %v, want the CLI's token", quota.CredentialKeys)
+	}
+	if quota.UsageURL != panelcodex.UsageURL {
+		t.Errorf("the quota's usage link = %q, want %q", quota.UsageURL, panelcodex.UsageURL)
+	}
+	if view := panels.View(listed[1].ID); len(view.Metrics) != len(panelcodex.Metrics()) {
+		t.Errorf("the quota panel shows %d metrics, want %d", len(view.Metrics), len(panelcodex.Metrics()))
+	}
+
+	// With no credential stored, the balance panel says so instead of asking
+	// the network: nothing here reaches out. (The quota panel's credential is
+	// the Codex CLI's own login, which this machine may well have: reading it
+	// is not this test's business.)
 	view := panels.View(listed[0].ID)
 	if view.HasSnapshot {
 		t.Error("a panel with no credential claims a snapshot")

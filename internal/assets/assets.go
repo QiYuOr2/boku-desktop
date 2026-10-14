@@ -89,6 +89,25 @@ var (
 	translateSVG []byte
 )
 
+// The settings window's sidebar marks: what each section of the page is
+// reached by. They are the same 24-unit stroked drawings the rest of the
+// application uses, so they take the color of the line they sit on.
+var (
+	//go:embed key.svg
+	keySVG []byte
+	//go:embed book.svg
+	bookSVG []byte
+	//go:embed info.svg
+	infoSVG []byte
+)
+
+// gaugeSVG is the placeholder mark of a block whose provider has no drawing of
+// its own in the repository yet: a gauge, which says "a measure" without
+// pretending to be a brand.
+//
+//go:embed gauge.svg
+var gaugeSVG []byte
+
 // DeepSeek returns the DeepSeek mark as the SVG document it is. The caller
 // parses it once and keeps the result: parsing belongs to the framework,
 // and this package depends on the standard library alone.
@@ -109,6 +128,21 @@ func Translate() []byte { return translateSVG }
 
 // Clipboard returns the clipboard mark as the SVG document it is.
 func Clipboard() []byte { return clipboardSVG }
+
+// Key returns the mark that heads the key section and its sidebar entry:
+// the drawing of a key the design gives it.
+func Key() []byte { return keySVG }
+
+// Book returns the mark for reading: what the general section's sidebar
+// entry is drawn with.
+func Book() []byte { return bookSVG }
+
+// Info returns the mark of the application itself, drawn beside 关于.
+func Info() []byte { return infoSVG }
+
+// Gauge returns the placeholder mark of a block whose provider has no drawing
+// of its own: a measure rather than a brand.
+func Gauge() []byte { return gaugeSVG }
 
 // Refresh returns the refresh mark as the SVG document it is.
 func Refresh() []byte { return refreshSVG }

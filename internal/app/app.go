@@ -79,10 +79,14 @@ type State struct {
 	quit          func()
 
 	trayIcon []byte
-	// deepseekMark is the DeepSeek logo, parsed once at startup: a view is
-	// built several times per frame, and parsing a document is not a view's
-	// work.
+	// deepseekMark is the DeepSeek whale: the mark its block of the quick
+	// window carries. It is parsed once at startup, because a view is built
+	// several times per frame and parsing a document is not a view's work.
 	deepseekMark *ui.SVG
+	// gaugeMark is the placeholder a block carries when the application has
+	// no drawing of its provider yet. It is not a brand: it says "a measure"
+	// until the real mark arrives.
+	gaugeMark *ui.SVG
 	// clipboardMark labels the quick window's clipboard line, parsed for the
 	// same reason.
 	clipboardMark *ui.SVG
@@ -112,6 +116,14 @@ type State struct {
 	// design gives it a mark of its own, and it is the application's own
 	// drawing rather than a brand's.
 	translationMark *ui.SVG
+	// keyMark, bookMark and infoMark are the settings window's sidebar's
+	// other three marks. The clipboard entry and the general entry draw the
+	// marks those sections already carry; these are the ones the page did
+	// not have before the sidebar named every section at once. They are
+	// parsed once at startup like every other mark.
+	keyMark  *ui.SVG
+	bookMark *ui.SVG
+	infoMark *ui.SVG
 
 	tray           *mygo.Tray
 	panel          *mygo.Window // the open quick window, or nil when closed
@@ -133,6 +145,13 @@ type State struct {
 	// translateNotice is the last thing the translation switches said,
 	// shown under them.
 	translateNotice string
+	// panelStatus is the last thing a panel switch said, shown under the
+	// switches in the general section.
+	panelStatus string
+	// loginNotice is what the last attempt to start a credential's own login
+	// said. It belongs to the panel whose credential comes from a tool: the
+	// button is there, and failing to start the login has to be visible.
+	loginNotice string
 	// delayInput is the close-delay field as typed. It is a string rather
 	// than a number because a field is built several times per frame, and
 	// what the user has typed is what it has to keep.
@@ -140,6 +159,35 @@ type State struct {
 	// alwaysOnTop is the general switch: whether the quick window is
 	// created above other windows.
 	alwaysOnTop bool
+	// settingsScroll is how far the settings page is scrolled. The sidebar
+	// owns it: clicking an entry moves it to that section, and reading it is
+	// what tells the sidebar which chapter the user is looking at. It is a
+	// ScrollState rather than a number because MyGo's scroll container keeps
+	// its place there.
+	settingsScroll ui.ScrollState
+	// settingsSection is the section the sidebar says is open: the last one
+	// an entry was clicked for, or the one the page is showing, whichever
+	// the frame can tell.
+	settingsSection settingsSectionKind
+	// settingsReveal is the section the sidebar asked for and the page has
+	// not reached yet, or nil when the sidebar is not the one moving the
+	// page. The entry the user clicked is the open one for the whole time the
+	// page is travelling, so that it does not flicker back to a section the
+	// page is passing on the way.
+	settingsReveal *settingsSectionKind
+	// settingsAiming says that the sidebar has sent the page somewhere and the
+	// scroll it was given has not stopped yet, which is what keeps the entry
+	// the user clicked the open one for the whole travel.
+	settingsAiming bool
+	// settingsAimAt is the section that travel is aimed at, so that a second
+	// click while the page is moving is a new destination rather than another
+	// aim at the same one.
+	settingsAimAt settingsSectionKind
+	// settingsRoom is how tall the room the page scrolls in is, as the last
+	// frame laid it out. The window is taller than that: the footer is under
+	// the page, and a section's heading is read against the middle of the
+	// room rather than the middle of the window.
+	settingsRoom float32
 	// translation is the translation card's state.
 	translation translationState
 	// translationHeight is how tall the card is, which is what it measured
@@ -197,12 +245,15 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The providers' marks are parsed here for the same reason: the
-	// settings window shows one beside the name of the provider it is
-	// configuring.
-	mark, err := ui.ParseSVG(assets.DeepSeek())
+	// The blocks of the quick window carry their provider's mark, so the two
+	// the repository has are parsed here with the rest.
+	deepseekMark, err := ui.ParseSVG(assets.DeepSeek())
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the DeepSeek mark: %w", err)
+	}
+	gaugeMark, err := ui.ParseSVG(assets.Gauge())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the placeholder mark: %w", err)
 	}
 	clipMark, err := ui.ParseSVG(assets.Clipboard())
 	if err != nil {
@@ -255,6 +306,22 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the translation mark: %w", err)
 	}
+	// The sidebar reaches every section, including the two that had no mark
+	// of their own: the key section and the about box. The key is the
+	// design's own drawing for the page that configures services, and the
+	// book and the info mark are the ones it draws beside the other two.
+	keyMark, err := ui.ParseSVG(assets.Key())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the key mark: %w", err)
+	}
+	bookMark, err := ui.ParseSVG(assets.Book())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the book mark: %w", err)
+	}
+	infoMark, err := ui.ParseSVG(assets.Info())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the info mark: %w", err)
+	}
 	return &State{
 		app:             app,
 		panelService:    deps.Panels,
@@ -265,7 +332,8 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		version:         deps.Version,
 		quit:            deps.Quit,
 		trayIcon:        trayIcon,
-		deepseekMark:    mark,
+		deepseekMark:    deepseekMark,
+		gaugeMark:       gaugeMark,
 		clipboardMark:   clipMark,
 		refreshMark:     refreshMark,
 		historyText:     historyText,
@@ -278,6 +346,9 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		pinMark:         pinMark,
 		closeMark:       closeMark,
 		translationMark: translationMark,
+		keyMark:         keyMark,
+		bookMark:        bookMark,
+		infoMark:        infoMark,
 	}, nil
 }
 
@@ -453,17 +524,18 @@ func (s *State) View(c *ui.Context) {
 	box.Children(func() {
 		body := ui.Scroll(c).FillWidth().Grow(1)
 		body.Children(func() {
-			content(c, false, func() {
-				inset(c, func() { s.card(c) })
-			})
+			// Every block brings its own room with it, and the line between
+			// two of them is the window's: the design's blocks are the
+			// window, not rows inside one margin.
+			s.card(c)
 		})
-		// The clipboard line closes the content: it is about the desktop
+		// The clipboard row closes the content: it is about the desktop
 		// rather than about a panel, and it belongs at the far end of the
 		// window from the numbers. The line under it is the window's own —
-		// it runs from edge to edge, as the footer's line does — and the
-		// footer itself keeps its own room inside that.
+		// it runs from edge to edge — and the footer keeps its own room
+		// inside that.
 		s.clipboardBottom(c)
-		hairline(c)
+		quickEdgeLine(c)
 		quickWindowFooter(c, s.versionLine(), s.flyoutActions)
 	})
 }
@@ -506,19 +578,24 @@ func (s *State) versionLine() string {
 	return appName + " " + version
 }
 
-// refreshAsync fetches the first panel away from the main thread.
+// refreshAsync fetches the listed panels away from the main thread.
 //
-// force asks for a refresh whatever the cache says; otherwise the panel is
-// only asked when its snapshot is missing, stale or from a failed attempt.
-// The answer is not carried back here: the use case keeps it, and the
-// repaint below makes the view read it. That is why a refresh that finishes
-// while the window is closed loses nothing.
+// force asks for a refresh whatever the cache says; otherwise a panel is only
+// asked when its snapshot is missing, stale or from a failed attempt. Each
+// panel runs in its own goroutine, so one slow provider cannot hold up
+// another's numbers. The answers are not carried back here: the use case
+// keeps them, and the repaint below makes the view read them. That is why a
+// refresh that finishes while the window is closed loses nothing.
 func (s *State) refreshAsync(force bool) {
-	listed := s.panelService.List()
-	if len(listed) == 0 {
-		return
+	for _, panel := range s.panelService.List() {
+		s.refreshPanelAsync(panel.ID, force)
 	}
-	panelID := listed[0].ID
+}
+
+// refreshPanelAsync fetches one panel away from the main thread: the panel
+// whose own refresh action was pressed, and the panel whose block is showing
+// a failure.
+func (s *State) refreshPanelAsync(panelID string, force bool) {
 	panels := s.panelService
 	window := s.panel
 	if !force && !panels.NeedsRefresh(panelID) {

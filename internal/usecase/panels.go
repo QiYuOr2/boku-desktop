@@ -22,6 +22,11 @@ type PanelDef struct {
 	// full. It is left empty by an assembly that names none, and then the
 	// provider's own descriptor decides.
 	UsageURL string
+	// Optional marks a panel the user can turn off in the settings window:
+	// one whose data is not Boku's own to fetch, or one that reads something
+	// of the user's. A panel that is not optional has no switch, and the
+	// settings window cannot offer one.
+	Optional bool
 }
 
 // Panels reads provider-backed panels: it keeps the last good snapshot of
@@ -33,7 +38,16 @@ type PanelDef struct {
 type Panels struct {
 	registry domain.ProviderRegistry
 	secrets  domain.SecretStore
-	now      func() time.Time
+	// tools is where the choices about the optional panels live, or nil in
+	// an assembly that has no settings file: the switches then work for this
+	// run only.
+	tools domain.ToolStore
+	// sources are the providers whose credentials come from somewhere other
+	// than the store, by provider id. A provider named here is asked of its
+	// source and never of the store. The map is filled once, in NewPanels,
+	// and only read afterwards.
+	sources map[string]domain.CredentialSource
+	now     func() time.Time
 
 	mu       sync.Mutex
 	defs     []PanelDef
@@ -41,6 +55,11 @@ type Panels struct {
 	cache    map[string]cached
 	lastErr  map[string]error
 	inflight map[string]*inflight
+	// choices are the panels the user turned off, by id, as they were read
+	// at assembly and as SetPanelOn changes them. A panel with no entry is
+	// on. It is read on every frame, which is why it is not read from the
+	// file there.
+	choices map[string]bool
 }
 
 type cached struct {
@@ -92,7 +111,15 @@ func (v View) NeedsCredentials() bool {
 // bad definition — an unknown provider, a metric the panel does not list, a
 // refresh interval the provider does not tolerate — because those are
 // assembly mistakes, not something to discover later in a card.
-func NewPanels(registry domain.ProviderRegistry, secrets domain.SecretStore, defs []PanelDef) (*Panels, error) {
+//
+// A source is registered per provider for a credential that is not Boku's to
+// keep: the Codex panel reads the login the Codex CLI already made
+// (docs/security.md §9). A source is optional, and the store is asked for
+// every provider that has none.
+//
+// tools is where the choices about the optional panels are read and written,
+// or nil for an assembly with no settings file.
+func NewPanels(registry domain.ProviderRegistry, secrets domain.SecretStore, tools domain.ToolStore, defs []PanelDef, sources ...domain.CredentialSource) (*Panels, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("%w: no provider registry", domain.ErrInvalidArgument)
 	}
@@ -102,11 +129,23 @@ func NewPanels(registry domain.ProviderRegistry, secrets domain.SecretStore, def
 	panels := &Panels{
 		registry: registry,
 		secrets:  secrets,
+		tools:    tools,
+		sources:  make(map[string]domain.CredentialSource, len(sources)),
 		now:      func() time.Time { return time.Now().UTC() },
 		byID:     make(map[string]PanelDef, len(defs)),
 		cache:    make(map[string]cached),
 		lastErr:  make(map[string]error),
 		inflight: make(map[string]*inflight),
+		choices:  make(map[string]bool),
+	}
+	for _, source := range sources {
+		if source == nil || strings.TrimSpace(source.ProviderID()) == "" {
+			return nil, fmt.Errorf("%w: a credential source names no provider", domain.ErrInvalidArgument)
+		}
+		if _, exists := panels.sources[source.ProviderID()]; exists {
+			return nil, fmt.Errorf("%w: two credential sources for provider %s", domain.ErrAlreadyExists, source.ProviderID())
+		}
+		panels.sources[source.ProviderID()] = source
 	}
 	for _, def := range defs {
 		if err := panels.add(def); err != nil {
@@ -165,13 +204,16 @@ func (p *Panels) add(def PanelDef) error {
 	return nil
 }
 
-// List returns the enabled panels, in the order they are shown.
+// List returns the enabled panels, in the order they are shown. A panel the
+// user turned off is not listed at all: it is not drawn, and nothing fetches
+// it — which for the panels whose credential is somebody else's login is also
+// the promise that the login file is not read.
 func (p *Panels) List() []domain.Panel {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	panels := make([]domain.Panel, 0, len(p.defs))
 	for _, def := range p.defs {
-		if def.Panel.Enabled {
+		if p.onLocked(def) {
 			panels = append(panels, def.Panel)
 		}
 	}
@@ -182,6 +224,125 @@ func (p *Panels) List() []domain.Panel {
 		return panels[i].ID < panels[j].ID
 	})
 	return panels
+}
+
+// onLocked reports whether a panel is shown: its definition must say so, and
+// the user must not have turned it off.
+func (p *Panels) onLocked(def PanelDef) bool {
+	if !def.Panel.Enabled {
+		return false
+	}
+	on, chosen := p.choices[def.Panel.ID]
+	return !chosen || on
+}
+
+// OptionalPanels returns the panels the settings window offers a switch for:
+// the ones the assembly marked optional, whether or not they are on, in the
+// order they are shown.
+func (p *Panels) OptionalPanels() []OptionalPanel {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	panels := make([]OptionalPanel, 0, len(p.defs))
+	for _, def := range p.defs {
+		if !def.Optional {
+			continue
+		}
+		panels = append(panels, OptionalPanel{
+			Panel: def.Panel,
+			On:    p.onLocked(def),
+		})
+	}
+	sort.SliceStable(panels, func(i, j int) bool {
+		if panels[i].Panel.SortOrder != panels[j].Panel.SortOrder {
+			return panels[i].Panel.SortOrder < panels[j].Panel.SortOrder
+		}
+		return panels[i].Panel.ID < panels[j].Panel.ID
+	})
+	return panels
+}
+
+// OptionalPanel is one panel the user can turn off, with the answer.
+type OptionalPanel struct {
+	Panel domain.Panel
+	On    bool
+}
+
+// LoadChoices reads the panels the user turned off. It is called once, by the
+// assembly: a frame must not read a file, and the choices change only through
+// SetPanelOn, which remembers them here as well as in the file.
+//
+// A store that cannot be read is not a reason to fail the start: the panels
+// are all on, which is what a user who never turned one off has.
+func (p *Panels) LoadChoices(ctx context.Context) error {
+	if p.tools == nil {
+		return nil
+	}
+	settings, err := p.tools.Load(ctx)
+	if err != nil {
+		return err
+	}
+	choices := make(map[string]bool, len(settings.Panels))
+	for id, on := range settings.Panels {
+		choices[id] = on
+	}
+	p.mu.Lock()
+	p.choices = choices
+	p.mu.Unlock()
+	return nil
+}
+
+// SetPanelOn turns an optional panel on or off and stores the choice.
+//
+// The file is read, changed and written rather than written from a copy of
+// the settings this service holds: every part of the application writes the
+// same file, and a copy would write back the other switches as they were when
+// this service started. A store that cannot be written is reported, and the
+// switch has already taken effect for this run.
+func (p *Panels) SetPanelOn(ctx context.Context, panelID string, on bool) error {
+	p.mu.Lock()
+	def, known := p.byID[panelID]
+	p.mu.Unlock()
+	if !known {
+		return fmt.Errorf("%w: panel %s", domain.ErrNotFound, panelID)
+	}
+	if !def.Optional {
+		return fmt.Errorf("%w: panel %s cannot be turned off", domain.ErrInvalidArgument, panelID)
+	}
+
+	var failed error
+	if p.tools != nil {
+		settings, err := p.tools.Load(ctx)
+		if err != nil {
+			failed = err
+		} else {
+			if settings.Panels == nil {
+				settings.Panels = make(map[string]bool)
+			}
+			settings.Panels[panelID] = on
+			if err := p.tools.Save(ctx, settings); err != nil {
+				failed = err
+			}
+		}
+	}
+
+	p.mu.Lock()
+	if p.choices == nil {
+		p.choices = make(map[string]bool)
+	}
+	p.choices[panelID] = on
+	p.mu.Unlock()
+	return failed
+}
+
+// PanelOn reports whether one panel is on, by id.
+func (p *Panels) PanelOn(panelID string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	def, known := p.byID[panelID]
+	if !known {
+		return false
+	}
+	return p.onLocked(def)
 }
 
 // Metrics returns one panel's metrics, in the order they are shown.
@@ -231,12 +392,12 @@ func (p *Panels) View(panelID string) View {
 
 // NeedsRefresh reports whether the panel's snapshot is missing, stale or
 // from a failed attempt. A fresh snapshot means the provider is not asked
-// again.
+// again, and a panel the user turned off is never asked.
 func (p *Panels) NeedsRefresh(panelID string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	def, ok := p.byID[panelID]
-	if !ok {
+	if !ok || !p.onLocked(def) {
 		return false
 	}
 	if _, failed := p.lastErr[panelID]; failed {
@@ -255,6 +416,10 @@ func (p *Panels) NeedsRefresh(panelID string) bool {
 // Concurrent calls for the same panel become one request; a failure keeps
 // the last good snapshot and is remembered until an attempt succeeds. The
 // snapshot returned with an error is that previous one, or nothing.
+//
+// A panel the user turned off is not asked at all, even if something calls
+// here: off means no request, and for the panels whose credential is somebody
+// else's login it means the login file is not read.
 func (p *Panels) Refresh(ctx context.Context, panelID string) (domain.Snapshot, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -262,8 +427,9 @@ func (p *Panels) Refresh(ctx context.Context, panelID string) (domain.Snapshot, 
 	p.mu.Lock()
 	def, known := p.byID[panelID]
 	running := p.inflight[panelID]
+	on := known && p.onLocked(def)
 	p.mu.Unlock()
-	if !known {
+	if !known || !on {
 		return domain.Snapshot{}, fmt.Errorf("%w: panel %s", domain.ErrNotFound, panelID)
 	}
 
@@ -320,6 +486,7 @@ func (p *Panels) Refresh(ctx context.Context, panelID string) (domain.Snapshot, 
 func (p *Panels) RefreshIfNeeded(ctx context.Context, panelID string) (domain.Snapshot, bool, error) {
 	p.mu.Lock()
 	def, known := p.byID[panelID]
+	on := known && p.onLocked(def)
 	running := p.inflight[panelID] != nil
 	entry, cached := p.cache[panelID]
 	_, failed := p.lastErr[panelID]
@@ -329,7 +496,7 @@ func (p *Panels) RefreshIfNeeded(ctx context.Context, panelID string) (domain.Sn
 	}
 	p.mu.Unlock()
 
-	if !known {
+	if !known || !on {
 		return domain.Snapshot{}, false, fmt.Errorf("%w: panel %s", domain.ErrNotFound, panelID)
 	}
 	if fresh && !running {
@@ -421,10 +588,36 @@ func (p *Panels) fetch(ctx context.Context, def PanelDef) (domain.Snapshot, erro
 	return snapshot, nil
 }
 
+// StartCredentialLogin starts the login a provider's credential comes from,
+// for a provider whose credential is not Boku's to keep: the panel has
+// nothing to read until the user has logged the tool in, and this is what
+// saves them finding a terminal.
+//
+// A provider with no source, or whose source has no login of its own, says
+// so: the interface only offers the action when the source has one.
+func (p *Panels) StartCredentialLogin(providerID string) error {
+	source, ok := p.sources[providerID]
+	if !ok {
+		return fmt.Errorf("%w: provider %s has no credential source", domain.ErrProviderNotFound, providerID)
+	}
+	starter, ok := source.(domain.LoginStarter)
+	if !ok {
+		return fmt.Errorf("%w: the credential source of %s has no login to start", domain.ErrInvalidArgument, providerID)
+	}
+	return starter.StartLogin()
+}
+
 // credentials collects what the provider asked for. A missing one is
 // ErrCredentialMissing before the provider is called at all: no request is
 // worth making with a key that is not there.
+//
+// A provider with a source of its own is asked of that source: its
+// credential is not in the store — and must not be copied into it — so the
+// store is not consulted for it at all.
 func (p *Panels) credentials(ctx context.Context, descriptor domain.ProviderDescriptor) (domain.Credentials, error) {
+	if source, ok := p.sources[descriptor.ID]; ok {
+		return source.Credentials(ctx)
+	}
 	creds := domain.Credentials{
 		ProviderID: descriptor.ID,
 		Secrets:    make(map[string]string, len(descriptor.CredentialKeys)),
@@ -469,8 +662,13 @@ func checkSnapshot(def PanelDef, snapshot domain.Snapshot) error {
 			return fmt.Errorf("%w: observation of %s does not match its value type %s",
 				domain.ErrInvalidMetricValue, observation.MetricKey, metric.ValueType)
 		}
-		if _, err := snapshot.MetricCurrency(metric); err != nil {
-			return err
+		// Only an amount has a currency to resolve: a percentage, a duration
+		// and a text are not amounts, and asking for theirs would refuse
+		// every one of them.
+		if metric.Unit == domain.UnitCurrency {
+			if _, err := snapshot.MetricCurrency(metric); err != nil {
+				return err
+			}
 		}
 		seen[observation.MetricKey] = true
 	}

@@ -29,6 +29,11 @@ import (
 // translation card.
 const renderDirEnv = "BOKU_RENDER_DIR"
 
+// settingsWholePage is a window tall enough to hold the whole settings page,
+// so that one frame shows every section: the page itself scrolls in a window
+// the size of a screen, and a section below the fold is not in a render.
+const settingsWholePage = 1800
+
 // TestRenderScreensForInspection writes the two screens as PNGs, so a
 // layout change can be looked at. It is skipped unless BOKU_RENDER_DIR is
 // set: nothing is written during an ordinary test run.
@@ -98,6 +103,10 @@ func TestRenderScreensForInspection(t *testing.T) {
 	// The settings window with a credential already stored.
 	write("settings-stored.png", state.settingsView, settingsWidth, settingsHeight)
 
+	// The quick window with a second panel under the first: the balance and
+	// the quota bar, which is the screen the bar was designed for.
+	write("flyout-codex.png", bothBlocksState(t).View, panelWidth, panelHeight)
+
 	// The quick window with its clipboard line, and the history window: the
 	// two faces the clipboard tool adds.
 	device := &testDevice{}
@@ -121,6 +130,10 @@ func TestRenderScreensForInspection(t *testing.T) {
 	withClipboard.clipboard.Read(context.Background())
 	write("history.png", withClipboard.historyView, historyWidth, historyHeight)
 	write("settings-clipboard.png", withClipboard.settingsView, settingsWidth, settingsHeight)
+	// The whole settings page in one window, so that the general section —
+	// where the switches are, including the one an optional panel adds — is
+	// in the frame rather than below it.
+	write("settings-general.png", bothBlocksState(t).settingsView, settingsWidth, settingsWholePage)
 
 	// A history longer than its window: the list scrolls and the footer
 	// stays where it is.

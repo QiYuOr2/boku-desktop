@@ -23,6 +23,7 @@ func TestNewRequiresItsDependencies(t *testing.T) {
 	panels, err := usecase.NewPanels(
 		testRegistry{provider: newTestProvider(), adapter: testAdapter{provider: newTestProvider()}},
 		newTestStore(),
+		nil,
 		[]usecase.PanelDef{{Panel: deepseek.Panel(), Metrics: deepseek.Metrics()}},
 	)
 	if err != nil {

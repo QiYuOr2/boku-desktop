@@ -212,11 +212,188 @@ func newTestPanels(t *testing.T, provider *fakeProvider, store domain.SecretStor
 	if len(defs) == 0 {
 		defs = []PanelDef{testDef()}
 	}
-	panels, err := NewPanels(reg, store, defs)
+	panels, err := NewPanels(reg, store, nil, defs)
 	if err != nil {
 		t.Fatalf("NewPanels failed: %v", err)
 	}
 	return panels
+}
+
+// An optional panel can be turned off. It leaves the list — so nothing draws
+// it and nothing fetches it — and the choice is written where the other
+// switches live, in the file every part of the application writes.
+func TestAnOptionalPanelCanBeTurnedOff(t *testing.T) {
+	provider := newFakeProvider()
+	reg := newRegistry()
+	reg.add(provider, fakeAdapter{id: "fake"})
+	tools := &fakeTools{}
+	optional := testDef()
+	optional.Optional = true
+	always := testDef()
+	always.Panel.ID = "panel-2"
+	always.Panel.Title = "一直显示"
+	always.Panel.SortOrder = 20
+
+	// A credential, so that a refresh of a panel that is on has something to
+	// fetch with.
+	store := newMemoryStore()
+	if err := store.Put(context.Background(), domain.CredentialKey("fake", "apiKey"), []byte("sk-test"), domain.SecretMeta{ProviderID: "fake"}); err != nil {
+		t.Fatalf("Put failed: %v", err)
+	}
+
+	panels, err := NewPanels(reg, store, tools, []PanelDef{always, optional})
+	if err != nil {
+		t.Fatalf("NewPanels failed: %v", err)
+	}
+	if err := panels.LoadChoices(context.Background()); err != nil {
+		t.Fatalf("LoadChoices failed: %v", err)
+	}
+
+	// Nothing has been chosen: both are listed.
+	if listed := panels.List(); len(listed) != 2 {
+		t.Fatalf("List returned %d panels, want both before any choice: %+v", len(listed), listed)
+	}
+	if choices := panels.OptionalPanels(); len(choices) != 1 || !choices[0].On {
+		t.Errorf("the switches are %+v, want the optional panel on", choices)
+	}
+
+	if err := panels.SetPanelOn(context.Background(), optional.Panel.ID, false); err != nil {
+		t.Fatalf("SetPanelOn failed: %v", err)
+	}
+	listed := panels.List()
+	if len(listed) != 1 || listed[0].ID != always.Panel.ID {
+		t.Errorf("List returned %+v, want only the panel nobody turned off", listed)
+	}
+	if panels.PanelOn(optional.Panel.ID) {
+		t.Error("the panel reports itself on after being turned off")
+	}
+	if choices := panels.OptionalPanels(); len(choices) != 1 || choices[0].On {
+		t.Errorf("the switches are %+v, want the optional panel off", choices)
+	}
+	// The choice is in the file, not only in memory.
+	if on, chosen := tools.settings.Panels[optional.Panel.ID]; !chosen || on {
+		t.Errorf("the stored choices are %v, want the panel off", tools.settings.Panels)
+	}
+	if tools.saves != 1 {
+		t.Errorf("the settings were saved %d times, want once", tools.saves)
+	}
+
+	// A panel that is off is not asked at all, even by a caller that insists.
+	if _, err := panels.Refresh(context.Background(), optional.Panel.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("Refresh of a panel that is off = %v, want ErrNotFound", err)
+	}
+	if panels.NeedsRefresh(optional.Panel.ID) {
+		t.Error("a panel that is off says it needs a refresh")
+	}
+	if provider.count() != 0 {
+		t.Errorf("the provider was called %d times, want none while the panel is off", provider.count())
+	}
+
+	// And back on: it is listed again, and it is asked.
+	if err := panels.SetPanelOn(context.Background(), optional.Panel.ID, true); err != nil {
+		t.Fatalf("SetPanelOn failed: %v", err)
+	}
+	if listed := panels.List(); len(listed) != 2 {
+		t.Errorf("List returned %+v, want both panels again", listed)
+	}
+	if _, err := panels.Refresh(context.Background(), optional.Panel.ID); err != nil {
+		t.Fatalf("Refresh failed after the panel was turned back on: %v", err)
+	}
+	if provider.count() != 1 {
+		t.Errorf("the provider was called %d times, want once", provider.count())
+	}
+}
+
+// A panel that is not optional has no switch, and one that is not defined has
+// nothing to switch: both are refused rather than stored.
+func TestOnlyOptionalPanelsCanBeTurnedOff(t *testing.T) {
+	provider := newFakeProvider()
+	reg := newRegistry()
+	reg.add(provider, fakeAdapter{id: "fake"})
+	panels, err := NewPanels(reg, newMemoryStore(), &fakeTools{}, []PanelDef{testDef()})
+	if err != nil {
+		t.Fatalf("NewPanels failed: %v", err)
+	}
+	if err := panels.SetPanelOn(context.Background(), "panel-1", false); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("SetPanelOn of a panel that is not optional = %v, want ErrInvalidArgument", err)
+	}
+	if err := panels.SetPanelOn(context.Background(), "ghost", false); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("SetPanelOn of a panel that does not exist = %v, want ErrNotFound", err)
+	}
+	if choices := panels.OptionalPanels(); len(choices) != 0 {
+		t.Errorf("the switches are %+v, want none", choices)
+	}
+}
+
+// The choices are read from the file at assembly: a panel the user turned off
+// is off from the first frame, without anything having to ask.
+func TestTheStoredChoicesAreReadAtAssembly(t *testing.T) {
+	provider := newFakeProvider()
+	reg := newRegistry()
+	reg.add(provider, fakeAdapter{id: "fake"})
+	def := testDef()
+	def.Optional = true
+	tools := &fakeTools{settings: domain.ToolSettings{Panels: map[string]bool{def.Panel.ID: false}}}
+
+	panels, err := NewPanels(reg, newMemoryStore(), tools, []PanelDef{def})
+	if err != nil {
+		t.Fatalf("NewPanels failed: %v", err)
+	}
+	// Before the choices are read, nothing is off: a service that has not
+	// read the file lists what it was built with.
+	if listed := panels.List(); len(listed) != 1 {
+		t.Fatalf("List returned %+v, want the panel before the choices are read", listed)
+	}
+	if err := panels.LoadChoices(context.Background()); err != nil {
+		t.Fatalf("LoadChoices failed: %v", err)
+	}
+	if listed := panels.List(); len(listed) != 0 {
+		t.Errorf("List returned %+v, want nothing: the file says the panel is off", listed)
+	}
+}
+
+// A store that cannot be written still flips the switch for this run: the
+// user's click is not refused because a file is read-only.
+func TestASwitchThatCannotBeStoredStillWorks(t *testing.T) {
+	provider := newFakeProvider()
+	reg := newRegistry()
+	reg.add(provider, fakeAdapter{id: "fake"})
+	def := testDef()
+	def.Optional = true
+	tools := &fakeTools{err: errors.New("the settings file is read-only")}
+
+	panels, err := NewPanels(reg, newMemoryStore(), tools, []PanelDef{def})
+	if err != nil {
+		t.Fatalf("NewPanels failed: %v", err)
+	}
+	if err := panels.SetPanelOn(context.Background(), def.Panel.ID, false); err == nil {
+		t.Error("SetPanelOn reported no error for a store that cannot be written")
+	}
+	if listed := panels.List(); len(listed) != 0 {
+		t.Errorf("List returned %+v, want the panel off for this run anyway", listed)
+	}
+}
+
+// With no settings store at all the switches still work, for this run.
+func TestSwitchesWithoutAStore(t *testing.T) {
+	provider := newFakeProvider()
+	reg := newRegistry()
+	reg.add(provider, fakeAdapter{id: "fake"})
+	def := testDef()
+	def.Optional = true
+	panels, err := NewPanels(reg, newMemoryStore(), nil, []PanelDef{def})
+	if err != nil {
+		t.Fatalf("NewPanels failed: %v", err)
+	}
+	if err := panels.LoadChoices(context.Background()); err != nil {
+		t.Fatalf("LoadChoices without a store failed: %v", err)
+	}
+	if err := panels.SetPanelOn(context.Background(), def.Panel.ID, false); err != nil {
+		t.Fatalf("SetPanelOn without a store failed: %v", err)
+	}
+	if listed := panels.List(); len(listed) != 0 {
+		t.Errorf("List returned %+v, want the panel off", listed)
+	}
 }
 
 func TestNewPanelsValidatesDefinitions(t *testing.T) {
@@ -292,16 +469,16 @@ func TestNewPanelsValidatesDefinitions(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := NewPanels(reg, store, c.defs); !errors.Is(err, c.want) {
+			if _, err := NewPanels(reg, store, nil, c.defs); !errors.Is(err, c.want) {
 				t.Fatalf("error = %v, want %v", err, c.want)
 			}
 		})
 	}
 
-	if _, err := NewPanels(nil, store, nil); !errors.Is(err, domain.ErrInvalidArgument) {
+	if _, err := NewPanels(nil, store, nil, nil); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("a nil registry: error = %v", err)
 	}
-	if _, err := NewPanels(reg, nil, nil); !errors.Is(err, domain.ErrInvalidArgument) {
+	if _, err := NewPanels(reg, nil, nil, nil); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("a nil store: error = %v", err)
 	}
 }
@@ -650,7 +827,7 @@ func TestAnAdapterThatBreaksTheContractIsCaught(t *testing.T) {
 			if c.def != nil {
 				def = *c.def
 			}
-			panels, err := NewPanels(reg, store, []PanelDef{def})
+			panels, err := NewPanels(reg, store, nil, []PanelDef{def})
 			if err != nil {
 				t.Fatalf("NewPanels failed: %v", err)
 			}

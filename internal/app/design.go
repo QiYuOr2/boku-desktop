@@ -41,6 +41,11 @@ var (
 	colorHover  = ui.Hex("#F5F5F4")
 	colorActive = ui.Hex("#E7E5E4")
 	colorRowAlt = ui.Hex("#F8FAFC")
+	// colorSidebar is the face of the settings window's sidebar, the one
+	// region of a window that is not the window's own white: the design gives
+	// the navigation a face of its own, so that the page beside it reads as
+	// the content and the column as the way around it.
+	colorSidebar = ui.Hex("#FAFAF9")
 
 	colorBorder = ui.Hex("#E2E8F0")
 	// colorHairline is the line between two entries of a list: fainter than
@@ -86,13 +91,6 @@ var (
 	colorEmeraldTile, colorEmeraldInk = ui.Hex("#ECFDF5"), ui.Hex("#047857")
 	colorStoneTile, colorStoneInk     = ui.Hex("#F5F5F4"), ui.Hex("#57534E")
 
-	// The tints behind a quiet button and a badge.
-	colorTextFill = ui.RGBA(15, 23, 42, 0.06)
-	// brandTint is the ground a provider's mark sits on inside a card: a wash
-	// of the brand's own color, so that the logo is on a tile of its own
-	// rather than loose on the page.
-	brandTint = ui.Hex("#EEF2FF")
-
 	// colorReadingInk is how a reading above a word is written in the
 	// translation window: the design's stone-500.
 	colorReadingInk = ui.Hex("#78716C")
@@ -128,6 +126,22 @@ var (
 	// stone-700 and its reading — or the loanword's own word — above it.
 	colorChip    = ui.Hex("#FAFAF9") // stone-50
 	colorChipInk = ui.Hex("#44403C") // stone-700
+
+	// --- The quick window's own scale ------------------------------------
+	//
+	// The flyout hangs over the desktop rather than sitting on a page, and
+	// the design draws it in stone: its chrome is not the slate the settings
+	// window uses. Each name below is the design's own class, and the piece
+	// that reads it is the one the design gives that value to.
+	panelInk    = ui.Hex("#292524") // stone-800, a block's name
+	panelNumber = ui.Hex("#1C1917") // stone-900, the number a block is about
+	panelFaint  = ui.Hex("#A8A29E") // stone-400, times, labels, quiet actions
+	panelBody   = ui.Hex("#78716C") // stone-500, the clipboard line
+	panelLine   = ui.Hex("#F5F5F4") // stone-100, dividers and the footer's edge
+	panelField  = ui.Hex("#FAFAF9") // stone-50, the clipboard row's face
+	panelBorder = ui.Hex("#E7E5E4") // stone-200, its hairline
+	panelHover  = ui.Hex("#F5F5F4") // stone-100, what a quiet action takes
+	panelPress  = ui.Hex("#E7E5E4") // stone-200, and what it takes pressed
 )
 
 // The application's metrics, in points, taken from the design: every window
@@ -151,6 +165,31 @@ const (
 	heightControl = 36.0
 	// sizeTile is the mark at the head of a section: 32 points, rounded.
 	sizeTile = 32.0
+
+	// The quick window's block, as the design draws it: 16 beside the block,
+	// 14 above it and 12 below, with a 20-point mark at its head.
+	quickEdge     = 16.0
+	quickTop      = 14.0
+	quickBottom   = 12.0
+	quickTileSize = 20.0
+	quickMarkSize = 12.0
+	// And its own type: a 13-point name, 11-point times and labels, a
+	// 22-point number, and the 10-point line over a bar.
+	sizeQuickName   = 13.0
+	sizeQuickFine   = 11.0
+	sizeQuickNumber = 22.0
+	sizeQuickTiny   = 10.0
+
+	// The API key section is the page's dense one: the design packs a service
+	// into two lines, so its head and the row inside each card are a size
+	// down from the rest of the page. Every number below is that design's.
+	sizeTileCompact     = 28.0 // its mark: w-7
+	sizeTitleCompact    = 14.0 // the head's name
+	sizeSubtitleCompact = 11.0 // the head's one line of explanation
+	sizeCardName        = 13.0 // the name at the head of a card
+	sizeFine            = 11.0 // a card's actions and the warning above them
+	heightCardControl   = 32.0 // h-8: a card's field and the actions beside it
+	cardActionPad       = 10.0 // px-2.5: the room beside an action's label
 
 	// Typography: a section's name, its one line of explanation, and the
 	// body text under them. They are the design's own sizes rather than
@@ -271,26 +310,72 @@ func versionLine(c *ui.Context, version string) {
 	ui.Text(c, version).FontSize(sizeSmall).TextColor(colorTextMuted).SingleLine()
 }
 
+// headSize is how large a section introduces itself: the tile its mark sits
+// in, the room that mark keeps inside the tile, the room between the tile and
+// the name beside it, and the two sizes of type.
+type headSize struct {
+	tile     float32
+	padX     float32
+	padY     float32
+	gap      float32
+	title    float32
+	subtitle float32
+}
+
+// The two heads the settings page draws: the design's own, which every
+// section but one wears, and the smaller one the API key section wears
+// because the design packed each of its cards into two lines.
+//
+// The small head's mark is 28 where the design's is 32, and the room after it
+// is 14 where that one's is 10: a smaller mark must not move the name, since
+// the names of the sections are one column down the page (the property
+// TestDesignSectionsArePeers keeps).
+var (
+	headRegular = headSize{tile: sizeTile, padX: 6, padY: 4, gap: 10, title: sizeTitle, subtitle: sizeSubtitle}
+	headSmall   = headSize{tile: sizeTileCompact, padX: 5, padY: 3.5, gap: 14, title: sizeTitleCompact, subtitle: sizeSubtitleCompact}
+)
+
 // sectionHead is how a section of the settings window introduces itself: the
 // mark of what it is about, its name, and one line saying what the section is
-// for.
+// for. It binds head to the box it drew, which is what tells the sidebar
+// where the section's heading is.
 //
-// A provider's mark is drawn in the provider's own color and is not dressed
-// up: it is the logo the user knows, and it keeps its own shape, color and
-// proportions wherever it appears. A section with nothing to show — the
-// clipboard, a group still to come — carries the application's own mark in
-// the muted stone instead.
-func sectionHead(c *ui.Context, mark *ui.SVG, ink ui.Color, title, subtitle string) {
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(10)).Children(func() {
+// A section's mark is drawn in the color its own thing is drawn in and is not
+// dressed up: it keeps its own shape and proportions wherever it appears. A
+// section with nothing of its own — the clipboard, a group still to come —
+// carries the application's mark in the muted stone instead.
+func sectionHead(c *ui.Context, head *ui.Handle, mark *ui.SVG, ink ui.Color, title, subtitle string) {
+	sectionHeadSized(c, head, mark, ink, title, subtitle, headRegular)
+}
+
+// sectionHeadSmall is the same head a size down: a 28-point tile and the
+// design's own 14/11 pair. The API key section wears it because its cards are
+// dense, and a head a size above them would be the largest thing on the page.
+func sectionHeadSmall(c *ui.Context, head *ui.Handle, mark *ui.SVG, ink ui.Color, title, subtitle string) {
+	sectionHeadSized(c, head, mark, ink, title, subtitle, headSmall)
+}
+
+// sectionHeadSized draws the head itself, at one of the two sizes.
+func sectionHeadSized(c *ui.Context, head *ui.Handle, mark *ui.SVG, ink ui.Color, title, subtitle string, size headSize) {
+	row := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(size.gap)
+	if head != nil {
+		row.Bind(head)
+	}
+	row.Children(func() {
 		if mark != nil {
 			ui.Box(c).Children(func() {
-				ui.Icon(c, mark).Height(float32(32)).Width(float32(32)).Padding(float32(4), float32(6)).Shrink(0).TextColor(ink)
+				ui.Icon(c, mark).
+					Height(size.tile).
+					Width(size.tile).
+					Padding(size.padY, size.padX).
+					Shrink(0).
+					TextColor(ink)
 			}).Background(colorMuted).Radius(radiusTile)
 		}
 		ui.Column(c).Fill().Children(func() {
-			ui.Text(c, title).FontSize(sizeTitle).FontWeight(600).TextColor(colorTextSoft).SingleLine()
+			ui.Text(c, title).FontSize(size.title).FontWeight(600).TextColor(colorTextSoft).SingleLine()
 			if subtitle != "" {
-				ui.Text(c, subtitle).FontSize(sizeSubtitle).TextColor(colorTextMuted).SingleLine()
+				ui.Text(c, subtitle).FontSize(size.subtitle).TextColor(colorTextMuted).SingleLine()
 			}
 		})
 	})
@@ -316,6 +401,23 @@ func inputFrame(c *ui.Context, input ui.Element) ui.Element {
 		TextColor(colorInputValue)
 }
 
+// fieldFrame is inputFrame at the size a card's own row has room for: 32
+// points high with 10 beside the text, which is what leaves the rest of the
+// line to the actions that act on the value in it.
+//
+// The field is the thing a dense card is about, so it takes the room that is
+// left rather than a width of its own: the caller grows it.
+func fieldFrame(c *ui.Context, input ui.Element) ui.Element {
+	return input.
+		Height(heightCardControl).
+		Padding(0, float32(10)).
+		Radius(radiusField).
+		Background(colorField).
+		Border(1, colorBorder).
+		FontSize(sizeSmall).
+		TextColor(colorInputValue)
+}
+
 // stacked is a plain column of the pieces inside a section, so that a section
 // body does not repeat the same gap in every call.
 func stacked(c *ui.Context, gap float32, body func()) {
@@ -335,21 +437,48 @@ const (
 	buttonSecondary
 )
 
+// buttonSize is how much room a button takes: the height every control on a
+// form row shares, the room beside its label, and the size of that label.
+type buttonSize struct {
+	height float32
+	pad    float32
+	font   float32
+}
+
+// The two sizes the page draws: the design's own, and the one the API key
+// cards use, where a field and two actions share one 32-point line.
+var (
+	buttonRegular = buttonSize{height: heightControl, pad: 16, font: sizeBody}
+	buttonDense   = buttonSize{height: heightCardControl, pad: cardActionPad, font: sizeFine}
+)
+
 // designButton builds an action in one of the tones. Every tone keeps the
 // whole behavior of a button — the pointer, the keyboard, the focus ring and
 // what assistive technology reads — since both are the framework's ButtonBase
 // underneath.
 func designButton(c *ui.Context, label string, tone buttonTone) ui.Element {
+	return buttonSized(c, label, tone, buttonRegular)
+}
+
+// cardButton is designButton in the size a dense card's row has room for: the
+// design's h-8 with 10 points beside the label. It is what stands next to a
+// card's field, where the three things on the line have to be one row.
+func cardButton(c *ui.Context, label string, tone buttonTone) ui.Element {
+	return buttonSized(c, label, tone, buttonDense)
+}
+
+// buttonSized draws the button itself, at one of the two sizes.
+func buttonSized(c *ui.Context, label string, tone buttonTone, size buttonSize) ui.Element {
 	b := ui.ButtonBase(c).Label(label)
 	switch tone {
 	case buttonPrimary:
 		b = b.
-			Height(heightControl).
-			Padding(0, float32(16)).
+			Height(size.height).
+			Padding(0, size.pad).
 			Radius(radiusField).
 			Background(colorBrand).
 			TextColor(colorOnBrand).
-			FontSize(sizeBody).
+			FontSize(size.font).
 			FontWeight(500).
 			Justify(ui.Start).
 			Cursor(ui.CursorPointer)
@@ -361,13 +490,13 @@ func designButton(c *ui.Context, label string, tone buttonTone) ui.Element {
 		}
 	case buttonSecondary:
 		b = b.
-			Height(heightControl).
-			Padding(0, float32(16)).
+			Height(size.height).
+			Padding(0, size.pad).
 			Radius(radiusField).
 			Background(colorSurface).
 			Border(1, colorBorder).
 			TextColor(colorText).
-			FontSize(sizeBody).
+			FontSize(size.font).
 			FontWeight(500).
 			Justify(ui.Start).
 			Cursor(ui.CursorPointer)
@@ -378,19 +507,19 @@ func designButton(c *ui.Context, label string, tone buttonTone) ui.Element {
 			b = b.Background(colorHover)
 		}
 	}
-	b.Children(func() { ui.Text(c, label).FontSize(sizeBody).FontWeight(500).SingleLine() })
+	b.Children(func() { ui.Text(c, label).FontSize(size.font).FontWeight(500).SingleLine() })
 	return b
 }
 
-// quietIconButton is an action drawn as a mark: one glyph with a square of the
-// content's own room around it, drawn in the muted ink the design gives a
-// secondary action and in the body ink under the pointer. The room is what
-// makes it a target rather than a picture; its label is what it means, for the
-// pointer that rests on it and for assistive technology.
-func quietIconButton(c *ui.Context, mark *ui.SVG, label string) ui.Element {
-	b := ui.ButtonBase(c).Label(label).Tooltip(label).
-		Radius(radiusField).
-		Padding(float32(4)).
+// textAction is an action written as a word rather than drawn as a button: the
+// quiet "删除" at the end of a card's head. It wears no face of its own,
+// because the two buttons under it are what the card is for, and a third one
+// beside the name would read as another thing the card does; its ink says what
+// it does. It answers the pointer over its own room, as every action here does.
+func textAction(c *ui.Context, label string, ink ui.Color) ui.Element {
+	b := ui.ButtonBase(c).Label(label).
+		Radius(float32(4)).
+		Padding(float32(2), float32(6)).
 		Cursor(ui.CursorPointer)
 	switch {
 	case b.Pressed():
@@ -399,11 +528,36 @@ func quietIconButton(c *ui.Context, mark *ui.SVG, label string) ui.Element {
 		b = b.Background(colorHover)
 	}
 	b.Children(func() {
-		icon := ui.Icon(c, mark).Size(float32(16), float32(16)).Shrink(0)
+		ui.Text(c, label).FontSize(sizeFine).FontWeight(500).TextColor(ink).SingleLine()
+	})
+	return b
+}
+
+// quietIconButton is an action drawn as a mark: one glyph with a square of the
+// content's own room around it, drawn in the faint ink the design gives a
+// secondary action and in the body ink under the pointer. The room is what
+// makes it a target rather than a picture; its label is what it means, for the
+// pointer that rests on it and for assistive technology.
+//
+// It is the quick window's footer action: the design's p-1 around a 14-point
+// mark, on the stone face the rest of that window is drawn on.
+func quietIconButton(c *ui.Context, mark *ui.SVG, label string) ui.Element {
+	b := ui.ButtonBase(c).Label(label).Tooltip(label).
+		Radius(cardMarkPad).
+		Padding(cardMarkPad).
+		Cursor(ui.CursorPointer)
+	switch {
+	case b.Pressed():
+		b = b.Background(panelPress)
+	case b.Hovered() || b.Focused():
+		b = b.Background(panelHover)
+	}
+	b.Children(func() {
+		icon := ui.Icon(c, mark).Size(float32(sizeCardMark), float32(sizeCardMark)).Shrink(0)
 		if b.Hovered() || b.Focused() {
-			icon.TextColor(colorText)
+			icon.TextColor(colorTextSoft)
 		} else {
-			icon.TextColor(colorTextMuted)
+			icon.TextColor(panelFaint)
 		}
 	})
 	return b
@@ -559,7 +713,7 @@ func annotationBlock(c *ui.Context, open bool, label string, toggle func()) {
 	}
 	button.Children(func() {
 		ui.Text(c, label).FontSize(sizeCardFoot).TextColor(colorReadingInk).SingleLine()
-		disclosureArrow(c, arrowTurn(open))
+		disclosureArrow(c, arrowTurn(open), colorReadingInk)
 	})
 	if button.Clicked() && toggle != nil {
 		toggle()
@@ -711,24 +865,128 @@ func notice(c *ui.Context, kind noteKind, text string) {
 }
 
 // noticePanel is the one note on a page that must not be missed: a tinted,
-// bordered panel in the warning colors, whose body is a line of its own.
-func noticePanel(c *ui.Context, title, body string) {
-	ui.Column(c).FillWidth().
+// bordered strip in the warning colors, with a single small line in it. It is
+// a panel rather than another line of body text, and the design draws it tight
+// — 6 above and below — because the rows under it are what the page is for.
+func noticePanel(c *ui.Context, text string) {
+	ui.Box(c).FillWidth().
 		Background(colorWarningFill).
 		Border(1, colorWarningBorder).
 		Radius(radiusField).
-		Padding(float32(10), float32(12)).
+		Padding(float32(6), float32(10)).
 		Children(func() {
-			if title != "" {
-				ui.Text(c, title).FontSize(sizeTiny).FontWeight(600).TextColor(colorWarning)
+			ui.Text(c, text).
+				FontSize(sizeFine).
+				TextColor(colorWarning).
+				Wrap().
+				LineHeight(1.4)
+		})
+}
+
+// cardHint is the smallest line a card carries: where the value above it comes
+// from. It is quieter than a notice, which is about what just happened.
+func cardHint(c *ui.Context, text string) {
+	ui.Text(c, text).FontSize(sizeTiny).TextColor(colorTextMuted).SingleLine()
+}
+
+// cardNote is the line a block's own head carries when one more line is needed
+// there: what an account is, when its window resets. The design gives that line
+// 11 points of faint ink, and the quick window's own stone.
+func cardNote(c *ui.Context, text string) {
+	ui.Text(c, text).FontSize(sizeQuickFine).TextColor(panelFaint).SingleLine()
+}
+
+// barHeight is how tall a proportion bar is: the design's h-1.5, which is a
+// line rather than a block.
+const barHeight = 6.0
+
+// progressBar draws a proportion: the whole of the room it is given as a
+// track, the part of it that is filled, and the number it stands for over the
+// track at its right end.
+//
+// The fill is painted rather than laid out: it is a fraction of whatever room
+// the track ends up with, and only the paint knows that width — a fill laid
+// out from the frame before would show the previous answer's share. What it
+// is, for assistive technology, is its name, its range and its value.
+//
+// The color is the block's own, for the fill and for the number alike: a bar
+// belongs to the block it is in, and the number over it is that same color —
+// which is why it is one color and not two. It is drawn on the content's own
+// face, so the color has to read there: a bar whose color is the tile's own
+// white would be a bar with no number at all.
+//
+// A share it does not have — nothing left, nothing read yet — draws the track
+// empty. An empty track is not "0%": the caller says which of the two it is in
+// words.
+func progressBar(c *ui.Context, percent int64, fill ui.Color, label, name string) {
+	ui.Column(c).FillWidth().Gap(float32(4)).AlignItems(ui.End).Children(func() {
+		// ui.Text(c, label).FontSize(sizeQuickTiny).FontWeight(500).TextColor(fill).SingleLine()
+		ui.Box(c).FillWidth().
+			Height(float32(barHeight)).
+			Radius(999).
+			Background(panelLine).
+			Role(ui.RoleMeter).
+			Range(0, 100, float64(percent)).
+			Label(name).
+			Draw(func(p *ui.Painter, r ui.Rect) {
+				share := percent
+				switch {
+				case share <= 0:
+					return
+				case share > 100:
+					share = 100
+				}
+				p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * float32(share) / 100, H: r.H}, fill, 999)
+			})
+	})
+}
+
+// panelMark is how a block's mark is drawn: the provider's own drawing, the
+// face of the tile it sits on, the color the drawing is made in, and the color
+// of a proportion bar in that block.
+//
+// The tile's ink and the bar's color are two different things and are kept
+// apart: the drawing on a tile is white (the tile is the provider's own color,
+// and white is what reads on it), and a bar is drawn on the content's face,
+// where white reads as nothing at all.
+type panelMark struct {
+	svg  *ui.SVG
+	tile ui.Color
+	ink  ui.Color
+	bar  ui.Color
+}
+
+// quickBlock is one block of the quick window: the design's own room around
+// it, which is what makes a block read as one thing rather than as rows that
+// happen to follow each other.
+func quickBlock(c *ui.Context, body func()) {
+	ui.Column(c).FillWidth().
+		Padding(quickTop, quickEdge, quickBottom, quickEdge).
+		Children(body)
+}
+
+// quickDivider is the line between two blocks of the quick window: one point
+// of stone-100, inside the same edge the blocks keep.
+func quickDivider(c *ui.Context) {
+	ui.Column(c).FillWidth().PaddingX(quickEdge).Children(func() {
+		ui.Row(c).FillWidth().Height(1).Shrink(0).Background(panelLine)
+	})
+}
+
+// quickTile is the mark at the head of a block: the provider's drawing in a
+// tile of its own, so that a block is recognised before its name is read. A
+// block whose provider has no drawing gets the tile alone, so that two blocks'
+// names still start at the same place.
+func quickTile(c *ui.Context, mark panelMark) {
+	ui.Box(c).Size(quickTileSize, quickTileSize).Shrink(0).
+		Radius(radiusTile).
+		Background(mark.tile).
+		Center().
+		Children(func() {
+			if mark.svg == nil {
+				return
 			}
-			if body != "" {
-				ui.Text(c, body).
-					FontSize(sizeTiny).
-					TextColor(colorWarning).
-					Wrap().
-					LineHeight(1.6)
-			}
+			ui.Icon(c, mark.svg).Size(quickMarkSize, quickMarkSize).Shrink(0).TextColor(mark.ink)
 		})
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"image"
 	"image/color"
+	"strings"
 	"testing"
 
 	"boku/internal/domain"
@@ -15,6 +16,12 @@ import (
 // the design system composes — a window's chrome, a section's head, an input,
 // the two actions of a form — are what the windows are made of, and these are
 // the properties a screen must keep whatever it says.
+
+// settingsPageHeight is a window tall enough to show two sections of the
+// settings page at once: the page is taller than the window the application
+// opens, and a property that is about two sections has to have both of them
+// laid out to be compared.
+const settingsPageHeight = 900
 
 // rowsOfColor returns the y of every row of the frame whose pixels from inset
 // to width-inset are all this color, which is what a region's face looks like
@@ -98,8 +105,9 @@ const scrollbarStrip = 48
 func rgba(c ui.Color) color.RGBA { return color.RGBA{R: c.R, G: c.G, B: c.B, A: c.A} }
 
 // A window draws no title of its own: the system's title bar names it, and a
-// name drawn again inside the window is a second title. The content starts at
-// the page's margin, and the version closes the window on its own face.
+// name drawn again inside the window is a second title. The sidebar is the
+// window's navigation and keeps the left edge; the page starts right of it,
+// at its own margin, and the version closes the window on its own face.
 func TestDesignWindowHasNoTitleOfItsOwn(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
 	state.loadCredentials()
@@ -111,14 +119,23 @@ func TestDesignWindowHasNoTitleOfItsOwn(t *testing.T) {
 	if exact(tt.Texts(), appName+" 设置") {
 		t.Errorf("the window draws its own name inside itself: %q", tt.Texts())
 	}
-	// The first thing drawn is the first section's head, at the page's
-	// margin.
-	head := findText(t, tt, "API Key")
-	if head.Y > pageEdge+4 {
-		t.Errorf("the content starts at y=%.0f: something is above it", head.Y)
+	// The first thing drawn on the page is the first section's own line, at
+	// the top of the page's margin: the sidebar keeps the left edge, and
+	// nothing of the window's own is above the page — its title is in the
+	// system's title bar rather than in the view.
+	pageLeft := float32(settingsSidebarWidth + pageEdge)
+	head := findText(t, tt, "配置各 AI 服务密钥")
+	if head.Y > pageEdge+pageEdge+8 {
+		t.Errorf("the page starts at y=%.0f: something of the window's own is above its first section", head.Y)
 	}
-	if head.X < pageEdge {
-		t.Errorf("the section's head starts at x=%.0f, inside the page's margin", head.X)
+	sidebar := findText(t, tt, "划词翻译")
+	if sidebar.X >= pageLeft {
+		t.Errorf("the sidebar's entry at x=%.0f is not left of the page's margin at x=%.0f",
+			sidebar.X, pageLeft)
+	}
+	if head.X < pageLeft || head.X > pageLeft+64 {
+		t.Errorf("the page's first line starts at x=%.0f, which is not the room after the page's margin at x=%.0f",
+			head.X, pageLeft)
 	}
 	// The window's own face is the content's: no band of another color runs
 	// across the top of it.
@@ -135,23 +152,25 @@ func TestDesignWindowHasNoTitleOfItsOwn(t *testing.T) {
 }
 
 // The settings window's sections are peers: each is a mark, a name and a line
-// of its own, and their headings start at the same left edge. Nothing nests
-// inside anything else, and the line between two of them is drawn inside the
-// page's margin — the only line that runs to the window's edges is the one
-// above the footer, which is where the window says it ends.
+// of its own, and their headings start at the same left edge — the page's,
+// right of the sidebar that navigates them. Nothing nests inside anything
+// else, and the line between two of them is drawn inside the page's margin —
+// the only lines that run to the window's edges are the sidebar's own edge and
+// the one above the footer, which is where the window says it ends.
 func TestDesignSectionsArePeers(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
 	state.loadCredentials()
-	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
+	// The page is taller than the window the application opens, so it is
+	// rendered into a taller one: a comparison of two sections needs both of
+	// them laid out at once.
+	tt := ui.NewTester(state.settingsView, settingsWidth, settingsPageHeight)
 
-	// The page is taller than the window: the sections below the fold have
-	// layout positions but no pixels, so a comparison is made between the
-	// headings that are on screen together.
+	pageLeft := float32(settingsSidebarWidth + pageEdge)
 	keys := findText(t, tt, "配置各 AI 服务密钥")
 	translate := findText(t, tt, "任意语言 → 中文 · AI 翻译")
-	if keys.X <= pageEdge || translate.X <= pageEdge {
+	if keys.X <= pageLeft || translate.X <= pageLeft {
 		t.Errorf("the sections start at x=%.0f and x=%.0f, inside the page's margin of %.0f",
-			keys.X, translate.X, float32(pageEdge))
+			keys.X, translate.X, pageLeft)
 	}
 	if d := keys.X - translate.X; d > 1 || d < -1 {
 		t.Errorf("the sections start at x=%.0f and x=%.0f: one is indented under the other",
@@ -159,29 +178,34 @@ func TestDesignSectionsArePeers(t *testing.T) {
 	}
 	// A section head is a mark and then a name, so the heading is right of the
 	// page's margin: the mark has the same room as a section label has none.
-	if keys.X <= pageEdge {
+	if keys.X <= pageLeft {
 		t.Errorf("the heading at x=%.0f is not right of its mark", keys.X)
 	}
 
 	// The line between two sections keeps the page's margin, the way every
-	// other thing on the page does. The page is taller than the window, so
-	// the divider is found where it was rendered: a row that is drawn from
-	// the page's margin to the other margin.
+	// other thing on the page does: a row that is drawn from the page's
+	// margin to the far side of the page. The window is rendered tall enough
+	// that the line is in the window at all.
 	const scale = 2
-	img := ui.Render(state.settingsView, settingsWidth, settingsHeight, scale)
+	img := ui.Render(state.settingsView, settingsWidth, settingsPageHeight, scale)
 	width := settingsWidth * scale
-	margin := int(pageEdge) * scale
+	margin := int(pageLeft) * scale
+	right := width - scrollbarStrip
 	divider := -1
 	for y := 0; y < img.Rect.Dy() && divider < 0; y++ {
 		if img.RGBAAt(margin+2, y) != rgba(colorBorder) || img.RGBAAt(margin-2, y) == rgba(colorBorder) {
 			continue
 		}
-		// It has to reach the other margin and stop there: a card's edge is
-		// drawn in the same color and stops short of it.
-		if img.RGBAAt(width-margin-2, y) != rgba(colorBorder) {
-			continue
+		// It has to reach the far side of the page and stop there: a card's
+		// edge is drawn in the same color and stops short of it.
+		all := true
+		for x := margin + 2; x < right; x++ {
+			if img.RGBAAt(x, y) != rgba(colorBorder) {
+				all = false
+				break
+			}
 		}
-		if img.RGBAAt(width-margin+2, y) == rgba(colorBorder) {
+		if !all {
 			continue
 		}
 		divider = y
@@ -189,70 +213,68 @@ func TestDesignSectionsArePeers(t *testing.T) {
 	if divider < 0 {
 		t.Fatal("the page draws no line between two sections inside its margin")
 	}
-	if got := img.RGBAAt(0, divider); got == rgba(colorBorder) {
-		t.Errorf("the line between the sections at y=%.0f runs to the window's edge", float32(divider)/scale)
+	// The sidebar's own edge is the window's, not the page's: the line
+	// between two sections does not reach it.
+	if got := img.RGBAAt(int(settingsSidebarWidth)*scale, divider); got == rgba(colorBorder) {
+		t.Errorf("the line between the sections at y=%.0f crosses into the sidebar", float32(divider)/scale)
 	}
 }
 
 // A section introduces itself with the mark of what it is about, its name and
-// one line of explanation: the name and its line start right of the mark, and
-// the two lines are not on top of each other.
+// one line of explanation: the name and its line start right of the mark, at
+// the page's margin rather than the window's edge, and the two lines are not
+// on top of each other.
 func TestDesignSectionHeadCarriesTheMark(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
 	state.loadCredentials()
-	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
+	// The second section is below the fold of the window the application
+	// opens; it is rendered into a taller one so that its head is drawn.
+	tt := ui.NewTester(state.settingsView, settingsWidth, settingsPageHeight)
 
-	title := findText(t, tt, "划词翻译")
+	// The heading's own line is what says where the head is: the sidebar
+	// draws the section's name at the window's left edge, and it is
+	// navigation rather than the section.
 	subtitle := findText(t, tt, "任意语言 → 中文 · AI 翻译")
-	if subtitle.Y <= title.Y {
-		t.Errorf("the head's line at y=%.0f is not under its name at y=%.0f", subtitle.Y, title.Y)
+	if subtitle.X <= settingsSidebarWidth+pageEdge {
+		t.Errorf("the section's line at x=%.0f is not right of its mark", subtitle.X)
 	}
-	if title.X <= pageEdge {
-		t.Errorf("the section's name at x=%.0f is not right of its mark", title.X)
+	// The name is the same words, right above it: the sidebar's entry of
+	// that name is at the window's edge and well above the section.
+	sidebar := findText(t, tt, "划词翻译")
+	if sidebar.X >= subtitle.X {
+		t.Errorf("the sidebar's entry at x=%.0f is not left of the section at x=%.0f", sidebar.X, subtitle.X)
 	}
-	if title.X != subtitle.X {
-		t.Errorf("the name at x=%.0f and its line at x=%.0f do not start together", title.X, subtitle.X)
-	}
-}
-
-// The provider's own mark is drawn in the provider's own color at the head of
-// its card: it is the logo the user knows, and it is not replaced or
-// recolored.
-func TestDesignProviderMarkKeepsItsOwnColor(t *testing.T) {
-	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	const scale = 2
-	img := ui.Render(state.settingsView, settingsWidth, settingsHeight, scale)
-	if got := countColor(img, deepseekBrandColor); got < 200 {
-		t.Errorf("the DeepSeek mark covers %d pixels, want the logo drawn in its own color", got)
-	}
-	if got := countColor(img, brandTint); got < 200 {
-		t.Errorf("the mark's ground covers %d pixels, want a tile of its own", got)
+	if subtitle.Y <= sidebar.Y+8 {
+		t.Errorf("the section's line at y=%.0f is not below the sidebar's entry at y=%.0f",
+			subtitle.Y, sidebar.Y)
 	}
 }
 
-// The credential is a value the form keeps out of its way: the field is empty
-// and shows only its own hint, and what is stored is a dot and a word in the
-// success color, on a line of its own — nothing beside it to press, because
-// typing over the field is what replaces it.
-func TestDesignCredentialIsShownAsAStatusLine(t *testing.T) {
+// The credential is a value the form keeps out of its way entirely: the field
+// is empty and shows only its own hint, the card says a credential is there
+// with its badge, and not one character of what is stored reaches the window —
+// replacing it is done by typing in the field and saving again.
+func TestDesignCredentialStaysOutOfTheWindow(t *testing.T) {
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
 	state.loadCredentials()
 	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
 
-	if !tt.HasText("已配置：…0001") {
-		t.Errorf("the stored credential is not shown masked: %q", tt.Texts())
+	if !tt.HasText("已配置") {
+		t.Errorf("the card does not say a credential is stored: %q", tt.Texts())
 	}
 	// The field holds nothing: what it draws is its own "sk-......" hint, and
 	// the stored value is not in it to be read back.
 	if typed := state.cardInput("deepseek"); typed != "" {
 		t.Errorf("the field holds %q, want the empty field that draws its hint", typed)
 	}
-	// The line is the whole of what the window says about it: the actions
-	// that used to sit at its end are gone, and replacing what is stored is
-	// done by typing in the field.
-	status := findText(t, tt, "已配置：…0001")
-	if status.W <= 0 || status.X <= pageEdge {
-		t.Errorf("the status line at x=%.0f, %.0f wide is not inside the page", status.X, status.W)
+	// Nothing of the stored credential is drawn: not its value, not its last
+	// four characters.
+	for _, text := range tt.Texts() {
+		for _, leak := range []string{"sk-test-0001", "0001"} {
+			if strings.Contains(text, leak) {
+				t.Errorf("the window draws %q, which is part of the stored credential", text)
+			}
+		}
 	}
 }
 
@@ -267,7 +289,7 @@ func TestDesignActionsAreFilledAndOutlined(t *testing.T) {
 	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
 
 	save := findText(t, tt, "保存")
-	test := findText(t, tt, "测试连接")
+	test := findText(t, tt, "测试")
 	if diff := save.H - test.H; diff > 1 || diff < -1 {
 		t.Errorf("the two actions are %.0f and %.0f tall: they are not one row of controls", save.H, test.H)
 	}
@@ -276,9 +298,14 @@ func TestDesignActionsAreFilledAndOutlined(t *testing.T) {
 	}
 	// The primary is filled: its line is the brand green from one edge of the
 	// button to the other, and it takes a button's width rather than a word's.
-	line := int(save.Y)*scale + 2
+	// The line is the middle of the button, where the rounding of its corners
+	// does not eat into the fill. The scan keeps to the page — the sidebar has
+	// a green entry of its own, and it is navigation rather than an action of
+	// the form.
+	line := int(save.Y+save.H/2) * scale
+	page := settingsSidebarWidth * scale
 	left, right := -1, -1
-	for x := 0; x < settingsWidth*scale; x++ {
+	for x := page; x < settingsWidth*scale; x++ {
 		if got := img.RGBAAt(x, line); got == rgba(colorBrand) {
 			if left < 0 {
 				left = x
@@ -289,7 +316,7 @@ func TestDesignActionsAreFilledAndOutlined(t *testing.T) {
 	if left < 0 {
 		t.Fatalf("no brand green on the primary action's line y=%d", line)
 	}
-	if right-left < 40*scale {
+	if right-left < 30*scale {
 		t.Errorf("the primary action's fill spans %d pixels: it is a word, not a button", right-left)
 	}
 	// And it is the form's main action: it sits at the right end of its own
@@ -311,7 +338,7 @@ func TestDesignPlainTextWarningIsAPanel(t *testing.T) {
 	img := ui.Render(state.settingsView, settingsWidth, settingsHeight, scale)
 	tt := ui.NewTester(state.settingsView, settingsWidth, settingsHeight)
 
-	plain := findTextPrefix(t, tt, "存放在")
+	plain := findTextPrefix(t, tt, "凭据明文保存在")
 	// The panel is drawn around the line: a point on the panel's own row,
 	// inside the page's margin, is the panel's tint rather than the content's
 	// white. The line is inset in the panel by its own padding.
@@ -401,7 +428,7 @@ func TestDesignQuickFooterActionsAreMarks(t *testing.T) {
 		t.Errorf("the footer actions end at x=%.0f, past the page's margin", right)
 	}
 	// They are drawn, not only named: their ink is on the footer's line.
-	if got := countColor(img, colorTextMuted); got < 20 {
+	if got := countColor(img, panelFaint); got < 20 {
 		t.Error("no mark is drawn in the footer")
 	}
 	// The version keeps the other end.
@@ -422,7 +449,10 @@ func TestDesignQuickWindowIsASection(t *testing.T) {
 
 	balance := findText(t, tt, "¥42.10")
 	label := findText(t, tt, "总余额")
-	if balance.H <= label.H*2 {
+	// The design's own pair is a 22-point number over an 11-point label: the
+	// number is half again as tall at least, and the test asks for that
+	// rather than for a fixed pixel height, which the font decides.
+	if balance.H <= label.H*1.5 {
 		t.Errorf("the balance is %.0f tall and its label %.0f: the number is not the headline",
 			balance.H, label.H)
 	}

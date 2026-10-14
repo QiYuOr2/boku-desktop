@@ -27,14 +27,17 @@ const (
 	historyHeight = 640
 )
 
-// clipboardRegion is the line under the panel: the mark, the content, and the
+// clipboardRegion is the row under the blocks: the mark, the content, and the
 // way to the history. It is one row high, so that the quick window stays a
 // glance rather than becoming a list.
 //
-// It draws its own leading line, and only when there is something to show:
-// with nothing read yet — monitoring is off, or nothing has been copied — the
-// line under the content runs straight to the footer, which is what a window
-// with no clipboard region looks like.
+// The design draws it as a field of its own rather than as another block: 12
+// from each side of the window, 14 points high inside, on a stone face with a
+// stone hairline — it is a value the desktop handed over, not a panel, and the
+// two are told apart by their shape as well as by their place.
+//
+// With nothing read yet — monitoring is off, or nothing has been copied — the
+// row is not drawn at all, not even the field.
 //
 // The mark and the way in do not shrink: a long value loses its own tail to
 // the ellipsis, and what the row is and what it offers stay readable.
@@ -45,27 +48,33 @@ func (s *State) clipboardRegion(c *ui.Context) {
 		return
 	}
 
-	hairline(c)
-	ui.Row(c).FillWidth().Height(float32(34)).Shrink(0).
-		PaddingX(float32(12)).
-		AlignItems(ui.Center).
-		Gap(float32(8)).
+	ui.Column(c).FillWidth().
+		Padding(float32(4), float32(12), float32(10), float32(12)).
 		Children(func() {
-			// The mark wears the label's color: it is a label, and the
-			// word it replaced was drawn in the same place.
-			ui.Icon(c, s.clipboardMark).Size(float32(14), float32(14)).Shrink(0).TextColor(colorTextMuted)
-			ui.Text(c, content.Display).FontSize(sizeSmall).TextColor(colorTextBody).SingleLine()
-			ui.Spacer(c)
-			if button := historyButton(c); button.Clicked() {
-				s.openHistory()
-			}
+			ui.Row(c).FillWidth().
+				Padding(float32(6), float32(10)).
+				Radius(float32(8)).
+				Border(1, panelBorder).
+				Background(panelField).
+				AlignItems(ui.Center).
+				Gap(float32(8)).
+				Children(func() {
+					// The mark wears the field's own ink: it is a label, and
+					// the word it replaced was drawn in the same place.
+					ui.Icon(c, s.clipboardMark).Size(float32(14), float32(14)).Shrink(0).TextColor(panelFaint)
+					ui.Text(c, content.Display).FontSize(sizeSmall).TextColor(panelBody).SingleLine()
+					ui.Spacer(c)
+					if button := historyButton(c); button.Clicked() {
+						s.openHistory()
+					}
+				})
 		})
 }
 
-// historyButton is the way from the clipboard line to the history: a chip,
-// because the line it sits on is a value rather than a row of actions.
+// historyButton is the way from the clipboard row to the history: a word,
+// because the row it sits on is about a value rather than about actions.
 func historyButton(c *ui.Context) ui.Element {
-	return chipButton(c, "历史")
+	return wordButton(c, "历史")
 }
 
 // clipboardLatest is what the tool last saw, and whether it saw anything.
