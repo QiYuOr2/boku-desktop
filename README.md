@@ -1,5 +1,10 @@
 # Boku Desktop
 
+[![CI](https://github.com/QiYuOr2/boku-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/QiYuOr2/boku-desktop/actions/workflows/ci.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/QiYuOr2/boku-desktop)](https://github.com/QiYuOr2/boku-desktop/blob/main/go.mod)
+[![MyGo](https://img.shields.io/badge/MyGo-v0.5.1-00ADD8)](https://github.com/egoist/mygo)
+[![License](https://img.shields.io/github/license/QiYuOr2/boku-desktop)](./LICENSE)
+
 用 Go 与 [MyGo](https://github.com/egoist/mygo) 写的桌面工具，常驻系统托盘。
 点托盘图标弹出一个窗口，里面是两类内容：面板与工具。
 

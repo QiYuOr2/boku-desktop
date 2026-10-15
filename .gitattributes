@@ -1,0 +1,19 @@
+# Go source is always LF, whatever the machine checks it out on. Without this,
+# a Windows checkout rewrites every file to CRLF and `gofmt -l` then reports
+# all of them as unformatted.
+*.go text eol=lf
+
+# Go module files are diffed and hashed; keep them stable too.
+go.mod text eol=lf
+go.sum text eol=lf
+*.mod text eol=lf
+
+# Shell scripts must stay LF or they fail to run.
+*.sh text eol=lf
+
+# Images are binary; never touch them.
+*.png binary
+*.ico binary
+
+# Everything else keeps its content as committed.
+* text=auto
