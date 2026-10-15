@@ -18,7 +18,7 @@ import (
 
 func newStorePath(t *testing.T) string {
 	t.Helper()
-	return filepath.Join(t.TempDir(), "secrets.json")
+	return filepath.Join(t.TempDir(), FileName)
 }
 
 func put(t *testing.T, store *Store, name, value string, meta domain.SecretMeta) {
@@ -140,7 +140,10 @@ func TestNothingToUnlock(t *testing.T) {
 	}
 }
 
-func TestTheFileIsReadableAndRestricted(t *testing.T) {
+// The file is readable because it is plain text. That is the design, and the
+// test says so rather than leaving it to be discovered: §5 of the security
+// design requires the window to tell the user the same thing.
+func TestTheFileIsPlainTextAndRestricted(t *testing.T) {
 	path := newStorePath(t)
 	store, err := Open(path)
 	if err != nil {
@@ -152,6 +155,11 @@ func TestTheFileIsReadableAndRestricted(t *testing.T) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read the file back: %v", err)
+	}
+	// The value is in the clear. If this ever stops being true, the setting
+	// window's notice has to change with it.
+	if !strings.Contains(string(data), "sk-test-0001") {
+		t.Error("the value is not in the file in the clear, which the notice claims it is")
 	}
 	var doc document
 	if err := json.Unmarshal(data, &doc); err != nil {
@@ -208,6 +216,12 @@ func TestOpenRefusesSomethingElse(t *testing.T) {
 	}
 }
 
+func TestOpenRefusesAnEmptyPath(t *testing.T) {
+	if _, err := Open("   "); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("Open(\"   \") = %v, want ErrInvalidArgument", err)
+	}
+}
+
 func TestEmptyNamesAndValuesAreRefused(t *testing.T) {
 	store, err := Open(newStorePath(t))
 	if err != nil {
@@ -233,7 +247,7 @@ func TestEmptyNamesAndValuesAreRefused(t *testing.T) {
 // stored something.
 func TestAFailedWriteKeepsTheStoreAsItWas(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "secrets.json")
+	path := filepath.Join(dir, FileName)
 	store, err := Open(path)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)

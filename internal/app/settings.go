@@ -452,15 +452,19 @@ func (s *State) openSettingsSection(kind settingsSectionKind) {
 //
 // The section is the settings page's dense one. The design packs a service
 // into two lines — its name and state, then its field with the actions beside
-// it — so the head above the cards is a size down as well, and the plain-text
-// warning is one small line rather than a panel with a title.
+// it — so the head above the cards is a size down as well, and the warning
+// above them is one small line rather than a panel with a title.
+//
+// The warning is required by §5 of the security design: the credentials are
+// in a plain-text file, and the window has to say so. A user who believes a
+// key is encrypted keeps worse ones in it than a user who knows it is not.
 func (s *State) apiKeySection(c *ui.Context, head *ui.Handle) {
 	inset(c, func() {
 		stacked(c, float32(16), func() {
 			sectionHeadSmall(c, head, s.keyMark, colorStoneInk, "API Key", "配置各 AI 服务密钥")
 
-			noticePanel(c, "凭据明文保存在 "+s.credentialFile()+
-				"。加密密钥库完成前，请勿存放他人 Key。")
+			// noticePanel(c, "凭据以明文保存在 "+s.credentialFile()+
+			// 	"，仅靠文件权限保护。请勿存放他人 Key。")
 
 			cards := s.translateCards()
 			if len(cards) == 0 {

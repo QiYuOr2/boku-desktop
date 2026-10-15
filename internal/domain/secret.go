@@ -6,8 +6,8 @@ import (
 )
 
 // SecretMeta describes one stored secret without saying what it is. A store
-// keeps it in the clear, so that a locked vault can still list which keys
-// exist and who they belong to.
+// keeps it beside the value, so that a window can list which keys exist and
+// who they belong to without reading any value.
 type SecretMeta struct {
 	ProviderID string
 	// Account is a non-sensitive label, such as which account a key
@@ -33,13 +33,15 @@ func (s Secret) Text() string { return string(s.Value) }
 
 // SecretStore keeps credentials. The database stores only these names, never
 // a value. Only this interface stands between the application and how the
-// values are protected, so the file it is implemented with can change —
-// from today's plain-text file to the encrypted vault — without touching
+// values are protected, so the file behind it can change without touching
 // the layers above.
 //
-// The locked state exists for that vault: a store that cannot be read
-// without a passphrase answers ErrVaultLocked until Unlock succeeds, and
-// the interface still lets the interface list which keys exist.
+// The locked state is part of the interface and not of this build. A store
+// that needs a passphrase before it can be read answers ErrVaultLocked —
+// which is why Put, Get and the rest are written to be branchable on it —
+// but the store this application assembles keeps its values in a plain-text
+// file and answers true to Unlocked always. §5 of the security design says
+// why, and says what protects the values instead.
 type SecretStore interface {
 	// Unlock makes the values readable. A store with nothing to unlock
 	// accepts any passphrase — which is itself the honest answer for a

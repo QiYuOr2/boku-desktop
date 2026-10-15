@@ -24,10 +24,12 @@ var (
 	ErrProviderBadResponse  = errors.New("provider bad response")
 	ErrCredentialMissing    = errors.New("credential missing")
 
-	// The secret store.
-	ErrVaultLocked    = errors.New("vault locked")
-	ErrVaultNotFound  = errors.New("vault not found")
-	ErrPassphrase     = errors.New("passphrase rejected")
+	// Credentials: the store keeps values in a plain-text file, so the only
+	// two things that can go wrong are a name that is not there and a name
+	// that already is. There is no locked state to report — §5 of the
+	// security design says why — and the errors an encrypted store would
+	// need were removed with the encryption rather than left for a caller to
+	// branch on something that never happens.
 	ErrSecretNotFound = errors.New("secret not found")
 	ErrSecretExists   = errors.New("secret exists")
 

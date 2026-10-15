@@ -2,19 +2,29 @@
 // kept in (this one) and the one action the interface takes on them
 // (service.go).
 //
-// Today they are plain text in a JSON file that the store asks the operating
-// system to keep at 0600. On Windows that permission bit does not decide
-// access — an ACL does — so this is not a security boundary, and the
-// settings window says so. The store has nothing to unlock, which is why
-// Unlock accepts anything and Unlocked always answers true: pretending
-// otherwise would make a plain-text file look protected.
+// The values are stored as plain text in a JSON file that the store asks the
+// operating system to keep at 0600. That is a deliberate choice, and it is the
+// same one most tools of this kind make: without a passphrase the user has to
+// type, there is nowhere to keep a key that an attacker who can read the
+// directory cannot also read. Encrypting the file with a key kept beside it
+// would look like protection without being any, which is worse than saying
+// plainly what the file is.
 //
-// §4 of the security design keeps this implementation and the encrypted vault of
-// Task 008 behind one domain.SecretStore interface, so moving to the vault
-// changes this package and nothing above it.
+// What protects the values is therefore not cryptography but the things that
+// can actually be promised, and §5 of the security design says which:
 //
-// A value never appears in an error or a log: the store hands values out one
-// name at a time, and lists names only.
+//   - the file is written 0600, and on Windows what decides access is the
+//     ACL — a directory only its owner, administrators and SYSTEM can read;
+//   - a value never appears in an error or a log, and never in the database,
+//     which keeps only the name;
+//   - the settings window says the credentials are in a plain-text file, so
+//     nobody is led to believe otherwise.
+//
+// The store has nothing to unlock, which is why Unlock accepts anything and
+// Unlocked always answers true. The interface keeps those methods — see
+// §2 of the security design — so that a build which does have something to
+// unlock can be swapped in without the layers above knowing, but this build
+// does not pretend to have one.
 package credential
 
 import (
@@ -31,6 +41,10 @@ import (
 	"boku/internal/domain"
 	"boku/internal/platform/atomicfile"
 )
+
+// FileName is the file the credentials are kept in, under the user data
+// directory.
+const FileName = "secrets.json"
 
 // fileVersion is the shape this build reads and writes. A file from another
 // version is refused rather than partly understood.

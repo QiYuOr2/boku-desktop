@@ -45,6 +45,22 @@ func (s *Secrets) Path() string {
 	return named.Path()
 }
 
+// Names returns the names of a provider's stored credentials, sorted.
+func (s *Secrets) Names(ctx context.Context, providerID string) ([]string, error) {
+	all, err := s.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	prefix := strings.TrimSpace(providerID) + "."
+	names := make([]string, 0, len(all))
+	for _, name := range all {
+		if strings.HasPrefix(name, prefix) {
+			names = append(names, name)
+		}
+	}
+	return names, nil
+}
+
 // Set stores one credential of a provider. The creation time of a first
 // version survives an update: the store keeps it.
 func (s *Secrets) Set(ctx context.Context, providerID, credentialKey, value string) error {
@@ -74,22 +90,6 @@ func (s *Secrets) Get(ctx context.Context, providerID, credentialKey string) (st
 // Delete removes one credential.
 func (s *Secrets) Delete(ctx context.Context, providerID, credentialKey string) error {
 	return s.store.Delete(ctx, domain.CredentialKey(providerID, credentialKey))
-}
-
-// Names returns the names of a provider's stored credentials, sorted.
-func (s *Secrets) Names(ctx context.Context, providerID string) ([]string, error) {
-	all, err := s.store.List(ctx)
-	if err != nil {
-		return nil, err
-	}
-	prefix := strings.TrimSpace(providerID) + "."
-	names := make([]string, 0, len(all))
-	for _, name := range all {
-		if strings.HasPrefix(name, prefix) {
-			names = append(names, name)
-		}
-	}
-	return names, nil
 }
 
 // Masked returns a credential as the interface may show it: its last four

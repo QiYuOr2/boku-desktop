@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	contractdeepseek "boku/internal/contract/deepseek"
+	"boku/internal/credential"
 	"boku/internal/domain"
 	"boku/internal/logging"
 	panelcodex "boku/internal/panel/codex"
@@ -105,6 +106,8 @@ func TestServicesAssembleThePanels(t *testing.T) {
 	// named, and is not created until something is stored in it.
 	if path := secrets.Path(); path == "" {
 		t.Error("the credential store has no path")
+	} else if filepath.Base(path) != credential.FileName {
+		t.Errorf("the credential file is %q, want %q", filepath.Base(path), credential.FileName)
 	}
 }
 

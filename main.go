@@ -160,9 +160,16 @@ func main() {
 // session.
 func services(userData, version string) (*panel.Panels, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, error) {
 	// Credentials: a file of their own, never the database. The store is
-	// named here and nowhere else, so moving to the encrypted vault of
-	// Task 008 is a change to this function.
-	secretStore, err := credential.Open(filepath.Join(userData, "secrets.json"))
+	// named here and nowhere else.
+	//
+	// The values are plain text. That is a deliberate choice rather than an
+	// unfinished one: with no passphrase for the user to type there is
+	// nowhere to keep a key that somebody reading the directory cannot also
+	// read, and a file encrypted with a key stored beside it would look like
+	// protection without being any. §5 of the security design says what
+	// protects them instead — a 0600 file, an ACL on Windows, never a value
+	// in a log or an error, and a window that says plainly what the file is.
+	secretStore, err := credential.Open(filepath.Join(userData, credential.FileName))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
 	}

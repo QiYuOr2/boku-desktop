@@ -3,6 +3,7 @@ package credential
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -141,5 +142,34 @@ func TestSecretsMaskedKeepsTheValueStored(t *testing.T) {
 func TestNewSecretsNeedsAStore(t *testing.T) {
 	if _, err := NewSecrets(nil); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("error = %v, want ErrInvalidArgument", err)
+	}
+}
+
+// The service over the real file store: what a value goes in as is what comes
+// back out, and the interface's own naming rule is applied on the way.
+func TestTheServiceOverTheFileStore(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(filepath.Join(dir, FileName))
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	secrets, err := NewSecrets(store)
+	if err != nil {
+		t.Fatalf("NewSecrets failed: %v", err)
+	}
+	ctx := context.Background()
+
+	if err := secrets.Set(ctx, "deepseek", "apiKey", "sk-test-0001"); err != nil {
+		t.Fatalf("Set failed: %v", err)
+	}
+	if value, err := secrets.Get(ctx, "deepseek", "apiKey"); err != nil || value != "sk-test-0001" {
+		t.Errorf("Get = %q, %v", value, err)
+	}
+	names, err := secrets.Names(ctx, "deepseek")
+	if err != nil || len(names) != 1 || names[0] != "deepseek.apiKey" {
+		t.Errorf("Names = %v, %v", names, err)
+	}
+	if path := secrets.Path(); filepath.Base(path) != FileName {
+		t.Errorf("Path = %q, want the file the store was opened with", path)
 	}
 }
