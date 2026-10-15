@@ -1,15 +1,16 @@
 # testdata
 
-Vectors for the tests in this module: the raw responses the adapters map.
-
-They mirror the repository-level `fixtures/providers/` directory, which both
-ends share. **Change both copies.**
+Sample responses for the adapter tests: the raw JSON each provider sends,
+mapped offline into a `domain.Snapshot`.
 
 ```text
-fixtures/providers/<providerId>/<case>.json  ←→  testdata/providers/<providerId>/<case>.json
+providers/<providerId>/<case>.json
 ```
 
-The copy exists because this module is published on its own and cannot reach
-outside its own directory. The repository-level `fixtures/` stays the source of
-truth for the Apple end; `fixtures/vault/` has no counterpart here because no
-test in this module reads it yet (the encrypted vault is Task 008).
+Every provider needs at least a happy path and a malformed case. The malformed
+one asserts that the adapter returns `ErrProviderBadResponse` rather than
+reporting a failure as `0`.
+
+These are the service's own structures, not rewritten for convenience — a
+reshaped fixture hides the real field names and units. Amounts and durations
+are converted inside the adapter, so the fixtures stay as they arrive.

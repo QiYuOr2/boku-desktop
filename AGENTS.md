@@ -143,9 +143,7 @@ testdata/       适配器测试用的原始响应样本
 ## Toolchain Rules
 
 - 命令入口只有 `go` 与 `go tool mygo`。
-- 不使用 vp / vite / vitest / oxlint / oxfmt / eslint / prettier。
-- 不使用 npm / yarn / pnpm / npx / Bun。
-- 不引入 webview 前端与第二套构建编排层。
+- 不引入第二套构建工具或前端构建链。
 - 所有代码必须能在 `CGO_ENABLED=0` 下编译，不引入需要 cgo 的依赖。
 - 验证命令：`gofmt -l .`、`go vet ./...`、`go tool mygo vet .`、`go test ./...`。
 
