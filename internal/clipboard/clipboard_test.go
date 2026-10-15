@@ -55,7 +55,7 @@ func TestASyntheticCopyIsNotRecorded(t *testing.T) {
 func TestClipboardDefaultsToOff(t *testing.T) {
 	clipboard, _, _, _ := newTestClipboard(t, ClipboardOptions{})
 	settings := clipboard.Settings()
-	if settings.Clipboard.RegionVisible || settings.Clipboard.Monitoring {
+	if settings.RegionVisible || settings.Monitoring {
 		t.Errorf("the clipboard starts enabled: %+v", settings)
 	}
 	if clipboard.Show() {
@@ -262,11 +262,11 @@ func TestPinnedEntriesSurviveTheLimit(t *testing.T) {
 		t.Fatalf("SaveEntries failed: %v", err)
 	}
 	clipboard, err := NewClipboard(ClipboardOptions{
-		Device: device,
-		Store:  store,
-		Tools:  &fakeTools{},
-		Clock:  newTestClock(),
-		Keep:   2,
+		Device:  device,
+		Store:   store,
+		Section: NewSection(),
+		Clock:   newTestClock(),
+		Keep:    2,
 	})
 	if err != nil {
 		t.Fatalf("NewClipboard failed: %v", err)
@@ -356,7 +356,7 @@ func TestCopySuppressesTheLoop(t *testing.T) {
 	}
 
 	// After the suppression window, a genuinely new copy is recorded again.
-	clock.advance(3 * domain.ClipboardDefaultPollInterval)
+	clock.advance(3 * DefaultPollInterval)
 	read(clipboard, clock, device, "something else")
 	if got := len(clipboard.History(0)); got != 3 {
 		t.Errorf("a new value after the window produced %d entries, want 3", got)
@@ -494,7 +494,7 @@ func TestEvictedEntriesTakeTheirPicturesWithThem(t *testing.T) {
 	ctx := context.Background()
 	// One more picture than the smallest history the settings allow, so that
 	// the limit is what drops one.
-	copies := domain.ClipboardMinHistorySize + 1
+	copies := MinHistorySize + 1
 	refs := make([]string, 0, copies)
 	for i := 0; i < copies; i++ {
 		png := []byte(fmt.Sprintf("89504e470d0a1a0a-picture-%d", i))
@@ -510,19 +510,19 @@ func TestEvictedEntriesTakeTheirPicturesWithThem(t *testing.T) {
 		t.Fatalf("the image store holds %d pictures, want all %d copies", len(kept), copies)
 	}
 
-	if err := clipboard.SetHistorySize(ctx, domain.ClipboardMinHistorySize); err != nil {
+	if err := clipboard.SetHistorySize(ctx, MinHistorySize); err != nil {
 		t.Fatalf("SetHistorySize failed: %v", err)
 	}
 	// The entry goes first and its picture follows: the deletion happens
 	// behind the frame, so the test waits for it rather than assuming it.
 	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) && len(store.keptImages()) > domain.ClipboardMinHistorySize {
+	for time.Now().Before(deadline) && len(store.keptImages()) > MinHistorySize {
 		time.Sleep(10 * time.Millisecond)
 	}
 	kept := store.keptImages()
-	if len(kept) != domain.ClipboardMinHistorySize {
+	if len(kept) != MinHistorySize {
 		t.Fatalf("the image store holds %d pictures, want the %d entries that are left",
-			len(kept), domain.ClipboardMinHistorySize)
+			len(kept), MinHistorySize)
 	}
 	if _, ok := kept[refs[0]]; ok {
 		t.Error("the picture of the entry that was dropped is still kept")
@@ -586,11 +586,10 @@ func TestAnUnreadablePictureIsRecordedWithItsReason(t *testing.T) {
 // start treating its own write as new after one.
 func TestCopiedValueIsSuppressedForTheConfiguredInterval(t *testing.T) {
 	clock := newTestClock()
-	tools := &fakeTools{settings: domain.ToolSettings{
-		Clipboard: domain.ClipboardSettings{PollInterval: 2 * time.Second},
-	}}
-	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{Clock: clock, Tools: tools})
-	if got := clipboard.Settings().Clipboard.Interval(); got != 2*time.Second {
+	tools := newFakeTools()
+	tools.section.Set(Settings{PollInterval: 2 * time.Second})
+	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{Clock: clock, Section: tools.section, Settings: tools})
+	if got := clipboard.Settings().Interval(); got != 2*time.Second {
 		t.Fatalf("the service reads an interval of %s, want the saved one", got)
 	}
 	if got := clipboard.interval; got != 2*time.Second {
@@ -648,13 +647,15 @@ func TestMonitoringOnlyReadsWhileItIsOn(t *testing.T) {
 		t.Error("the region is still shown after monitoring was turned off")
 	}
 	after := device.readCount()
-	time.Sleep(4 * domain.ClipboardMinPollInterval)
+	time.Sleep(4 * MinPollInterval)
 	if got := device.readCount(); got != after {
 		t.Errorf("the clipboard was read %d more times after monitoring was turned off", got-after)
 	}
 
-	settings, _ := tools.Load(ctx)
-	if settings.Clipboard.Monitoring {
+	if err := tools.Load(ctx); err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if tools.section.Current().Monitoring {
 		t.Error("the switch was not saved as off")
 	}
 	if tools.saves == 0 {
@@ -700,26 +701,27 @@ func TestSetRegionVisibleIsIndependentOfMonitoring(t *testing.T) {
 	if err := clipboard.SetRegionVisible(ctx, true); err != nil {
 		t.Fatalf("SetRegionVisible failed: %v", err)
 	}
-	if clipboard.Settings().Clipboard.Monitoring {
+	if clipboard.Settings().Monitoring {
 		t.Error("showing the region turned monitoring on")
 	}
-	time.Sleep(2 * domain.ClipboardMinPollInterval)
+	time.Sleep(2 * MinPollInterval)
 	if got := device.readCount(); got != 0 {
 		t.Errorf("the clipboard was read %d times while monitoring is off", got)
 	}
-	if !clipboard.Settings().Clipboard.RegionVisible {
+	if !clipboard.Settings().RegionVisible {
 		t.Error("the visibility switch was not saved")
 	}
 }
 
 // A settings file that cannot be written must not take the switch with it.
 func TestSwitchesSurviveASaveFailure(t *testing.T) {
-	tools := &fakeTools{err: errors.New("the settings file is read-only")}
-	clipboard, _, _, _ := newTestClipboard(t, ClipboardOptions{Tools: tools})
+	tools := newFakeTools()
+	tools.saveErr = errors.New("the settings file is read-only")
+	clipboard, _, _, _ := newTestClipboard(t, ClipboardOptions{Section: tools.section, Settings: tools})
 	if err := clipboard.SetMonitoring(context.Background(), true); err == nil {
 		t.Error("SetMonitoring reported no error for a failed save")
 	}
-	if !clipboard.Settings().Clipboard.Monitoring {
+	if !clipboard.Settings().Monitoring {
 		t.Error("the switch the user flipped was dropped")
 	}
 }
@@ -728,39 +730,38 @@ func TestSwitchesSurviveASaveFailure(t *testing.T) {
 // drops what no longer fits at once, and it is written down for the next
 // start.
 func TestRecordRangeBoundsTheHistory(t *testing.T) {
-	tools := &fakeTools{settings: domain.ToolSettings{
-		Clipboard: domain.ClipboardSettings{
-			RegionVisible: true,
-			Monitoring:    true,
-			HistorySize:   domain.ClipboardMaxHistorySize,
-		},
-	}}
-	clipboard, device, store, _ := newTestClipboard(t, ClipboardOptions{Tools: tools})
-	if got := clipboard.Settings().Clipboard.KeepsHistory(); got != domain.ClipboardMaxHistorySize {
-		t.Fatalf("the range starts at %d, want %d", got, domain.ClipboardMaxHistorySize)
+	tools := newFakeTools()
+	tools.section.Set(Settings{
+		RegionVisible: true,
+		Monitoring:    true,
+		HistorySize:   MaxHistorySize,
+	})
+	clipboard, device, store, _ := newTestClipboard(t, ClipboardOptions{Section: tools.section, Settings: tools})
+	if got := clipboard.Settings().KeepsHistory(); got != MaxHistorySize {
+		t.Fatalf("the range starts at %d, want %d", got, MaxHistorySize)
 	}
 	ctx := context.Background()
-	total := domain.ClipboardMaxHistorySize + 2
+	total := MaxHistorySize + 2
 	for i := 0; i < total; i++ {
 		device.set(textReading(fmt.Sprintf("copy %d", i)))
 		clipboard.Read(ctx)
 	}
-	if got := len(clipboard.History(0)); got != domain.ClipboardMaxHistorySize {
-		t.Fatalf("the history holds %d entries, want the range %d", got, domain.ClipboardMaxHistorySize)
+	if got := len(clipboard.History(0)); got != MaxHistorySize {
+		t.Fatalf("the history holds %d entries, want the range %d", got, MaxHistorySize)
 	}
 
-	if err := clipboard.SetHistorySize(ctx, domain.ClipboardMinHistorySize); err != nil {
+	if err := clipboard.SetHistorySize(ctx, MinHistorySize); err != nil {
 		t.Fatalf("SetHistorySize failed: %v", err)
 	}
-	if got := len(clipboard.History(0)); got != domain.ClipboardMinHistorySize {
+	if got := len(clipboard.History(0)); got != MinHistorySize {
 		t.Errorf("the history holds %d entries after the range was shortened, want %d",
-			got, domain.ClipboardMinHistorySize)
+			got, MinHistorySize)
 	}
 	waitFor(t, "the pruned history to be written", func() bool {
-		return len(store.stored()) == domain.ClipboardMinHistorySize
+		return len(store.stored()) == MinHistorySize
 	})
-	if got := tools.settings.Clipboard.KeepsHistory(); got != domain.ClipboardMinHistorySize {
-		t.Errorf("the saved range is %d, want %d", got, domain.ClipboardMinHistorySize)
+	if got := tools.section.Current().KeepsHistory(); got != MinHistorySize {
+		t.Errorf("the saved range is %d, want %d", got, MinHistorySize)
 	}
 
 	// A number the settings form cannot offer is the default, not a bound of
@@ -768,8 +769,8 @@ func TestRecordRangeBoundsTheHistory(t *testing.T) {
 	if err := clipboard.SetHistorySize(ctx, 7); err != nil {
 		t.Fatalf("SetHistorySize(7) failed: %v", err)
 	}
-	if got := clipboard.Settings().Clipboard.KeepsHistory(); got != domain.ClipboardDefaultHistorySize {
-		t.Errorf("a range of 7 became %d, want the default %d", got, domain.ClipboardDefaultHistorySize)
+	if got := clipboard.Settings().KeepsHistory(); got != DefaultHistorySize {
+		t.Errorf("a range of 7 became %d, want the default %d", got, DefaultHistorySize)
 	}
 }
 
@@ -777,8 +778,8 @@ func TestRecordRangeBoundsTheHistory(t *testing.T) {
 // it read before anything is shown.
 func TestRecordRangeIsReadAtStart(t *testing.T) {
 	base := time.Date(2026, 2, 3, 9, 0, 0, 0, time.UTC)
-	entries := make([]domain.ClipboardEntry, 0, domain.ClipboardMaxHistorySize)
-	for i := 0; i < domain.ClipboardMaxHistorySize; i++ {
+	entries := make([]domain.ClipboardEntry, 0, MaxHistorySize)
+	for i := 0; i < MaxHistorySize; i++ {
 		entries = append(entries, domain.ClipboardEntry{
 			ID:          fmt.Sprintf("entry-%02d", i),
 			Content:     fmt.Sprintf("copy %d", i),
@@ -788,23 +789,25 @@ func TestRecordRangeIsReadAtStart(t *testing.T) {
 			CreatedAt:   base,
 		})
 	}
-	tools := &fakeTools{settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{HistorySize: domain.ClipboardMinHistorySize}}}
+	tools := newFakeTools()
+	tools.section.Set(Settings{HistorySize: MinHistorySize})
 	clipboard, err := NewClipboard(ClipboardOptions{
-		Device: &fakeDevice{},
-		Store:  &fakeStore{entries: entries},
-		Tools:  tools,
+		Device:   &fakeDevice{},
+		Store:    &fakeStore{entries: entries},
+		Section:  tools.section,
+		Settings: tools,
 	})
 	if err != nil {
 		t.Fatalf("NewClipboard failed: %v", err)
 	}
 	t.Cleanup(clipboard.Stop)
 	history := clipboard.History(0)
-	if len(history) != domain.ClipboardMinHistorySize {
+	if len(history) != MinHistorySize {
 		t.Fatalf("the history starts with %d entries, want the saved range %d",
-			len(history), domain.ClipboardMinHistorySize)
+			len(history), MinHistorySize)
 	}
 	// The newest of the entries are the ones kept.
-	if want := fmt.Sprintf("copy %d", domain.ClipboardMaxHistorySize-1); history[0].Content != want {
+	if want := fmt.Sprintf("copy %d", MaxHistorySize-1); history[0].Content != want {
 		t.Errorf("the history starts with %q, want the newest copy %q", history[0].Content, want)
 	}
 }
@@ -813,7 +816,7 @@ func TestRecordRangeIsReadAtStart(t *testing.T) {
 func TestCorruptHistoryDoesNotStopTheTool(t *testing.T) {
 	store := &fakeStore{loadErr: errors.New("the history file is not json")}
 	device := &fakeDevice{}
-	clipboard, err := NewClipboard(ClipboardOptions{Device: device, Store: store, Tools: &fakeTools{}})
+	clipboard, err := NewClipboard(ClipboardOptions{Device: device, Store: store, Section: NewSection()})
 	if err != nil {
 		t.Fatalf("NewClipboard failed over an unreadable history: %v", err)
 	}
@@ -833,21 +836,16 @@ func TestCorruptHistoryDoesNotStopTheTool(t *testing.T) {
 func TestUnreadableSettingsStopTheTool(t *testing.T) {
 	store := &fakeStore{}
 	device := &fakeDevice{}
+	tools := newFakeTools()
+	tools.loadErr = errors.New("the settings file is unreadable")
 	if _, err := NewClipboard(ClipboardOptions{
-		Device: device,
-		Store:  store,
-		Tools:  &failingTools{},
+		Device:   device,
+		Store:    store,
+		Section:  tools.section,
+		Settings: tools,
 	}); err == nil {
 		t.Error("NewClipboard started over an unreadable settings file")
 	}
-}
-
-// failingTools refuses to load, as a settings file with the wrong owner or
-// unreadable bytes would.
-type failingTools struct{ fakeTools }
-
-func (f *failingTools) Load(context.Context) (domain.ToolSettings, error) {
-	return domain.ToolSettings{}, errors.New("the settings file is unreadable")
 }
 
 // prune is where the history's bound lives, so it is tested on its own, with
@@ -952,13 +950,12 @@ func TestPruneOrdersAndBoundsTheHistory(t *testing.T) {
 
 // Starting the tool again obeys the switches the last session saved.
 func TestClipboardStartRespectsTheSavedSwitch(t *testing.T) {
-	tools := &fakeTools{settings: domain.ToolSettings{
-		Clipboard: domain.ClipboardSettings{
-			Monitoring:    true,
-			RegionVisible: true,
-		},
-	}}
-	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{Tools: tools})
+	tools := newFakeTools()
+	tools.section.Set(Settings{
+		Monitoring:    true,
+		RegionVisible: true,
+	})
+	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{Section: tools.section, Settings: tools})
 	clipboard.Start(context.Background())
 	waitFor(t, "the first poll from Start", func() bool { return device.readCount() >= 1 })
 	if !clipboard.Show() {

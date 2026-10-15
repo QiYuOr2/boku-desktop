@@ -218,56 +218,19 @@ func (e ClipboardEntry) Validate() error {
 	return nil
 }
 
-// ToolSettings is the application's own configuration as one value: what the
-// user chose about Boku, in the groups the features that read them are
-// organised in.
+// MaxClipTextBytes is how much text of one copy is kept. Anything longer is
+// truncated: a clipboard holding a whole file must not end up in the history.
 //
-// It is a container, not a bag: each field belongs to one feature, and that
-// feature is the only thing that reads or writes it. The grouping is what
-// makes the ownership visible — a new setting goes into the group whose
-// feature will read it, and a feature that is handed this value still cannot
-// name another feature's fields without saying so out loud.
-//
-// One file holds all of it (internal/settings), because it is one thing the
-// user configured and one file they may put in a cloud folder; the grouping
-// is a property of the value, not of where it is stored.
-type ToolSettings struct {
-	// Clipboard is the clipboard tool's own configuration.
-	Clipboard ClipboardSettings
-	// Panels is what the user chose about the panels that can be turned off.
-	Panels PanelSettings
-	// Translation is the selection-translation tool's own configuration.
-	Translation TranslationSettings
-}
+// It is a bound on the entity rather than a setting, which is why it lives
+// here and not with the clipboard feature's own configuration: what a recorded
+// copy may hold is what a ClipboardEntry is, and internal/kit — which does the
+// truncating — may only depend on this package.
+const MaxClipTextBytes = 64 << 10
 
-// Normalize makes every group sane. A hand-edited settings file should not
-// keep the application from starting; it should be brought into its bounds.
-//
-// It delegates rather than repeating: each group knows its own rules, and a
-// group is normalized the same way whether it was read from a file or built
-// by an assembly.
-func (s ToolSettings) Normalize() ToolSettings {
-	s.Clipboard = s.Clipboard.Normalize()
-	s.Panels = s.Panels.Normalize()
-	s.Translation = s.Translation.Normalize()
-	return s
-}
-
-// ToolStore reads and writes the application's own settings. Its
-// implementation is a file, and it is the only place they are written.
-//
-// Update is the way a setting is changed. Load followed by Save is two steps
-// that another change can land between, and the second write then puts back
-// the values the first one read: the whole file is replaced by whatever the
-// caller happened to load. A caller that means to change something uses
-// Update, which reads, changes and writes without letting go of the file.
-type ToolStore interface {
-	Load(ctx context.Context) (ToolSettings, error)
-	Save(ctx context.Context, settings ToolSettings) error
-	// Update reads the settings, hands them to change, and writes the result.
-	// A change that returns an error leaves the file alone.
-	Update(ctx context.Context, change func(*ToolSettings) error) error
-}
+// MaxClipImageBytes is how large a bitmap on the clipboard is read. A larger
+// one is not read at all: the entry still says that a picture was copied,
+// without the application holding it.
+const MaxClipImageBytes = 16 << 20
 
 // ClipboardStore reads and writes clipboard history. Entries are stored
 // whole, newest first: the list is short enough that reading it costs

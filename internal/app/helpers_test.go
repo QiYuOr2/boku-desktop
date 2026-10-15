@@ -260,6 +260,7 @@ func testStateWith(t testing.TB, provider *testProvider, store *testStore, versi
 	panels, err := panel.NewPanels(
 		testRegistry{provider: provider, adapter: testAdapter{provider: provider}},
 		store,
+		panel.NewSection(),
 		nil,
 		[]panel.PanelDef{{Panel: deepseek.Panel(), Metrics: deepseek.Metrics()}},
 	)
@@ -371,15 +372,16 @@ func testTranslate(t testing.TB, store *testStore, device *testDevice) *testTran
 		BaseURLSetting:       "custom.baseURL",
 		AllowEmptyCredential: true,
 	}}
-	// The store starts as a fresh installation has it: the file store fills
-	// the translation defaults in when the file has no such key, so the fake
-	// stands in for a store that has already been read once.
-	tools := &testToolStore{settings: domain.ToolSettings{Translation: domain.TranslationDefaults()}}
+	// The sections start as a fresh installation has them: the file store
+	// fills the defaults in when the file has no such key, so the fake stands
+	// in for a store that has already been read once.
+	tools := newTestToolStore()
 	selection := &testSelection{timeline: timeline}
 	service, err := translate.NewTranslate(translate.TranslateOptions{
 		Translators: testTranslators{reply, custom},
 		Secrets:     store,
-		Tools:       tools,
+		Section:     tools.translation,
+		Settings:    tools,
 		// The platform's own answer is faked here, so that a test can say
 		// what the user has selected in another application — and, through
 		// the timeline, when it was read.
@@ -625,17 +627,18 @@ func testClipboard(t testing.TB, device *testDevice, tools *testToolStore) *clip
 		device = &testDevice{}
 	}
 	if tools == nil {
-		tools = &testToolStore{}
+		tools = newTestToolStore()
 	}
 	// One clock for the service and for what the device hands back: the
 	// history is ordered by the times the device reports.
 	clock := &testClock{at: time.Date(2026, 2, 3, 9, 0, 0, 0, time.UTC)}
 	device.now = clock.now
 	clipboard, err := clipboard.NewClipboard(clipboard.ClipboardOptions{
-		Device: device,
-		Store:  &testClipStore{},
-		Tools:  tools,
-		Clock:  clock,
+		Device:   device,
+		Store:    &testClipStore{},
+		Section:  tools.clipboard,
+		Settings: tools,
+		Clock:    clock,
 	})
 	if err != nil {
 		t.Fatalf("NewClipboard failed: %v", err)
@@ -841,35 +844,36 @@ func (s *testClipStore) SaveEntries(_ context.Context, entries []domain.Clipboar
 	return nil
 }
 
-// testToolStore is a domain.ToolStore in memory.
+// testToolStore is the settings store, in memory: the real sections, with the
+// file replaced by a map.
+//
+// The sections are the real ones — a test that changed a clipboard switch
+// through a stand-in would not be testing what ships — and what is faked is
+// only the file underneath them, so that a test never touches a user's data.
 type testToolStore struct {
-	mu       sync.Mutex
-	settings domain.ToolSettings
+	mu          sync.Mutex
+	clipboard   *clipboard.Section
+	translation *translate.Section
+	panels      *panel.Section
 }
 
-func (s *testToolStore) Load(context.Context) (domain.ToolSettings, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.settings, nil
-}
-
-func (s *testToolStore) Save(_ context.Context, settings domain.ToolSettings) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.settings = settings
-	return nil
-}
-
-// Update is the store's read-modify-write, in one critical section.
-func (s *testToolStore) Update(_ context.Context, change func(*domain.ToolSettings) error) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	settings := s.settings
-	if err := change(&settings); err != nil {
-		return err
+func newTestToolStore() *testToolStore {
+	return &testToolStore{
+		clipboard:   clipboard.NewSection(),
+		translation: translate.NewSection(),
+		panels:      panel.NewSection(),
 	}
-	s.settings = settings.Normalize()
-	return nil
+}
+
+// Load is a file read that finds nothing: every section keeps its defaults.
+func (s *testToolStore) Load(context.Context) error { return nil }
+
+// Update runs the change against the section named, the way the file store
+// does — it is the section that decides what the change means.
+func (s *testToolStore) Update(_ context.Context, section string, change func() error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return change()
 }
 
 // withCredential adds the DeepSeek key the panel needs.
@@ -885,6 +889,7 @@ func emptyPanelService(t *testing.T) *panel.Panels {
 	panels, err := panel.NewPanels(
 		testRegistry{provider: provider, adapter: testAdapter{provider: provider}},
 		newTestStore(),
+		panel.NewSection(),
 		nil,
 		nil,
 	)
@@ -989,4 +994,102 @@ func clipboardState(t testing.TB, device *testDevice, tools *testToolStore) *Sta
 	state.clipboard = testClipboard(t, device, tools)
 	loaded(t, state)
 	return state
+}
+
+// translateState is a state whose translation card is a fake, so that a test
+// can ask what the card was told without a window existing.
+func translateState(t testing.TB) (*State, *testTranslateFixture, *testCard) {
+	t.Helper()
+	state, translate, _ := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	card := &testCard{timeline: translate.timeline}
+	state.cardWindows = func(onClosed, onBlur, onFocus func()) cardWindow {
+		card.onClosed, card.onBlur, card.onFocus = onClosed, onBlur, onFocus
+		return card
+	}
+	state.cursor, state.cursorSet = mygo.Point{X: 400, Y: 300}, true
+	return state, translate, card
+}
+
+func start(t *testing.T, state *State) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		state.onTranslateShortcut()
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the shortcut callback did not return: something in it waits")
+	}
+}
+
+type testCard struct {
+	mu     sync.Mutex
+	shown  bool
+	focuse int
+	hides  int
+	bounds mygo.Rectangle
+
+	// timeline, when a test sets one, records the two moments that matter to
+	// a translation: the card appearing without the keyboard, and taking it.
+	timeline *timeline
+
+	onClosed func()
+	onBlur   func()
+	onFocus  func()
+}
+
+func (c *testCard) ShowInactive() {
+	c.mu.Lock()
+	c.shown = true
+	c.mu.Unlock()
+	if c.timeline != nil {
+		c.timeline.add("the card appeared without the keyboard")
+	}
+}
+
+func (c *testCard) Focus() {
+	c.mu.Lock()
+	c.focuse++
+	c.mu.Unlock()
+	if c.timeline != nil {
+		c.timeline.add("the card took the keyboard")
+	}
+}
+func (c *testCard) Hide() { c.mu.Lock(); c.hides++; c.shown = false; c.mu.Unlock() }
+func (c *testCard) Update(fn func()) {
+	// The card has no frame of its own, so the update runs where it is
+	// asked for: that is the state the next frame would draw.
+	fn()
+}
+func (c *testCard) SetContentBounds(r mygo.Rectangle) { c.mu.Lock(); c.bounds = r; c.mu.Unlock() }
+func (c *testCard) ContentBounds() mygo.Rectangle     { c.mu.Lock(); defer c.mu.Unlock(); return c.bounds }
+func (c *testCard) OnClosed(fn func()) func()         { c.onClosed = fn; return func() {} }
+func (c *testCard) OnBlur(fn func()) func()           { c.onBlur = fn; return func() {} }
+func (c *testCard) OnFocus(fn func()) func()          { c.onFocus = fn; return func() {} }
+
+// visible is whether the card is on screen.
+func (c *testCard) visible() bool { c.mu.Lock(); defer c.mu.Unlock(); return c.shown }
+
+// hidden is how many times the card was taken off screen.
+func (c *testCard) hidden() int { c.mu.Lock(); defer c.mu.Unlock(); return c.hides }
+
+// blur and focus are what the platform reports.
+func (c *testCard) blur() {
+	c.mu.Lock()
+	fn := c.onBlur
+	c.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
+func (c *testCard) focus() {
+	c.mu.Lock()
+	fn := c.onFocus
+	c.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
 }

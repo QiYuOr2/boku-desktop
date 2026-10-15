@@ -45,7 +45,7 @@ type Translator struct {
 	// settings is what the application was configured with. The settings
 	// window reads it to show the address and the name; a translation uses
 	// whatever is stored at the moment the request is made.
-	settings func() domain.CustomTranslatorSettings
+	settings func() openai.CustomService
 	model    string
 	now      func() time.Time
 }
@@ -53,7 +53,7 @@ type Translator struct {
 // New returns the translator. Settings is a function rather than a value
 // because the user may change the address while the application runs, and
 // the next translation should use the new one.
-func New(client *httpc.Client, settings func() domain.CustomTranslatorSettings) *Translator {
+func New(client *httpc.Client, settings func() openai.CustomService) *Translator {
 	return &Translator{
 		client:   client,
 		settings: settings,
@@ -65,8 +65,8 @@ func New(client *httpc.Client, settings func() domain.CustomTranslatorSettings) 
 // NewWithBaseURL returns a translator with an address of its own, whatever
 // the settings say. Tests use it to point at an httptest server.
 func NewWithBaseURL(client *httpc.Client, baseURL string) *Translator {
-	return New(client, func() domain.CustomTranslatorSettings {
-		return domain.CustomTranslatorSettings{BaseURL: baseURL}
+	return New(client, func() openai.CustomService {
+		return openai.CustomService{BaseURL: baseURL}
 	})
 }
 
@@ -89,11 +89,18 @@ func (t *Translator) Descriptor() domain.TranslatorDescriptor {
 }
 
 // current is what the user configured, as the settings hold it now.
-func (t *Translator) current() domain.CustomTranslatorSettings {
+//
+// The address is cleaned the way this feature cleans it, so that what is asked
+// is what will be stored; the backend does not judge it further.
+func (t *Translator) current() openai.CustomService {
 	if t.settings == nil {
-		return domain.CustomTranslatorSettings{}
+		return openai.CustomService{}
 	}
-	return t.settings().Normalize()
+	raw := t.settings()
+	return openai.CustomService{
+		BaseURL:     openai.NormalizeBaseURL(raw.BaseURL),
+		DisplayName: strings.TrimSpace(raw.DisplayName),
+	}
 }
 
 // Translate asks for the translation.
@@ -120,7 +127,7 @@ func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, re
 	// key".
 	key := strings.TrimSpace(creds.Secrets[APIKeyCredential])
 
-	text, cut := openai.Truncate(req.Text, domain.MaxTranslationChars)
+	text, cut := openai.Truncate(req.Text, openai.DefaultMaxChars)
 	source := req.SourceLang
 	if source == domain.LangUnknown {
 		source = domain.Language(kit.DetectLanguage(text))
@@ -163,7 +170,7 @@ func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, re
 		result.TranslatedText = content
 	}
 	if cut {
-		result.Note = "原文过长，只翻译了前 " + strconv.Itoa(domain.MaxTranslationChars) + " 个字。"
+		result.Note = "原文过长，只翻译了前 " + strconv.Itoa(openai.DefaultMaxChars) + " 个字。"
 	}
 	if err := result.Validate(); err != nil {
 		return domain.TranslationResult{}, err

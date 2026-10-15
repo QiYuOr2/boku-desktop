@@ -54,7 +54,7 @@ func TestWatcherDoesNotOverlapItsReads(t *testing.T) {
 	done := make(chan struct{})
 	watcher := &Watcher{
 		Device:   device,
-		Interval: domain.ClipboardMinPollInterval,
+		Interval: MinPollInterval,
 		Emit:     func(domain.ClipContent) {},
 	}
 	go func() {
@@ -69,7 +69,7 @@ func TestWatcherDoesNotOverlapItsReads(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("the watcher never read the clipboard")
 	}
-	time.Sleep(3 * domain.ClipboardMinPollInterval)
+	time.Sleep(3 * MinPollInterval)
 	select {
 	case <-device.reads:
 		t.Error("the watcher started a second read while the first was in flight")
@@ -98,7 +98,7 @@ func TestWatcherKeepsGoingAfterAFailedRead(t *testing.T) {
 	done := make(chan struct{})
 	watcher := &Watcher{
 		Device:   device,
-		Interval: domain.ClipboardMinPollInterval,
+		Interval: MinPollInterval,
 		Emit: func(domain.ClipContent) {
 			mu.Lock()
 			emitted++
@@ -109,7 +109,7 @@ func TestWatcherKeepsGoingAfterAFailedRead(t *testing.T) {
 		defer close(done)
 		_ = watcher.Run(ctx)
 	}()
-	time.Sleep(2 * domain.ClipboardMinPollInterval)
+	time.Sleep(2 * MinPollInterval)
 
 	device.fail(nil)
 	device.set(textReading("after the failure"))
@@ -144,7 +144,7 @@ func TestWatcherEmitsOnlyWhatChanged(t *testing.T) {
 	defer cancel()
 	watcher := &Watcher{
 		Device:   device,
-		Interval: domain.ClipboardMinPollInterval,
+		Interval: MinPollInterval,
 		Emit: func(reading domain.ClipContent) {
 			mu.Lock()
 			emitted = append(emitted, reading.Text)
@@ -163,7 +163,7 @@ func TestWatcherEmitsOnlyWhatChanged(t *testing.T) {
 		return len(emitted) >= 1
 	})
 	// Several polls of the same value must not emit again.
-	time.Sleep(3 * domain.ClipboardMinPollInterval)
+	time.Sleep(3 * MinPollInterval)
 	mu.Lock()
 	count := len(emitted)
 	mu.Unlock()
@@ -181,7 +181,7 @@ func TestWatcherEmitsOnlyWhatChanged(t *testing.T) {
 	// A failing device emits nothing.
 	device.fail(errors.New("the clipboard is busy"))
 	before := len(emitted)
-	time.Sleep(2 * domain.ClipboardMinPollInterval)
+	time.Sleep(2 * MinPollInterval)
 	mu.Lock()
 	after := len(emitted)
 	mu.Unlock()
@@ -207,7 +207,7 @@ func TestWatcherRejectsAnIntervalBelowTheFloor(t *testing.T) {
 		defer close(done)
 		_ = watcher.Run(ctx)
 	}()
-	time.Sleep(domain.ClipboardMinPollInterval + 50*time.Millisecond)
+	time.Sleep(MinPollInterval + 50*time.Millisecond)
 	cancel()
 	<-done
 	if got := device.readCount(); got > 3 {

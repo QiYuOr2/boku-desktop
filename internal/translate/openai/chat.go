@@ -22,10 +22,10 @@ import (
 	"boku/internal/platform/httpc"
 )
 
-// DefaultMaxChars bounds what one request carries. The use case truncates
-// before this, so a request that reaches here is already inside it; the
-// constant is the translator's own ceiling for callers that are not the use
-// case, such as a test.
+// DefaultMaxChars bounds what one request carries. The caller truncates before
+// this, so a request that reaches here is already inside it; the constant is
+// the ceiling for callers that are not the use case, such as a test — and the
+// number the note about a shortened text names.
 const DefaultMaxChars = 4000
 
 // Options is one call: where to ask, what to call the model, what to say,
@@ -52,6 +52,86 @@ type Options struct {
 // endpointPath is the OpenAI-compatible path every service of this kind
 // answers on.
 const endpointPath = "/chat/completions"
+
+// CustomService is where a user's own OpenAI-compatible service is, and what
+// to call it.
+//
+// It lives here, beside the protocol it names, because the two things that
+// need it are on either side of a boundary: the custom backend asks a service
+// at this address, and the settings that hold it are the translation feature's.
+// The backend cannot import the feature — the feature imports the backend — so
+// the type they share belongs with the protocol instead.
+type CustomService struct {
+	// BaseURL is the service's address, such as "https://api.example.com/v1".
+	// Empty means the service is not configured, and the window says so.
+	BaseURL string
+	// DisplayName is what the user calls the service. Empty means the
+	// interface uses its own word for it.
+	DisplayName string
+}
+
+// NormalizeBaseURL turns what a user typed into an address the application
+// will ask, or into nothing.
+//
+// It accepts what people write — "api.example.com/v1", or a full URL — and
+// refuses anything that is not plain HTTP: a credential is about to be sent
+// there, and a scheme the transport does not speak is a mistake worth dropping
+// rather than passing on. A protocol-relative address ("//host/v1") is dropped
+// too: it is how a web page means "the same scheme as this page", which a
+// desktop application has no answer for.
+//
+// It sits here rather than in the feature that stores the address because the
+// backend that asks it needs the same answer: what is stored and what is asked
+// must be the same string, and two cleanings is two chances for them to differ.
+func NormalizeBaseURL(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" || strings.HasPrefix(value, "//") {
+		return ""
+	}
+	lower := strings.ToLower(value)
+	scheme := "https"
+	if index := strings.Index(lower, "://"); index >= 0 {
+		scheme, value = lower[:index], value[index+3:]
+	} else if index := strings.IndexAny(lower, ":/?#"); index >= 0 {
+		// Something before the first slash that is not the host is a scheme,
+		// however it is punctuated: "javascript:alert(1)" names a scheme and
+		// a payload, not a host and a path. A port ("localhost:8080/v1")
+		// names the host itself, which is the one colon that is allowed to
+		// stand alone.
+		head := lower[:index]
+		if lower[index] == ':' && !strings.ContainsAny(head, "./") && !isPort(head, lower[index+1:]) {
+			return ""
+		}
+	}
+	if scheme != "http" && scheme != "https" {
+		return ""
+	}
+	host := strings.TrimLeft(value, "/")
+	if host == "" {
+		return ""
+	}
+	return scheme + "://" + strings.TrimRight(host, "/")
+}
+
+// isPort reports whether what follows a colon is a port number rather than the
+// payload of a scheme: "8080/v1" is, "alert(1)" is not.
+func isPort(head, rest string) bool {
+	digits := rest
+	if index := strings.IndexAny(rest, "/?#"); index >= 0 {
+		digits = rest[:index]
+	}
+	if digits == "" {
+		return false
+	}
+	for _, r := range digits {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	// A port is a number, and the host it belongs to is a host: no scheme is
+	// spelled with digits before it.
+	return head != ""
+}
 
 // EndpointOf is the address a base URL is asked at, or "" when there is no
 // base URL. The settings window shows it, so that a user can see where their

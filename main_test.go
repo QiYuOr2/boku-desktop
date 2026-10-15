@@ -31,7 +31,7 @@ func TestServicesAssembleThePanels(t *testing.T) {
 	}
 	// The clipboard starts off, and nothing here reads the system
 	// clipboard: assembling a service is not using it.
-	if settings := clip.Settings(); settings.Clipboard.Monitoring || settings.Clipboard.RegionVisible {
+	if settings := clip.Settings(); settings.Monitoring || settings.RegionVisible {
 		t.Errorf("the clipboard starts enabled: %+v", settings)
 	}
 

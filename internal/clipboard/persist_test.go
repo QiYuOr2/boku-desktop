@@ -54,9 +54,10 @@ func TestCopyDoesNotWaitForTheHistoryFile(t *testing.T) {
 	device := &fakeDevice{}
 	store := newSlowStore(300 * time.Millisecond)
 	clipboard, err := NewClipboard(ClipboardOptions{
-		Device: device,
-		Store:  store,
-		Tools:  &fakeTools{},
+		Device:   device,
+		Store:    store,
+		Section:  NewSection(),
+		Settings: newFakeTools(),
 	})
 	if err != nil {
 		t.Fatalf("NewClipboard failed: %v", err)
@@ -110,9 +111,10 @@ func TestAnUnchangedHistoryIsNotRewritten(t *testing.T) {
 	device := &fakeDevice{}
 	store := &countingStore{}
 	clipboard, err := NewClipboard(ClipboardOptions{
-		Device: device,
-		Store:  store,
-		Tools:  &fakeTools{},
+		Device:   device,
+		Store:    store,
+		Section:  NewSection(),
+		Settings: newFakeTools(),
 	})
 	if err != nil {
 		t.Fatalf("NewClipboard failed: %v", err)

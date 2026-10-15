@@ -12,45 +12,37 @@ import (
 
 // fakeTools is the settings store, in memory: the panel feature reads and
 // writes the switches about the optional panels through it.
+//
+// It is a stand-in for internal/settings rather than the real store because
+// these tests are about the panel feature, and a store that fails on demand is
+// how its error paths are reached. It behaves the way the real one does for
+// the part the feature uses: Update re-reads nothing, because nothing else
+// writes in a test.
 type fakeTools struct {
-	mu       sync.Mutex
-	settings domain.ToolSettings
-	saves    int
-	err      error
+	mu      sync.Mutex
+	section *Section
+	saves   int
+	err     error
 }
 
-func (f *fakeTools) Load(context.Context) (domain.ToolSettings, error) {
+func newFakeTools() *fakeTools {
+	return &fakeTools{section: NewSection()}
+}
+
+func (f *fakeTools) Load(context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.settings, nil
+	return f.err
 }
 
-func (f *fakeTools) Save(_ context.Context, settings domain.ToolSettings) error {
+func (f *fakeTools) Update(_ context.Context, _ string, change func() error) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.saves++
 	if f.err != nil {
 		return f.err
 	}
-	f.settings = settings
-	return nil
-}
-
-// Update is the store's read-modify-write, in one critical section: it is what
-// a feature uses to change a setting without overwriting anybody else's.
-func (f *fakeTools) Update(_ context.Context, change func(*domain.ToolSettings) error) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	settings := f.settings
-	if err := change(&settings); err != nil {
-		return err
-	}
-	f.saves++
-	if f.err != nil {
-		return f.err
-	}
-	f.settings = settings.Normalize()
-	return nil
+	return change()
 }
 
 // memoryStore is a domain.SecretStore in memory: these tests do not depend on

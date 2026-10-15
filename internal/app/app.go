@@ -566,7 +566,7 @@ func (s *State) clipboardBottom(c *ui.Context) {
 	if s.clipboard == nil {
 		return
 	}
-	if !s.clipboard.Settings().Clipboard.RegionVisible {
+	if !s.clipboard.Settings().RegionVisible {
 		return
 	}
 	s.clipboardRegion(c)

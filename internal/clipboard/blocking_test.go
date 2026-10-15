@@ -16,10 +16,11 @@ func TestOpenDoesNotWaitForASlowClipboard(t *testing.T) {
 	emitted := make(chan struct{}, 4)
 	device := &fakeDevice{readDelay: 300 * time.Millisecond}
 	clipboard, err := NewClipboard(ClipboardOptions{
-		Device: device,
-		Store:  &fakeStore{},
-		Tools:  &fakeTools{},
-		Emit:   func() { emitted <- struct{}{} },
+		Device:   device,
+		Store:    &fakeStore{},
+		Section:  NewSection(),
+		Settings: newFakeTools(),
+		Emit:     func() { emitted <- struct{}{} },
 	})
 	if err != nil {
 		t.Fatalf("NewClipboard failed: %v", err)
@@ -50,9 +51,10 @@ func TestOpenDoesNotWaitForASlowClipboard(t *testing.T) {
 func TestCopyAsyncDoesNotWaitForASlowClipboard(t *testing.T) {
 	device := &fakeDevice{writeDelay: 300 * time.Millisecond}
 	clipboard, err := NewClipboard(ClipboardOptions{
-		Device: device,
-		Store:  &fakeStore{},
-		Tools:  &fakeTools{},
+		Device:   device,
+		Store:    &fakeStore{},
+		Section:  NewSection(),
+		Settings: newFakeTools(),
 	})
 	if err != nil {
 		t.Fatalf("NewClipboard failed: %v", err)
@@ -91,9 +93,10 @@ func TestCopyAsyncReportsARefusedWrite(t *testing.T) {
 	device := &fakeDevice{}
 	device.failWrite(domain.ErrUnsupportedClipboardFormat)
 	clipboard, err := NewClipboard(ClipboardOptions{
-		Device: device,
-		Store:  &fakeStore{},
-		Tools:  &fakeTools{},
+		Device:   device,
+		Store:    &fakeStore{},
+		Section:  NewSection(),
+		Settings: newFakeTools(),
 	})
 	if err != nil {
 		t.Fatalf("NewClipboard failed: %v", err)

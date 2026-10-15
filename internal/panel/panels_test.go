@@ -212,7 +212,7 @@ func newTestPanels(t *testing.T, provider *fakeProvider, store domain.SecretStor
 	if len(defs) == 0 {
 		defs = []PanelDef{testDef()}
 	}
-	panels, err := NewPanels(reg, store, nil, defs)
+	panels, err := NewPanels(reg, store, NewSection(), nil, defs)
 	if err != nil {
 		t.Fatalf("NewPanels failed: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestAnOptionalPanelCanBeTurnedOff(t *testing.T) {
 	provider := newFakeProvider()
 	reg := newRegistry()
 	reg.add(provider, fakeAdapter{id: "fake"})
-	tools := &fakeTools{}
+	tools := newFakeTools()
 	optional := testDef()
 	optional.Optional = true
 	always := testDef()
@@ -241,7 +241,7 @@ func TestAnOptionalPanelCanBeTurnedOff(t *testing.T) {
 		t.Fatalf("Put failed: %v", err)
 	}
 
-	panels, err := NewPanels(reg, store, tools, []PanelDef{always, optional})
+	panels, err := NewPanels(reg, store, tools.section, tools, []PanelDef{always, optional})
 	if err != nil {
 		t.Fatalf("NewPanels failed: %v", err)
 	}
@@ -270,9 +270,9 @@ func TestAnOptionalPanelCanBeTurnedOff(t *testing.T) {
 	if choices := panels.OptionalPanels(); len(choices) != 1 || choices[0].On {
 		t.Errorf("the switches are %+v, want the optional panel off", choices)
 	}
-	// The choice is in the file, not only in memory.
-	if on, chosen := tools.settings.Panels.Choices[optional.Panel.ID]; !chosen || on {
-		t.Errorf("the stored choices are %v, want the panel off", tools.settings.Panels.Choices)
+	// The choice is in the section, not only in memory.
+	if on, chosen := tools.section.Choices()[optional.Panel.ID]; !chosen || on {
+		t.Errorf("the stored choices are %v, want the panel off", tools.section.Choices())
 	}
 	if tools.saves != 1 {
 		t.Errorf("the settings were saved %d times, want once", tools.saves)
@@ -310,7 +310,7 @@ func TestOnlyOptionalPanelsCanBeTurnedOff(t *testing.T) {
 	provider := newFakeProvider()
 	reg := newRegistry()
 	reg.add(provider, fakeAdapter{id: "fake"})
-	panels, err := NewPanels(reg, newMemoryStore(), &fakeTools{}, []PanelDef{testDef()})
+	panels, err := NewPanels(reg, newMemoryStore(), NewSection(), newFakeTools(), []PanelDef{testDef()})
 	if err != nil {
 		t.Fatalf("NewPanels failed: %v", err)
 	}
@@ -333,11 +333,10 @@ func TestTheStoredChoicesAreReadAtAssembly(t *testing.T) {
 	reg.add(provider, fakeAdapter{id: "fake"})
 	def := testDef()
 	def.Optional = true
-	tools := &fakeTools{settings: domain.ToolSettings{
-		Panels: domain.PanelSettings{Choices: map[string]bool{def.Panel.ID: false}},
-	}}
+	tools := newFakeTools()
+	tools.section.Set(def.Panel.ID, false)
 
-	panels, err := NewPanels(reg, newMemoryStore(), tools, []PanelDef{def})
+	panels, err := NewPanels(reg, newMemoryStore(), tools.section, tools, []PanelDef{def})
 	if err != nil {
 		t.Fatalf("NewPanels failed: %v", err)
 	}
@@ -362,9 +361,10 @@ func TestASwitchThatCannotBeStoredStillWorks(t *testing.T) {
 	reg.add(provider, fakeAdapter{id: "fake"})
 	def := testDef()
 	def.Optional = true
-	tools := &fakeTools{err: errors.New("the settings file is read-only")}
+	tools := newFakeTools()
+	tools.err = errors.New("the settings file is read-only")
 
-	panels, err := NewPanels(reg, newMemoryStore(), tools, []PanelDef{def})
+	panels, err := NewPanels(reg, newMemoryStore(), tools.section, tools, []PanelDef{def})
 	if err != nil {
 		t.Fatalf("NewPanels failed: %v", err)
 	}
@@ -383,7 +383,7 @@ func TestSwitchesWithoutAStore(t *testing.T) {
 	reg.add(provider, fakeAdapter{id: "fake"})
 	def := testDef()
 	def.Optional = true
-	panels, err := NewPanels(reg, newMemoryStore(), nil, []PanelDef{def})
+	panels, err := NewPanels(reg, newMemoryStore(), NewSection(), nil, []PanelDef{def})
 	if err != nil {
 		t.Fatalf("NewPanels failed: %v", err)
 	}
@@ -471,16 +471,16 @@ func TestNewPanelsValidatesDefinitions(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if _, err := NewPanels(reg, store, nil, c.defs); !errors.Is(err, c.want) {
+			if _, err := NewPanels(reg, store, NewSection(), nil, c.defs); !errors.Is(err, c.want) {
 				t.Fatalf("error = %v, want %v", err, c.want)
 			}
 		})
 	}
 
-	if _, err := NewPanels(nil, store, nil, nil); !errors.Is(err, domain.ErrInvalidArgument) {
+	if _, err := NewPanels(nil, store, NewSection(), nil, nil); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("a nil registry: error = %v", err)
 	}
-	if _, err := NewPanels(reg, nil, nil, nil); !errors.Is(err, domain.ErrInvalidArgument) {
+	if _, err := NewPanels(reg, nil, NewSection(), nil, nil); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("a nil store: error = %v", err)
 	}
 }
@@ -829,7 +829,7 @@ func TestAnAdapterThatBreaksTheContractIsCaught(t *testing.T) {
 			if c.def != nil {
 				def = *c.def
 			}
-			panels, err := NewPanels(reg, store, nil, []PanelDef{def})
+			panels, err := NewPanels(reg, store, NewSection(), nil, []PanelDef{def})
 			if err != nil {
 				t.Fatalf("NewPanels failed: %v", err)
 			}

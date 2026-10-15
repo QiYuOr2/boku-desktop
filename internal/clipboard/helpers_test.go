@@ -235,45 +235,42 @@ func (s *fakeStore) stored() []domain.ClipboardEntry {
 	return append([]domain.ClipboardEntry(nil), s.entries...)
 }
 
-// fakeTools is the settings store, in memory.
+// fakeTools is the settings store, in memory: this feature's section, with the
+// file replaced by the section itself.
+//
+// The section is the real one, so a switch changed through it is changed the
+// way the shipped code changes it; what is faked is only the file underneath.
+// loadErr and saveErr are separate because a test needs to name which of the
+// two failed: a file that cannot be read stops the application starting, and a
+// file that cannot be written must not take the switch the user just flipped.
 type fakeTools struct {
-	mu       sync.Mutex
-	settings domain.ToolSettings
-	saves    int
-	err      error
+	mu      sync.Mutex
+	section *Section
+	saves   int
+	loadErr error
+	saveErr error
 }
 
-func (f *fakeTools) Load(context.Context) (domain.ToolSettings, error) {
+func newFakeTools() *fakeTools {
+	return &fakeTools{section: NewSection()}
+}
+
+func (f *fakeTools) Load(context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.settings, nil
+	return f.loadErr
 }
 
-func (f *fakeTools) Save(_ context.Context, settings domain.ToolSettings) error {
+// Update is the store's read-modify-write, in one critical section: it is what
+// a feature uses to change a setting without overwriting anybody else's.
+func (f *fakeTools) Update(_ context.Context, _ string, change func() error) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.saves++
-	if f.err != nil {
-		return f.err
+	if f.saveErr != nil {
+		return f.saveErr
 	}
-	f.settings = settings
-	return nil
-}
-
-// Update is the store's read-modify-write, in one critical section.
-func (f *fakeTools) Update(_ context.Context, change func(*domain.ToolSettings) error) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	settings := f.settings
-	if err := change(&settings); err != nil {
-		return err
-	}
-	f.saves++
-	if f.err != nil {
-		return f.err
-	}
-	f.settings = settings.Normalize()
-	return nil
+	return change()
 }
 
 // testClock is a clock the test moves by hand.
@@ -303,11 +300,14 @@ func newTestClipboard(t *testing.T, opts ClipboardOptions) (*Clipboard, *fakeDev
 	t.Helper()
 	device := &fakeDevice{}
 	store := &fakeStore{}
-	tools := &fakeTools{}
+	tools := newFakeTools()
 	opts.Device = device
 	opts.Store = store
-	if opts.Tools == nil {
-		opts.Tools = tools
+	if opts.Section == nil {
+		opts.Section = tools.section
+	}
+	if opts.Settings == nil {
+		opts.Settings = tools
 	}
 	if opts.Clock == nil {
 		opts.Clock = newTestClock()

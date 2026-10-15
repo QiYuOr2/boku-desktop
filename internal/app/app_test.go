@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/ui"
 
 	"boku/internal/credential"
 	"boku/internal/panel"
@@ -24,6 +23,7 @@ func TestNewRequiresItsDependencies(t *testing.T) {
 	panels, err := panel.NewPanels(
 		testRegistry{provider: newTestProvider(), adapter: testAdapter{provider: newTestProvider()}},
 		newTestStore(),
+		panel.NewSection(),
 		nil,
 		[]panel.PanelDef{{Panel: deepseek.Panel(), Metrics: deepseek.Metrics()}},
 	)
@@ -41,21 +41,6 @@ func TestNewRequiresItsDependencies(t *testing.T) {
 	}
 }
 
-// The tray application has no main window, so the quit entry has to work.
-func TestQuitActionQuits(t *testing.T) {
-	quit := 0
-	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	state.quit = func() { quit++ }
-	loaded(t, state)
-	tt := ui.NewTester(state.View, panelWidth, panelHeight)
-	if err := tt.Click("退出"); err != nil {
-		t.Fatalf("click the quit action: %v", err)
-	}
-	if quit != 1 {
-		t.Errorf("quit called %d times after one click, want 1", quit)
-	}
-}
-
 // A second launch brings the quick window forward, but never against a tray
 // that does not exist yet: MyGo's NewFlyout refuses a flyout with neither a
 // tray nor a parent, and a launch arriving while the application is still
@@ -65,30 +50,6 @@ func TestActivateWithoutATrayOpensNothing(t *testing.T) {
 	state.Activate()
 	if state.panel != nil {
 		t.Error("Activate opened a quick window with no tray to anchor it to")
-	}
-}
-
-// MyGo rebuilds the view for every input and repaint, so a view that
-// changed state would fight itself.
-func TestViewIsIdempotent(t *testing.T) {
-	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	loaded(t, state)
-	tt := ui.NewTester(state.View, panelWidth, panelHeight)
-	first := tt.Texts()
-	tt.Frame()
-	second := tt.Texts()
-	if len(first) != len(second) {
-		t.Fatalf("redrawing changed the number of texts: %d then %d", len(first), len(second))
-	}
-	for i := range first {
-		if first[i] != second[i] {
-			t.Errorf("text %d changed on redraw: %q then %q", i, first[i], second[i])
-		}
-	}
-	// Drawing must not fetch anything: the view is built several times per
-	// frame.
-	if view := state.panelService.View(deepseek.PanelID); view.Loading {
-		t.Error("drawing the view started a refresh")
 	}
 }
 

@@ -11,9 +11,11 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"boku/internal/clipboard"
 	"boku/internal/domain"
 	"boku/internal/kit"
 	"boku/internal/panel"
+	"boku/internal/translate"
 )
 
 // The settings window is a sidebar and the page it navigates: the sidebar
@@ -792,7 +794,7 @@ func (s *State) translateSection(c *ui.Context, head *ui.Handle) {
 // service, with whether it can be used now. A service with no key is shown
 // and cannot be picked, rather than hidden — the user has to know it exists
 // to know what to configure.
-func (s *State) providerPicker(c *ui.Context, settings domain.TranslationSettings) {
+func (s *State) providerPicker(c *ui.Context, settings translate.Settings) {
 	cards := s.translateCards()
 	stacked(c, float32(8), func() {
 		sectionLabel(c, "使用的 AI")
@@ -812,7 +814,7 @@ func (s *State) providerPicker(c *ui.Context, settings domain.TranslationSetting
 // one choice should answer anywhere on it. A service with nothing configured
 // is drawn but cannot be chosen, which is what tells the user what to
 // configure.
-func (s *State) providerOption(c *ui.Context, card translateCard, settings domain.TranslationSettings) {
+func (s *State) providerOption(c *ui.Context, card translateCard, settings translate.Settings) {
 	selected := settings.ProviderOr() == card.id
 	row := ui.ButtonBase(c).Label("使用 "+card.displayName).
 		FillWidth().
@@ -875,7 +877,7 @@ func chooseTextColor(configured bool) ui.Color {
 
 // annotationSwitches are the Japanese enhancements: what the translator is
 // asked to say about each word.
-func (s *State) annotationSwitches(c *ui.Context, settings domain.TranslationSettings) {
+func (s *State) annotationSwitches(c *ui.Context, settings translate.Settings) {
 	stacked(c, float32(10), func() {
 		sectionLabel(c, "日语增强（仅日语原文）")
 		furigana := settings.Furigana
@@ -894,7 +896,7 @@ func (s *State) annotationSwitches(c *ui.Context, settings domain.TranslationSet
 
 // windowSwitches are the card's own behavior: whether it stays, and how long
 // it waits before closing itself.
-func (s *State) windowSwitches(c *ui.Context, settings domain.TranslationSettings) {
+func (s *State) windowSwitches(c *ui.Context, settings translate.Settings) {
 	stacked(c, float32(10), func() {
 		sectionLabel(c, "浮窗行为")
 		pinned := settings.Pinned
@@ -918,7 +920,7 @@ func (s *State) windowSwitches(c *ui.Context, settings domain.TranslationSetting
 // keystroke: a half-typed number is not a setting, and writing one would make
 // the window close itself the moment a user selected the old value to
 // replace it.
-func (s *State) closeDelayField(c *ui.Context, settings domain.TranslationSettings) {
+func (s *State) closeDelayField(c *ui.Context, settings translate.Settings) {
 	field := ui.TextInput(c, &s.delayInput)
 	field.Placeholder(strconv.FormatInt(settings.CloseDelayOr().Milliseconds(), 10)).SingleLine()
 	field.Disabled(s.form.busy != "")
@@ -1072,12 +1074,12 @@ func (s *State) clipboardSection(c *ui.Context, head *ui.Handle) {
 			stacked(c, float32(12), func() {
 				notice(c, notePlain, "剪贴板内容可能包含密码、验证码与私人对话；默认不读取。")
 
-				monitor := settings.Clipboard.Monitoring
+				monitor := settings.Monitoring
 				ui.Checkbox(c, &monitor, "监听剪贴板（每 "+intervalLabel(settings)+" 读取一次）").
 					FontSize(sizeBody).
 					OnClick(func() { s.setClipboardMonitoring(monitor) })
 
-				visible := settings.Clipboard.RegionVisible
+				visible := settings.RegionVisible
 				ui.Checkbox(c, &visible, "在快捷窗口底部显示剪贴板内容").
 					FontSize(sizeBody).
 					OnClick(func() { s.setClipboardRegionVisible(visible) })
@@ -1086,10 +1088,10 @@ func (s *State) clipboardSection(c *ui.Context, head *ui.Handle) {
 				// is a choice among three rather than a number, and the line
 				// under it says what shortening it costs, because the entries
 				// that no longer fit are dropped rather than hidden.
-				sizes := domain.ClipboardHistorySizes()
+				sizes := clipboard.HistorySizes()
 				selected := 0
 				for index, size := range sizes {
-					if size == settings.Clipboard.KeepsHistory() {
+					if size == settings.KeepsHistory() {
 						selected = index
 					}
 				}
@@ -1102,9 +1104,9 @@ func (s *State) clipboardSection(c *ui.Context, head *ui.Handle) {
 							s.setClipboardHistorySize(sizes[selected])
 						}
 					})
-					notice(c, notePlain, "只保留最近 "+strconv.Itoa(settings.Clipboard.KeepsHistory())+
+					notice(c, notePlain, "只保留最近 "+strconv.Itoa(settings.KeepsHistory())+
 						" 条；缩短范围会立刻丢弃更早的记录。")
-					if !settings.Clipboard.Monitoring {
+					if !settings.Monitoring {
 						notice(c, notePlain, "关闭监听后不再读取剪贴板，历史里已有的记录仍然保留。")
 					}
 				})
@@ -1254,8 +1256,8 @@ func aboutLine(c *ui.Context, label, value string) {
 }
 
 // intervalLabel names the poll interval the way the switch reads.
-func intervalLabel(settings domain.ToolSettings) string {
-	interval := settings.Clipboard.Interval()
+func intervalLabel(settings clipboard.Settings) string {
+	interval := settings.Interval()
 	if interval%time.Second == 0 {
 		return strconv.Itoa(int(interval/time.Second)) + " 秒"
 	}
@@ -1270,7 +1272,7 @@ func (s *State) setClipboardMonitoring(enabled bool) {
 	switch {
 	case err != nil:
 		s.clipboardStatus = "开关没能写进设置文件：" + friendlyError(err) + "（本次运行内已生效）"
-	case settings.Clipboard.Monitoring:
+	case settings.Monitoring:
 		s.clipboardStatus = "已开始读取剪贴板。"
 	default:
 		s.clipboardStatus = "已停止读取剪贴板。"
@@ -1286,7 +1288,7 @@ func (s *State) setClipboardRegionVisible(visible bool) {
 	switch {
 	case err != nil:
 		s.clipboardStatus = "开关没能写进设置文件：" + friendlyError(err) + "（本次运行内已生效）"
-	case settings.Clipboard.RegionVisible:
+	case settings.RegionVisible:
 		s.clipboardStatus = "快捷窗口底部会显示剪贴板内容。"
 	default:
 		s.clipboardStatus = "快捷窗口底部不再显示剪贴板内容。"
@@ -1407,9 +1409,9 @@ func (s *State) translateCards() []translateCard {
 }
 
 // translateSettings is the translation configuration, for the card's view.
-func (s *State) translateSettings() (domain.TranslationSettings, error) {
+func (s *State) translateSettings() (translate.Settings, error) {
 	if s.translate == nil {
-		return domain.TranslationDefaults(), nil
+		return translate.Defaults(), nil
 	}
 	return s.translate.Settings()
 }
@@ -1417,10 +1419,10 @@ func (s *State) translateSettings() (domain.TranslationSettings, error) {
 // translateSettingsOr is the same configuration, or its defaults when it
 // cannot be read: a window that cannot read a settings file shows what a
 // fresh installation has rather than nothing.
-func (s *State) translateSettingsOr() domain.TranslationSettings {
+func (s *State) translateSettingsOr() translate.Settings {
 	settings, err := s.translateSettings()
 	if err != nil {
-		return domain.TranslationDefaults()
+		return translate.Defaults()
 	}
 	return settings
 }
@@ -1542,7 +1544,7 @@ func (s *State) testCredential(card translateCard) {
 			// The test below reads the address from the settings, so a save
 			// that failed turns into a connection failure somewhere else;
 			// naming it here is what keeps that from being a mystery.
-			if err := service.SetCustomTranslator(ctx, domain.CustomTranslatorSettings{
+			if err := service.SetCustomTranslator(ctx, translate.CustomSettings{
 				BaseURL:     address,
 				DisplayName: name,
 			}); err != nil {
@@ -1561,10 +1563,10 @@ func (s *State) testCredential(card translateCard) {
 	}()
 }
 
-// customValues is the user's own service as typed, cleaned the way the domain
-// cleans it.
+// customValues is the user's own service as typed, cleaned the way the
+// translation tool cleans it.
 func (s *State) customValues() (address, name string) {
-	cleaned := domain.CustomTranslatorSettings{
+	cleaned := translate.CustomSettings{
 		BaseURL:     s.form.customURL,
 		DisplayName: s.form.customName,
 	}.Normalize()
@@ -1606,7 +1608,7 @@ func (s *State) saveCredential(card translateCard) {
 			err = secrets.Set(context.Background(), id, credentialKey, key)
 		}
 		if err == nil && id == customTranslatorID {
-			err = service.SetCustomTranslator(context.Background(), domain.CustomTranslatorSettings{
+			err = service.SetCustomTranslator(context.Background(), translate.CustomSettings{
 				BaseURL:     address,
 				DisplayName: name,
 			})

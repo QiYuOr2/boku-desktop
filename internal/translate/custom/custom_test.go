@@ -12,14 +12,15 @@ import (
 
 	"boku/internal/domain"
 	"boku/internal/platform/httpc"
+	"boku/internal/translate/openai"
 )
 
 // The address is the user's to name, so the descriptor reports what they
 // typed — and nothing when they typed nothing, rather than an address the
 // application made up.
 func TestDescriptorFollowsTheSettings(t *testing.T) {
-	settings := domain.CustomTranslatorSettings{}
-	reply := New(httpc.New(httpc.Options{}), func() domain.CustomTranslatorSettings { return settings })
+	settings := openai.CustomService{}
+	reply := New(httpc.New(httpc.Options{}), func() openai.CustomService { return settings })
 	if got := reply.Descriptor().Endpoint; got != "" {
 		t.Errorf("endpoint = %q, want nothing before an address is configured", got)
 	}
@@ -30,13 +31,13 @@ func TestDescriptorFollowsTheSettings(t *testing.T) {
 		t.Error("the descriptor does not say its address is a setting")
 	}
 
-	settings = domain.CustomTranslatorSettings{BaseURL: "https://api.example.com/v1"}
+	settings = openai.CustomService{BaseURL: "https://api.example.com/v1"}
 	if got := reply.Descriptor().Endpoint; got != "https://api.example.com/v1/chat/completions" {
 		t.Errorf("endpoint = %q", got)
 	}
 	// The settings may change while the application runs, and the next
 	// translation uses the new address.
-	settings = domain.CustomTranslatorSettings{BaseURL: "http://127.0.0.1:11434/v1"}
+	settings = openai.CustomService{BaseURL: "http://127.0.0.1:11434/v1"}
 	if got := reply.Descriptor().Endpoint; got != "http://127.0.0.1:11434/v1/chat/completions" {
 		t.Errorf("endpoint after a change = %q", got)
 	}
@@ -50,8 +51,8 @@ func TestTranslateWithoutAnAddress(t *testing.T) {
 		asked = true
 	}))
 	defer server.Close()
-	reply := New(httpc.New(httpc.Options{}), func() domain.CustomTranslatorSettings {
-		return domain.CustomTranslatorSettings{}
+	reply := New(httpc.New(httpc.Options{}), func() openai.CustomService {
+		return openai.CustomService{}
 	})
 	_, err := reply.Translate(context.Background(), domain.Credentials{}, domain.TranslationRequest{
 		Text:       "hello",
@@ -142,10 +143,10 @@ func TestTranslateNormalizesTheAddress(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"你好"}}]}`))
 	}))
 	defer server.Close()
-	reply := New(httpc.New(httpc.Options{HTTPClient: server.Client()}), func() domain.CustomTranslatorSettings {
+	reply := New(httpc.New(httpc.Options{HTTPClient: server.Client()}), func() openai.CustomService {
 		// A trailing slash is what a person pastes; the request must not
 		// end up with two.
-		return domain.CustomTranslatorSettings{BaseURL: server.URL + "/v1/"}
+		return openai.CustomService{BaseURL: server.URL + "/v1/"}
 	})
 	if _, err := reply.Translate(context.Background(), domain.Credentials{}, domain.TranslationRequest{
 		Text:       "hello",

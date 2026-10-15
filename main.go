@@ -36,6 +36,7 @@ import (
 	"boku/internal/translate"
 	customtranslator "boku/internal/translate/custom"
 	deepseektranslator "boku/internal/translate/deepseek"
+	"boku/internal/translate/openai"
 )
 
 // Name the application before Run: MyGo reads the name it registers with
@@ -174,9 +175,26 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 	// credentials: two files, each owned by the feature that reads it. See
 	// internal/clipboard/store.go for why the history is a file rather than
 	// the table docs/database.md §3 describes.
-	prefs, err := settings.New(filepath.Join(userData, "settings.json"))
+	//
+	// The settings file is shared, so each feature that has settings is
+	// registered with the store: the store itself knows nothing about what is
+	// in it, and a feature is handed only the keys it owns.
+	clipboardSettings := clipboard.NewSection()
+	translateSettings := translate.NewSection()
+	panelSettings := panel.NewSection()
+	prefs, err := settings.New(
+		filepath.Join(userData, "settings.json"),
+		clipboardSettings,
+		translateSettings,
+		panelSettings,
+	)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
+	}
+	// The file is read once, here: a frame must not read it, and neither
+	// must a service that already has its settings in memory.
+	if err := prefs.Load(context.Background()); err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("read the settings: %w", err)
 	}
 	history, err := clipboard.NewHistory(filepath.Join(userData, "clipboard_history.json"))
 	if err != nil {
@@ -214,7 +232,7 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 	// panel marked optional is one the user can turn off in the settings
 	// window, and its switch is stored in the same settings file as the rest
 	// of the application's choices.
-	panels, err := panel.NewPanels(registry, secretStore, prefs, []panel.PanelDef{
+	panels, err := panel.NewPanels(registry, secretStore, panelSettings, prefs, []panel.PanelDef{
 		{
 			Panel:   deepseekpanel.Panel(),
 			Metrics: deepseekpanel.Metrics(),
@@ -251,10 +269,13 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 		}
 	})
 	clip, err := clipboard.NewClipboard(clipboard.ClipboardOptions{
-		Device: device,
-		Store:  history,
-		Tools:  prefs,
-		Clock:  domain.SystemClock{},
+		Device:  device,
+		Store:   history,
+		Section: clipboardSettings,
+		// The store the switches are written through. The file was read
+		// once above, so this only writes.
+		Settings: prefs,
+		Clock:    domain.SystemClock{},
 	})
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
@@ -268,22 +289,24 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 	if err := translators.Register(deepseektranslator.New(client)); err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("register the deepseek translator: %w", err)
 	}
-	if err := translators.Register(customtranslator.New(client, func() domain.CustomTranslatorSettings {
-		// The address is read from the settings each time it is asked for:
+	if err := translators.Register(customtranslator.New(client, func() openai.CustomService {
+		// The address is read from the section each time it is asked for:
 		// the user may change it while the application runs, and the next
-		// translation should use the new one.
-		current, err := prefs.Load(context.Background())
-		if err != nil {
-			return domain.CustomTranslatorSettings{}
+		// translation should use the new one. It is in memory, so asking
+		// costs no file read.
+		custom := translateSettings.Current().Custom
+		return openai.CustomService{
+			BaseURL:     custom.BaseURL,
+			DisplayName: custom.DisplayName,
 		}
-		return current.Normalize().Translation.Custom
 	})); err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("register the custom translator: %w", err)
 	}
 	translation, err := translate.NewTranslate(translate.TranslateOptions{
 		Translators: translators,
 		Secrets:     secretStore,
-		Tools:       prefs,
+		Section:     translateSettings,
+		Settings:    prefs,
 		// The selection is asked first and the clipboard second: what the
 		// user has selected is what they mean, and what is on the clipboard
 		// is what they copied last. The clipboard is also what the selection

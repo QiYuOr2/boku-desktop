@@ -33,15 +33,15 @@ type Watcher struct {
 // Run polls until ctx is canceled. It returns when the context ends, so a
 // caller that cancels knows the goroutine is on its way out.
 //
-// An interval below ClipboardMinPollInterval is raised to it, and a read
+// An interval below MinPollInterval is raised to it, and a read
 // that failed is skipped rather than treated as an empty clipboard.
 func (w *Watcher) Run(ctx context.Context) error {
 	if w.Device == nil {
 		return errors.New("clipboard: the watcher has no device")
 	}
 	interval := w.Interval
-	if interval < domain.ClipboardMinPollInterval {
-		interval = domain.ClipboardDefaultPollInterval
+	if interval < MinPollInterval {
+		interval = DefaultPollInterval
 	}
 	now := w.Now
 	if now == nil {

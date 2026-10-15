@@ -38,10 +38,11 @@ type PanelDef struct {
 type Panels struct {
 	registry domain.ProviderRegistry
 	secrets  domain.SecretStore
-	// tools is where the choices about the optional panels live, or nil in
-	// an assembly that has no settings file: the switches then work for this
-	// run only.
-	tools domain.ToolStore
+	// section holds the choices about the optional panels, and saver is the
+	// store it is written through. A nil saver is an assembly that has no
+	// settings file: the switches then work for this run only.
+	section *Section
+	saver   StoreSettings
 	// sources are the providers whose credentials come from somewhere other
 	// than the store, by provider id. A provider named here is asked of its
 	// source and never of the store. The map is filled once, in NewPanels,
@@ -117,19 +118,24 @@ func (v View) NeedsCredentials() bool {
 // (docs/security.md §9). A source is optional, and the store is asked for
 // every provider that has none.
 //
-// tools is where the choices about the optional panels are read and written,
-// or nil for an assembly with no settings file.
-func NewPanels(registry domain.ProviderRegistry, secrets domain.SecretStore, tools domain.ToolStore, defs []PanelDef, sources ...domain.CredentialSource) (*Panels, error) {
+// section holds the choices about the optional panels, and saver is the store
+// they are written through; either may be nil for an assembly with no settings
+// file, and the switches then work for this run only.
+func NewPanels(registry domain.ProviderRegistry, secrets domain.SecretStore, section *Section, saver StoreSettings, defs []PanelDef, sources ...domain.CredentialSource) (*Panels, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("%w: no provider registry", domain.ErrInvalidArgument)
 	}
 	if secrets == nil {
 		return nil, fmt.Errorf("%w: no secret store", domain.ErrInvalidArgument)
 	}
+	if section == nil {
+		section = NewSection()
+	}
 	panels := &Panels{
 		registry: registry,
 		secrets:  secrets,
-		tools:    tools,
+		section:  section,
+		saver:    saver,
 		sources:  make(map[string]domain.CredentialSource, len(sources)),
 		now:      func() time.Time { return time.Now().UTC() },
 		byID:     make(map[string]PanelDef, len(defs)),
@@ -274,16 +280,14 @@ type OptionalPanel struct {
 // A store that cannot be read is not a reason to fail the start: the panels
 // are all on, which is what a user who never turned one off has.
 func (p *Panels) LoadChoices(ctx context.Context) error {
-	if p.tools == nil {
-		return nil
+	if p.saver != nil {
+		if err := p.saver.Load(ctx); err != nil {
+			return err
+		}
 	}
-	settings, err := p.tools.Load(ctx)
-	if err != nil {
-		return err
-	}
-	choices := make(map[string]bool, len(settings.Panels.Choices))
-	for id, on := range settings.Panels.Choices {
-		choices[id] = on
+	choices := p.section.Choices()
+	if choices == nil {
+		choices = make(map[string]bool)
 	}
 	p.mu.Lock()
 	p.choices = choices
@@ -311,11 +315,13 @@ func (p *Panels) SetPanelOn(ctx context.Context, panelID string, on bool) error 
 	}
 
 	var failed error
-	if p.tools != nil {
-		failed = p.tools.Update(ctx, func(settings *domain.ToolSettings) error {
-			settings.Panels = settings.Panels.Set(panelID, on)
+	if p.saver != nil {
+		failed = p.saver.Update(ctx, sectionName, func() error {
+			p.section.Set(panelID, on)
 			return nil
 		})
+	} else {
+		p.section.Set(panelID, on)
 	}
 
 	p.mu.Lock()

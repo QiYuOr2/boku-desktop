@@ -610,7 +610,7 @@ func (s *State) scheduleTranslationClose(window cardWindow) {
 		return
 	}
 	settings, err := s.translate.Settings()
-	delay := domain.DefaultTranslationCloseDelay
+	delay := translate.DefaultCloseDelay
 	if err == nil {
 		delay = settings.CloseDelayOr()
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	"boku/internal/domain"
+	"boku/internal/translate"
 )
 
 // A global shortcut is what starts a translation while another application
@@ -232,7 +232,7 @@ func (s *State) applyShortcut(accelerator string) {
 
 // resetShortcut puts the default combination back.
 func (s *State) resetShortcut() {
-	s.applyShortcut(domain.DefaultTranslationAccelerator)
+	s.applyShortcut(translate.DefaultAccelerator)
 }
 
 // shortcutLine is what the settings window writes beside the shortcut: the

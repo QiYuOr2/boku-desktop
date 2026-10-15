@@ -94,7 +94,7 @@ func (t *Translator) translate(ctx context.Context, key string, req domain.Trans
 	// is reported rather than made silently: half a translated paragraph
 	// that says nothing about its missing half is worse than a short one
 	// that says so.
-	text, cut := openai.Truncate(req.Text, domain.MaxTranslationChars)
+	text, cut := openai.Truncate(req.Text, openai.DefaultMaxChars)
 	source := req.SourceLang
 	if source == domain.LangUnknown {
 		source = domain.Language(kit.DetectLanguage(text))
@@ -142,7 +142,7 @@ func (t *Translator) translate(ctx context.Context, key string, req domain.Trans
 		result.TranslatedText = content
 	}
 	if cut {
-		result.Note = "原文过长，只翻译了前 " + strconv.Itoa(domain.MaxTranslationChars) + " 个字。"
+		result.Note = "原文过长，只翻译了前 " + strconv.Itoa(openai.DefaultMaxChars) + " 个字。"
 	}
 	if err := result.Validate(); err != nil {
 		return domain.TranslationResult{}, err

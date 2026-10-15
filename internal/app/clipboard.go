@@ -9,6 +9,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"boku/internal/clipboard"
 	"boku/internal/domain"
 )
 
@@ -90,9 +91,9 @@ func (s *State) clipboardLatest() (domain.ClipRecord, bool) {
 // that many entries, so it is also all the page has to list.
 func (s *State) clipboardHistorySize() int {
 	if s.clipboard == nil {
-		return domain.ClipboardDefaultHistorySize
+		return clipboard.DefaultHistorySize
 	}
-	return s.clipboard.Settings().Clipboard.KeepsHistory()
+	return s.clipboard.Settings().KeepsHistory()
 }
 
 // clipboardHistory is the recorded copies, newest first, at most the record

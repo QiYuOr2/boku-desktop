@@ -23,10 +23,13 @@ import (
 type Translate struct {
 	translators domain.TranslatorRegistry
 	secrets     domain.SecretStore
-	tools       domain.ToolStore
-	clipboard   domain.ClipboardDevice
-	selection   domain.SelectionDevice
-	now         func() time.Time
+	section     *Section
+	// saver is the store the section is saved through, or nil when the
+	// settings are kept in memory only.
+	saver     StoreSettings
+	clipboard domain.ClipboardDevice
+	selection domain.SelectionDevice
+	now       func() time.Time
 }
 
 // TranslateOptions is what the service is assembled from. Everything is
@@ -36,7 +39,14 @@ type Translate struct {
 type TranslateOptions struct {
 	Translators domain.TranslatorRegistry
 	Secrets     domain.SecretStore
-	Tools       domain.ToolStore
+	// Section is this feature's settings, as the store holds them: it is read
+	// from at assembly and written through when a switch changes. A nil
+	// section keeps the settings in memory, which is what a test wants and
+	// what an assembly without a settings file must still survive.
+	Section *Section
+	// Settings is the store the section is saved through. A nil store keeps
+	// the settings in memory only.
+	Settings StoreSettings
 	// Selection reads what the user has selected in another application,
 	// when the platform can say. It is asked first: it is about what the
 	// user is looking at, where the clipboard is about what they copied
@@ -60,14 +70,20 @@ func NewTranslate(opts TranslateOptions) (*Translate, error) {
 	if clock == nil {
 		clock = domain.SystemClock{}
 	}
-	return &Translate{
+	section := opts.Section
+	if section == nil {
+		section = NewSection()
+	}
+	service := &Translate{
 		translators: opts.Translators,
 		secrets:     opts.Secrets,
-		tools:       opts.Tools,
+		section:     section,
+		saver:       opts.Settings,
 		clipboard:   opts.Clipboard,
 		selection:   opts.Selection,
 		now:         clock.Now,
-	}, nil
+	}
+	return service, nil
 }
 
 // Request is one translation the interface asks for.
@@ -130,48 +146,42 @@ type TranslatorView struct {
 }
 
 // Settings returns the translation configuration as it stands.
-func (t *Translate) Settings() (domain.TranslationSettings, error) {
-	if t.tools == nil {
-		return domain.TranslationDefaults(), nil
-	}
-	settings, err := t.tools.Load(context.Background())
-	if err != nil {
-		return domain.TranslationDefaults(), err
-	}
-	return settings.Normalize().Translation, nil
+func (t *Translate) Settings() (Settings, error) {
+	return t.section.Current(), nil
 }
 
 // SaveSettings changes the configuration through a function, so that every
-// switch is written the same way: read what is there, change one thing, put it
-// back — as one step, through the store's Update.
+// switch is written the same way: change one thing in this feature's settings,
+// and let the store put it back with every other feature's.
 //
-// It does not Load and then Save. The file holds every feature's settings, and
-// a value read here and written back would put back whatever another feature
-// changed in between: flipping a translation switch would undo a clipboard
-// switch flipped while this one was reading. Update reads, changes and writes
-// without letting go of the file, so what lands is the translation setting and
-// nothing else.
+// It does not write the whole settings value. The file holds every feature's
+// settings, and a value read here and written back would put back whatever
+// another feature changed in between: flipping a translation switch would undo
+// a clipboard switch flipped while this one was reading. The store's Update
+// reads the file again, applies this feature's change and writes as one step,
+// so what lands is the translation setting and nothing else.
 //
 // A switch that cannot be saved is reported, and the settings the application
 // runs on are the ones on disk rather than the ones that were meant to be
 // written.
-func (t *Translate) SaveSettings(ctx context.Context, change func(*domain.TranslationSettings)) error {
+func (t *Translate) SaveSettings(ctx context.Context, change func(*Settings)) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if t.tools == nil {
+	if t.saver == nil {
 		return nil // kept in memory only, which is what a test wants
 	}
-	return t.tools.Update(ctx, func(current *domain.ToolSettings) error {
-		change(&current.Translation)
-		current.Translation = current.Translation.Normalize()
+	return t.saver.Update(ctx, sectionName, func() error {
+		settings := t.section.Current()
+		change(&settings)
+		t.section.Set(settings)
 		return nil
 	})
 }
 
 // SetEnabled turns the tool on or off.
 func (t *Translate) SetEnabled(ctx context.Context, enabled bool) error {
-	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.Enabled = enabled })
+	return t.SaveSettings(ctx, func(s *Settings) { s.Enabled = enabled })
 }
 
 // SetAccelerator remembers the shortcut that starts a translation, so that
@@ -185,7 +195,7 @@ func (t *Translate) SetAccelerator(ctx context.Context, accelerator string) erro
 	if trimmed == "" {
 		return fmt.Errorf("%w: the shortcut is empty", domain.ErrInvalidArgument)
 	}
-	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.Accelerator = trimmed })
+	return t.SaveSettings(ctx, func(s *Settings) { s.Accelerator = trimmed })
 }
 
 // SetProvider chooses the translator to use. An id no translator answers to
@@ -195,37 +205,37 @@ func (t *Translate) SetProvider(ctx context.Context, id string) error {
 	if _, err := t.translators.Translator(id); err != nil {
 		return err
 	}
-	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.Provider = id })
+	return t.SaveSettings(ctx, func(s *Settings) { s.Provider = id })
 }
 
 // SetFurigana turns the reading of Japanese kanji on or off.
 func (t *Translate) SetFurigana(ctx context.Context, on bool) error {
-	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.Furigana = on })
+	return t.SaveSettings(ctx, func(s *Settings) { s.Furigana = on })
 }
 
 // SetLoanwordGloss turns the English original of a katakana loanword on or
 // off.
 func (t *Translate) SetLoanwordGloss(ctx context.Context, on bool) error {
-	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.LoanwordGloss = on })
+	return t.SaveSettings(ctx, func(s *Settings) { s.LoanwordGloss = on })
 }
 
 // SetPinned decides whether the window starts pinned.
 func (t *Translate) SetPinned(ctx context.Context, pinned bool) error {
-	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.Pinned = pinned })
+	return t.SaveSettings(ctx, func(s *Settings) { s.Pinned = pinned })
 }
 
 // SetCloseDelay decides how long the window waits before closing itself once
 // it loses the keyboard.
 func (t *Translate) SetCloseDelay(ctx context.Context, delay time.Duration) error {
-	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.CloseDelay = delay })
+	return t.SaveSettings(ctx, func(s *Settings) { s.CloseDelay = delay })
 }
 
 // SetCustomTranslator records where the user's own service is and what to
-// call it. The address is cleaned the way the domain cleans it, so that what
+// call it. The address is cleaned the way this feature cleans it, so that what
 // is stored is what will be asked.
-func (t *Translate) SetCustomTranslator(ctx context.Context, settings domain.CustomTranslatorSettings) error {
+func (t *Translate) SetCustomTranslator(ctx context.Context, settings CustomSettings) error {
 	settings = settings.Normalize()
-	return t.SaveSettings(ctx, func(s *domain.TranslationSettings) { s.Custom = settings })
+	return t.SaveSettings(ctx, func(s *Settings) { s.Custom = settings })
 }
 
 // Providers lists the translators the settings window offers, in the order

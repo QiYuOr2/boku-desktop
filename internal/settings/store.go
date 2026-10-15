@@ -1,20 +1,23 @@
-// Package settings stores the application's own configuration: the switches
-// that are about Boku itself — the clipboard options, which optional panels
-// are on, and the translation tool's settings.
+// Package settings stores the application's own configuration as one file,
+// under the user data directory:
 //
-// One file, under the user data directory:
+//	settings.json    what the user chose about Boku
 //
-//	settings.json    the switches that are about Boku itself
+// It knows nothing about what is in it. Each feature that has settings
+// registers a Section: a name, and how that feature's own configuration is
+// written down. This package reads the file, hands each section its own part
+// of it, and writes back only the parts that changed.
 //
-// It holds one domain.ToolStore and nothing else. The clipboard history used
-// to live here too, in a second file, because the two were written by the same
-// object; it is the clipboard feature's file and now lives with it
-// (internal/clipboard/store.go).
+// That ignorance is the point. A settings store that knew the fields would
+// have to be edited whenever any feature gained one, and every feature would
+// be able to reach every other feature's settings through it. Here a feature
+// can only ever be handed its own section — the type it decodes into lives in
+// that feature's package, and no other package has a reason to name it.
 //
 // The file is written through internal/platform/atomicfile, so a crash
-// mid-write leaves the previous file rather than half of a new one. A settings
-// file that cannot be read is an error: the window would otherwise show
-// defaults the user never chose and then write them back.
+// mid-write leaves the previous file rather than half of a new one. A file
+// that cannot be read is an error: the window would otherwise show defaults
+// the user never chose and then write them back.
 package settings
 
 import (
@@ -23,260 +26,195 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 	"sync"
-	"time"
 
-	"boku/internal/domain"
 	"boku/internal/kit"
 	"boku/internal/platform/atomicfile"
 )
 
-// fileVersion is the shape this build reads and writes. A file from another
+// FileVersion is the shape this build reads and writes. A file from another
 // version is refused rather than partly understood.
-const fileVersion = 1
+const FileVersion = 1
 
-// customTranslatorID is the translator whose settings the user fills in
-// themselves. It is named here, and not imported from the package that
-// implements it, because the file's field names are a storage decision: this
-// package must keep reading a file whose translator moved.
-const customTranslatorID = "custom"
-
-// defaultTools is what a user who has never saved anything has: the
-// translation defaults, which a struct literal would leave switched off —
-// the one default this file cannot express by writing nothing.
-func defaultTools() domain.ToolSettings {
-	return domain.ToolSettings{Translation: domain.TranslationDefaults()}.Normalize()
+// Section is one feature's configuration, as that feature knows it.
+//
+// The store never looks inside. Decode is handed the file's tool settings and
+// takes the ones it owns; Encode hands back the ones it owns. The two are the
+// only place the storage format and a feature's own type meet, which is why a
+// feature can gain a setting without this package being touched.
+//
+// Decode is given every feature's keys rather than only its own — the file is
+// one flat object, and that is what keeps a user's existing settings readable
+// without a migration. Taking only its own keys is therefore each section's
+// own discipline, and Encode's job is the other half of it: the map it returns
+// is merged into the file, so a section that returned another feature's key
+// would be writing settings it does not own.
+type Section interface {
+	// Name is the section's name, for errors. It is not a key in the file:
+	// the settings of every feature share one flat object there, which is
+	// the shape docs/database.md §8 documents and a person reads.
+	Name() string
+	// Decode reads this feature's settings out of values, which holds the
+	// keys of every feature. A key that is absent leaves the setting as it
+	// is, so a file written before a key existed gives that key's default
+	// rather than a zero.
+	Decode(values map[string]json.RawMessage) error
+	// Encode returns this feature's settings as the keys it owns.
+	Encode() (map[string]any, error)
 }
 
-// toolDocument is what settings.json holds: the switches, under names that
-// docs/database.md §8 exports and a person can read.
-type toolDocument struct {
-	Version int  `json:"version"`
-	Tools   tool `json:"tools"`
-}
-
-type tool struct {
-	ClipboardRegionVisible bool `json:"clipboardRegionVisible"`
-	ClipboardMonitoring    bool `json:"clipboardMonitoring"`
-	// ClipboardPollIntervalMs is the poll interval in milliseconds, the unit
-	// a file a person edits can be written in.
-	ClipboardPollIntervalMs int64 `json:"clipboardPollIntervalMs"`
-	// ClipboardHistorySize is the record range: how many of the most recent
-	// copies are kept, in entries. A file that does not have it (or holds a
-	// number that is not one of the ranges) is brought back to the default
-	// by Normalize.
-	ClipboardHistorySize int `json:"clipboardHistorySize"`
-
-	// Panels holds what the user chose about the panels that can be turned
-	// off, by panel id. It is only written when there is a choice in it: a
-	// panel with no key is on, which is what every panel is until somebody
-	// turns one off, and what a file written before the switch existed says.
-	Panels map[string]bool `json:"panels,omitempty"`
-
-	// The selection-translation tool. Every field is optional in the file:
-	// one this build wrote always has them, and one a person wrote — or one
-	// from before the tool existed — gets its defaults from Normalize.
-	//
-	// A field whose default is ON is a pointer, because a plain bool cannot
-	// tell an absent key from a choice: a file written before the key
-	// existed decodes to "false", which reads as a switch the user turned
-	// off. Nil means the key was absent, and the default applies.
-	TranslateEnabled       *bool  `json:"translateEnabled"`
-	TranslateAccelerator   string `json:"translateAccelerator"`
-	TranslateProvider      string `json:"translateProvider"`
-	TranslateFurigana      *bool  `json:"translateFurigana"`
-	TranslateLoanwordGloss *bool  `json:"translateLoanwordGloss"`
-	TranslatePinned        bool   `json:"translatePinned"`
-	// TranslateCloseDelayMs is how long the window waits before closing
-	// itself, in milliseconds. Milliseconds rather than Go's duration
-	// string: the file is one a person reads and may edit.
-	TranslateCloseDelayMs int64 `json:"translateCloseDelayMs"`
-	// Translators holds what the user's own services were configured with,
-	// by translator id. Nothing sensitive goes here: a key lives in the
-	// credential store.
-	Translators map[string]translatorSettings `json:"translators,omitempty"`
-}
-
-// translatorSettings is one user-configured translator.
-type translatorSettings struct {
-	BaseURL     string `json:"baseURL,omitempty"`
-	DisplayName string `json:"displayName,omitempty"`
-}
-
-// Store is the application's settings as a file. It is a domain.ToolStore,
-// and it is safe to use from several goroutines.
+// Store is settings.json. It is safe to use from several goroutines.
 type Store struct {
 	Path string
 
+	// mu guards the file, the sections and every read-modify-write: a change
+	// made while another one is in flight must not be lost, and the only way
+	// to promise that is to hold one lock across the read and the write.
 	mu       sync.Mutex
-	settings domain.ToolSettings
-	loaded   bool
+	sections []Section
+	byName   map[string]Section
 }
 
-// New returns the store over a path. A missing file is not an error: the
-// store starts from the defaults and writes on the first change.
-func New(path string) (*Store, error) {
-	if strings.TrimSpace(path) == "" {
-		return nil, fmt.Errorf("%w: the settings store has no path", domain.ErrInvalidArgument)
-	}
-	return &Store{Path: path}, nil
-}
-
-// Load reads the settings, and returns the defaults when there is no file.
+// document is what settings.json holds: the version, and the flat object the
+// features' settings share.
 //
-// A caller that means to change something should use Update instead: reading
-// here and writing with Save is two steps, and a change made between them is
-// lost.
-func (s *Store) Load(ctx context.Context) (domain.ToolSettings, error) {
+// The settings of every feature sit in one "tools" object rather than in one
+// entry each. That is the shape every file already in the wild has, and the
+// shape docs/database.md §8 describes to a user; keeping it is what lets this
+// package stop knowing the fields without any file needing a migration.
+type document struct {
+	Version int                        `json:"version"`
+	Tools   map[string]json.RawMessage `json:"tools"`
+}
+
+// New returns the store over a path, with the sections it should read and
+// write. A missing file is not an error: every section keeps its own defaults
+// and writes on the first change.
+func New(path string, sections ...Section) (*Store, error) {
+	if path == "" {
+		return nil, fmt.Errorf("settings: the store has no path")
+	}
+	store := &Store{Path: path, byName: make(map[string]Section, len(sections))}
+	for _, section := range sections {
+		if section == nil {
+			return nil, fmt.Errorf("settings: a section is nil")
+		}
+		name := section.Name()
+		if name == "" {
+			return nil, fmt.Errorf("settings: a section has no name")
+		}
+		if _, twice := store.byName[name]; twice {
+			return nil, fmt.Errorf("settings: section %s is registered twice", name)
+		}
+		store.byName[name] = section
+		store.sections = append(store.sections, section)
+	}
+	return store, nil
+}
+
+// Load reads the file into every registered section.
+//
+// A key the file does not hold is left as it is: the feature's default, which
+// is what a user who has never saved anything should get. That is also what
+// makes a new setting work without a migration — a file written before the key
+// existed simply has no entry for it.
+func (s *Store) Load(ctx context.Context) error {
 	if err := kit.ContextErr(ctx); err != nil {
-		return domain.ToolSettings{}, err
+		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.read()
 }
 
-// Update reads the settings, lets change modify them, and writes the result —
-// all under one lock, so that a change made while another one is in flight
-// cannot be lost.
-//
-// This is the only way the application changes a setting it already has. A
-// caller that reads with Load, changes what it read and writes it back with
-// Save is doing the same thing in three steps, and two such callers overwrite
-// each other: both read the file as it was, both write back what they read
-// plus their own change, and the second write undoes the first. Keeping the
-// three steps in one critical section is what makes that impossible, and it is
-// why Save is not enough on its own for a change to existing settings.
-//
-// A missing file is not an error: change is handed the defaults.
-func (s *Store) Update(ctx context.Context, change func(*domain.ToolSettings) error) error {
-	if err := kit.ContextErr(ctx); err != nil {
-		return err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	settings, err := s.read()
-	if err != nil {
-		return err
-	}
-	if err := change(&settings); err != nil {
-		return err
-	}
-	return s.write(settings.Normalize())
-}
-
-// read returns the settings on disk, or the defaults when there is no file.
-//
-// It is the body of Load without the locking: the lock is taken by whoever
-// calls it, so that a read and the write that follows it are one step.
-func (s *Store) read() (domain.ToolSettings, error) {
+func (s *Store) read() error {
 	data, err := os.ReadFile(s.Path)
 	if errors.Is(err, os.ErrNotExist) {
-		return defaultTools(), nil
+		return nil
 	}
 	if err != nil {
-		return domain.ToolSettings{}, fmt.Errorf("settings: read %s: %w", s.Path, err)
+		return fmt.Errorf("settings: read %s: %w", s.Path, err)
 	}
-	var doc toolDocument
+	var doc document
 	if err := json.Unmarshal(data, &doc); err != nil {
-		return domain.ToolSettings{}, fmt.Errorf("settings: %s is not a readable settings file: %w", s.Path, err)
+		return fmt.Errorf("settings: %s is not a readable settings file: %w", s.Path, err)
 	}
-	if doc.Version != fileVersion {
-		return domain.ToolSettings{}, fmt.Errorf("settings: %s is version %d, this build reads version %d",
-			s.Path, doc.Version, fileVersion)
+	if doc.Version != FileVersion {
+		return fmt.Errorf("settings: %s is version %d, this build reads version %d",
+			s.Path, doc.Version, FileVersion)
 	}
-	defaults := domain.TranslationDefaults()
-	translation := domain.TranslationSettings{
-		Enabled:       true,
-		Accelerator:   doc.Tools.TranslateAccelerator,
-		Provider:      doc.Tools.TranslateProvider,
-		Furigana:      defaults.Furigana,
-		LoanwordGloss: defaults.LoanwordGloss,
-		Pinned:        doc.Tools.TranslatePinned,
-		CloseDelay:    time.Duration(doc.Tools.TranslateCloseDelayMs) * time.Millisecond,
-		Custom: domain.CustomTranslatorSettings{
-			BaseURL:     doc.Tools.Translators[customTranslatorID].BaseURL,
-			DisplayName: doc.Tools.Translators[customTranslatorID].DisplayName,
-		},
+	for _, section := range s.sections {
+		if err := section.Decode(doc.Tools); err != nil {
+			return fmt.Errorf("settings: %s: %s: %w", s.Path, section.Name(), err)
+		}
 	}
-	// An absent key is the default, not a false: the switch is on for a user
-	// who has never touched it, and a file from before the tool existed has
-	// no key at all — which is every user who has not opened this page since
-	// the Japanese annotations were added. Reading those two keys as plain
-	// bools left both annotations off, so the app asked for a plain
-	// translation and the window drew no readings at all.
-	if doc.Tools.TranslateEnabled != nil {
-		translation.Enabled = *doc.Tools.TranslateEnabled
-	}
-	if doc.Tools.TranslateFurigana != nil {
-		translation.Furigana = *doc.Tools.TranslateFurigana
-	}
-	if doc.Tools.TranslateLoanwordGloss != nil {
-		translation.LoanwordGloss = *doc.Tools.TranslateLoanwordGloss
-	}
-	return domain.ToolSettings{
-		Clipboard: domain.ClipboardSettings{
-			RegionVisible: doc.Tools.ClipboardRegionVisible,
-			Monitoring:    doc.Tools.ClipboardMonitoring,
-			PollInterval:  time.Duration(doc.Tools.ClipboardPollIntervalMs) * time.Millisecond,
-			HistorySize:   doc.Tools.ClipboardHistorySize,
-		},
-		Panels:      domain.PanelSettings{Choices: panelChoices(doc.Tools.Panels)},
-		Translation: translation,
-	}.Normalize(), nil
+	return nil
 }
 
-// Save writes the settings whole.
+// Update reads the file, hands one section to change, and writes the whole
+// document back.
 //
-// A caller that means to change one thing should use Update instead. Save
-// replaces the file with what it was given, so a value this build read earlier
-// and put back here is a value that overwrites whatever was written in
-// between.
-func (s *Store) Save(ctx context.Context, settings domain.ToolSettings) error {
+// This is the only way a setting is changed. A caller that reads with Load,
+// changes what it read and writes with Save is doing the same thing in three
+// steps, and two such callers overwrite each other: both read the file as it
+// was, both write back what they read plus their own change, and the second
+// write undoes the first. Keeping the three steps in one critical section is
+// what makes that impossible.
+//
+// The section named is the one whose change is run. The others are re-read and
+// written back from the store's own copy of the file rather than from anything
+// the caller holds, so a change to one feature's settings cannot put back
+// another feature's stale values.
+func (s *Store) Update(ctx context.Context, name string, change func() error) error {
+	if err := kit.ContextErr(ctx); err != nil {
+		return err
+	}
+	if _, known := s.byName[name]; !known {
+		return fmt.Errorf("settings: no section is named %s", name)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.read(); err != nil {
+		return err
+	}
+	if err := change(); err != nil {
+		return err
+	}
+	return s.write()
+}
+
+// Save writes every section as it stands.
+func (s *Store) Save(ctx context.Context) error {
 	if err := kit.ContextErr(ctx); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.write(settings)
+	return s.write()
 }
 
-// write puts the settings on disk. The caller holds the lock: a write is the
-// second half of a read-modify-write, and is never done on its own by a caller
-// that meant to change something.
-func (s *Store) write(settings domain.ToolSettings) error {
-	settings = settings.Normalize()
-	translation := settings.Translation
-	enabled, furigana, gloss := translation.Enabled, translation.Furigana, translation.LoanwordGloss
-	doc := toolDocument{
-		Version: fileVersion,
-		Tools: tool{
-			ClipboardRegionVisible:  settings.Clipboard.RegionVisible,
-			ClipboardMonitoring:     settings.Clipboard.Monitoring,
-			ClipboardPollIntervalMs: settings.Clipboard.Interval().Milliseconds(),
-			ClipboardHistorySize:    settings.Clipboard.KeepsHistory(),
-			Panels:                  panelChoices(settings.Panels.Choices),
-
-			TranslateEnabled:       &enabled,
-			TranslateAccelerator:   translation.AcceleratorOr(),
-			TranslateProvider:      translation.ProviderOr(),
-			TranslateFurigana:      &furigana,
-			TranslateLoanwordGloss: &gloss,
-			TranslatePinned:        translation.Pinned,
-			TranslateCloseDelayMs:  translation.CloseDelayOr().Milliseconds(),
-			// The map is written even when it holds nothing worth keeping:
-			// its presence is what tells a reader that this build wrote the
-			// file, and therefore that an absent key inside it is a choice
-			// rather than a version's gap.
-			Translators: map[string]translatorSettings{
-				customTranslatorID: {
-					BaseURL:     translation.Custom.BaseURL,
-					DisplayName: translation.Custom.DisplayName,
-				},
-			},
-		},
+func (s *Store) write() error {
+	tools := make(map[string]json.RawMessage)
+	for _, section := range s.sections {
+		values, err := section.Encode()
+		if err != nil {
+			return fmt.Errorf("settings: encode %s: %w", section.Name(), err)
+		}
+		for key, value := range values {
+			raw, err := json.Marshal(value)
+			if err != nil {
+				return fmt.Errorf("settings: encode %s: %s: %w", section.Name(), key, err)
+			}
+			// Two features writing one key is a mistake in the assembly,
+			// not something to resolve silently: whichever won would be
+			// decided by the order the sections were registered in.
+			if _, taken := tools[key]; taken {
+				return fmt.Errorf("settings: %s and another section both write %q", section.Name(), key)
+			}
+			tools[key] = raw
+		}
 	}
+	doc := document{Version: FileVersion, Tools: tools}
 	data, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return fmt.Errorf("settings: encode %s: %w", s.Path, err)
@@ -284,23 +222,26 @@ func (s *Store) write(settings domain.ToolSettings) error {
 	if err := atomicfile.Write(s.Path, append(data, '\n')); err != nil {
 		return fmt.Errorf("settings: %w", err)
 	}
-	s.settings, s.loaded = settings, true
 	return nil
 }
 
-// panelChoices copies the panels the user chose about, so that a caller can
-// never write into a map the store is holding. A file that holds no choice is
-// nil rather than an empty map: both mean the same thing — every panel is on.
-func panelChoices(choices map[string]bool) map[string]bool {
-	if len(choices) == 0 {
+// Into decodes one key of a section's settings into out.
+//
+// It is the answer to "the file does not have this key": out is left exactly
+// as it was, which is how a feature keeps the default it started with. Passing
+// the zero value would read as a choice the user made — every switch off,
+// every interval zero — and a file written before a key existed would turn
+// that feature off for everybody.
+//
+// It is here, next to the file format, so that every section answers that
+// question the same way instead of each deciding for itself.
+func Into(values map[string]json.RawMessage, key string, out any) error {
+	raw, present := values[key]
+	if !present {
 		return nil
 	}
-	copied := make(map[string]bool, len(choices))
-	for id, on := range choices {
-		copied[id] = on
+	if err := json.Unmarshal(raw, out); err != nil {
+		return fmt.Errorf("%s: %w", key, err)
 	}
-	return copied
+	return nil
 }
-
-// ensure the port is satisfied where it is defined, not at the call site.
-var _ domain.ToolStore = (*Store)(nil)

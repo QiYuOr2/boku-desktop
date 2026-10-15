@@ -14,6 +14,7 @@ import (
 	contract "boku/internal/contract/deepseek"
 	"boku/internal/domain"
 	"boku/internal/platform/httpc"
+	"boku/internal/translate/openai"
 )
 
 // The translator reuses the balance panel's credential: one account, one
@@ -182,7 +183,7 @@ func TestTranslateReportsATruncatedText(t *testing.T) {
 	}))
 	defer server.Close()
 	translated := NewWithBaseURL(httpc.New(httpc.Options{}), server.URL)
-	long := strings.Repeat("日", domain.MaxTranslationChars+50)
+	long := strings.Repeat("日", openai.DefaultMaxChars+50)
 	result, err := translated.Translate(context.Background(), credentials(), domain.TranslationRequest{
 		Text:       long,
 		TargetLang: domain.LangChinese,
@@ -190,8 +191,8 @@ func TestTranslateReportsATruncatedText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Translate failed: %v", err)
 	}
-	if got := len([]rune(result.SourceText)); got != domain.MaxTranslationChars {
-		t.Errorf("the source sent is %d characters, want %d", got, domain.MaxTranslationChars)
+	if got := len([]rune(result.SourceText)); got != openai.DefaultMaxChars {
+		t.Errorf("the source sent is %d characters, want %d", got, openai.DefaultMaxChars)
 	}
 	if !strings.Contains(result.Note, "只翻译了前") {
 		t.Errorf("note = %q, want it to say the text was cut", result.Note)

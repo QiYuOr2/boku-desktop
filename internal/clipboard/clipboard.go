@@ -37,9 +37,12 @@ const maxCopiedTextBytes = 1 << 20
 // survives a window closing: the history is the service's, not a view's.
 // Every method is safe to call from any goroutine.
 type Clipboard struct {
-	device   domain.ClipboardDevice
-	store    domain.ClipboardStore
-	tools    domain.ToolStore
+	device  domain.ClipboardDevice
+	store   domain.ClipboardStore
+	section *Section
+	// saver is the store the section is saved through, or nil when the
+	// settings are kept in memory only.
+	saver    StoreSettings
 	now      func() time.Time
 	emit     func()
 	interval time.Duration
@@ -60,7 +63,7 @@ type Clipboard struct {
 	latest     *domain.ClipRecord
 	history    []domain.ClipboardEntry
 	historyErr error
-	settings   domain.ToolSettings
+	settings   Settings
 	writeAt    time.Time
 	writeValue string
 	writeKind  domain.ClipKind
@@ -84,12 +87,16 @@ type Clipboard struct {
 type ClipboardOptions struct {
 	Device domain.ClipboardDevice
 	Store  domain.ClipboardStore
-	// Tools stores the switches, including the poll interval and the record
-	// range. A nil store keeps them in memory, which is what a test wants
-	// and what an assembly without a settings file must still survive.
-	Tools domain.ToolStore
-	Clock domain.Clock
-	Emit  func()
+	// Section is this feature's settings, as the store holds them: it is
+	// read from at assembly and written through when a switch changes. A nil
+	// section keeps the settings in memory, which is what a test wants and
+	// what an assembly without a settings file must still survive.
+	Section *Section
+	// Settings is the store the section is saved through. A nil store keeps
+	// the settings in memory only.
+	Settings StoreSettings
+	Clock    domain.Clock
+	Emit     func()
 	// Keep overrides the record range the settings hold.
 	Keep int
 	// PollIn overrides the interval the settings hold.
@@ -108,12 +115,17 @@ func NewClipboard(opts ClipboardOptions) (*Clipboard, error) {
 	if clock == nil {
 		clock = domain.SystemClock{}
 	}
+	section := opts.Section
+	if section == nil {
+		section = NewSection()
+	}
 	clipboard := &Clipboard{
-		device: opts.Device,
-		store:  opts.Store,
-		tools:  opts.Tools,
-		now:    clock.Now,
-		emit:   opts.Emit,
+		device:  opts.Device,
+		store:   opts.Store,
+		section: section,
+		saver:   opts.Settings,
+		now:     clock.Now,
+		emit:    opts.Emit,
 		// An option overrides the record range the settings hold, which is
 		// what a test wants; load fills it in from the settings otherwise,
 		// and prunes the stored history to it as it reads it.
@@ -125,8 +137,8 @@ func NewClipboard(opts ClipboardOptions) (*Clipboard, error) {
 	// The interval the two switches were read with is the one the poll and
 	// the loop-suppression window use; an option overrides it, which is
 	// what a test wants.
-	clipboard.interval = clipboard.settings.Clipboard.Interval()
-	if opts.PollIn >= domain.ClipboardMinPollInterval {
+	clipboard.interval = clipboard.settings.Interval()
+	if opts.PollIn >= MinPollInterval {
 		clipboard.interval = opts.PollIn
 	}
 	return clipboard, nil
@@ -143,17 +155,14 @@ func NewClipboard(opts ClipboardOptions) (*Clipboard, error) {
 // The history is pruned as it is read, so a record range the user shortened
 // while the application was not running is honored before anything is shown.
 func (c *Clipboard) load(ctx context.Context) error {
-	if c.tools != nil {
-		settings, err := c.tools.Load(ctx)
-		if err != nil {
+	if c.saver != nil {
+		if err := c.saver.Load(ctx); err != nil {
 			return fmt.Errorf("read the clipboard settings: %w", err)
 		}
-		c.settings = settings.Normalize()
-	} else {
-		c.settings = domain.ToolSettings{}.Normalize()
 	}
+	c.settings = c.section.Current()
 	if c.keep <= 0 {
-		c.keep = c.settings.Clipboard.KeepsHistory()
+		c.keep = c.settings.KeepsHistory()
 	}
 	entries, err := c.store.LoadEntries(ctx)
 	if err != nil {
@@ -164,8 +173,8 @@ func (c *Clipboard) load(ctx context.Context) error {
 	return nil
 }
 
-// Settings returns the current switches.
-func (c *Clipboard) Settings() domain.ToolSettings {
+// Settings returns the clipboard's own switches.
+func (c *Clipboard) Settings() Settings {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.settings
@@ -184,7 +193,7 @@ func (c *Clipboard) SetEmit(emit func()) {
 // Hiding it stops nothing: what the user turned off is the drawing.
 func (c *Clipboard) SetRegionVisible(ctx context.Context, visible bool) error {
 	c.mu.Lock()
-	c.settings.Clipboard.RegionVisible = visible
+	c.settings.RegionVisible = visible
 	settings := c.settings
 	c.mu.Unlock()
 	return c.saveSettings(ctx, settings)
@@ -195,11 +204,11 @@ func (c *Clipboard) SetRegionVisible(ctx context.Context, visible bool) error {
 // read in flight.
 func (c *Clipboard) SetMonitoring(ctx context.Context, enabled bool) error {
 	c.mu.Lock()
-	if c.settings.Clipboard.Monitoring == enabled {
+	if c.settings.Monitoring == enabled {
 		c.mu.Unlock()
 		return nil
 	}
-	c.settings.Clipboard.Monitoring = enabled
+	c.settings.Monitoring = enabled
 	settings := c.settings
 	c.mu.Unlock()
 	if err := c.saveSettings(ctx, settings); err != nil {
@@ -218,18 +227,19 @@ func (c *Clipboard) SetMonitoring(ctx context.Context, enabled bool) error {
 // It goes through the store's Update rather than a Save of the whole settings
 // value: the file holds every feature's settings, and writing back the copy
 // this service holds would put back whatever another feature changed since
-// that copy was read. Update reads, applies the change and writes as one step,
-// touching nothing but the clipboard's four values.
+// that copy was read. Update reads the file again, applies this feature's
+// change and writes as one step, touching nothing but the clipboard's four
+// values.
 //
 // It remembers the new switches here as well, even when the file could not be
 // written: the switch the user just flipped has taken effect for this run.
-func (c *Clipboard) saveSettings(ctx context.Context, settings domain.ToolSettings) error {
-	if c.tools == nil {
+func (c *Clipboard) saveSettings(ctx context.Context, settings Settings) error {
+	c.section.Set(settings)
+	if c.saver == nil {
 		return nil
 	}
-	wanted := settings.Clipboard
-	return c.tools.Update(ctx, func(current *domain.ToolSettings) error {
-		current.Clipboard = wanted
+	return c.saver.Update(ctx, sectionName, func() error {
+		c.section.Set(settings)
 		return nil
 	})
 }
@@ -243,15 +253,15 @@ func (c *Clipboard) saveSettings(ctx context.Context, settings domain.ToolSettin
 // gone — the range is what the file holds, not what the page shows — so the
 // settings form says so before the choice is made.
 func (c *Clipboard) SetHistorySize(ctx context.Context, size int) error {
-	if !domain.ValidClipboardHistorySize(size) {
-		size = domain.ClipboardDefaultHistorySize
+	if !ValidHistorySize(size) {
+		size = DefaultHistorySize
 	}
 	c.mu.Lock()
-	if c.settings.Clipboard.HistorySize == size {
+	if c.settings.HistorySize == size {
 		c.mu.Unlock()
 		return nil
 	}
-	c.settings.Clipboard.HistorySize = size
+	c.settings.HistorySize = size
 	settings := c.settings
 	c.keep = size
 	c.history = c.prune(c.history)
@@ -269,7 +279,7 @@ func (c *Clipboard) SetHistorySize(ctx context.Context, size int) error {
 // Start begins monitoring when the settings say so. main.go calls it once
 // the application is ready.
 func (c *Clipboard) Start(ctx context.Context) {
-	if !c.Settings().Clipboard.Monitoring {
+	if !c.Settings().Monitoring {
 		return
 	}
 	c.begin(ctx)
@@ -336,7 +346,7 @@ func (c *Clipboard) stop() {
 // Show reports whether the interface has a reason to read the clipboard: the
 // region is drawn and the content it would draw is being collected.
 func (c *Clipboard) Show() bool {
-	return c.Settings().Clipboard.Reads()
+	return c.Settings().Reads()
 }
 
 // Latest is the most recent reading, and whether there is one.

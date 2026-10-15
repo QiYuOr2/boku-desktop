@@ -205,9 +205,9 @@ func newTranslate(t *testing.T) *translateFixture {
 	// The settings start as a fresh installation has them: the store fills
 	// the translation defaults in when the file has no such key, so the fake
 	// stands in for a store that has already been read once.
-	tools := &fakeTools{settings: domain.ToolSettings{Translation: domain.TranslationDefaults()}}
+	tools := newFakeTools()
 	// The user's own translator reads its address from those settings.
-	customReply.baseURL = func() string { return tools.settings.Translation.Custom.BaseURL }
+	customReply.baseURL = func() string { return tools.section.Current().Custom.BaseURL }
 	secrets := newMemoryStore()
 	if err := secrets.Put(context.Background(),
 		domain.CredentialKey("deepseek", "apiKey"), []byte("sk-test-0001"), domain.SecretMeta{}); err != nil {
@@ -218,7 +218,8 @@ func newTranslate(t *testing.T) *translateFixture {
 	service, err := NewTranslate(TranslateOptions{
 		Translators: newFakeTranslators(deepseek, customReply),
 		Secrets:     secrets,
-		Tools:       tools,
+		Section:     tools.section,
+		Settings:    tools,
 		Selection:   selection,
 		Clipboard:   device,
 		Clock:       clock,
@@ -388,7 +389,7 @@ func TestTranslatePicksTheTargetFromTheSource(t *testing.T) {
 // what the request for the words asks for.
 func TestTheAnnotationIsItsOwnRequest(t *testing.T) {
 	f := newTranslate(t)
-	f.tools.settings.Translation = domain.TranslationDefaults()
+	f.tools.section.Set(Defaults())
 
 	// A translation asks for no annotation, whatever the switches say.
 	if err := f.translate.SetFurigana(context.Background(), true); err != nil {
@@ -459,7 +460,7 @@ func TestTranslateWhenTheToolIsOff(t *testing.T) {
 // window shows "去配置" rather than an error.
 func TestTranslateWithNothingConfigured(t *testing.T) {
 	f := newTranslate(t)
-	if err := f.translate.SaveSettings(context.Background(), func(s *domain.TranslationSettings) {
+	if err := f.translate.SaveSettings(context.Background(), func(s *Settings) {
 		s.Provider = "nobody"
 	}); err != nil {
 		t.Fatalf("SaveSettings failed: %v", err)
@@ -584,7 +585,7 @@ func TestTranslateHonoursCancellation(t *testing.T) {
 func TestSettingsRoundTrip(t *testing.T) {
 	f := newTranslate(t)
 	ctx := context.Background()
-	f.tools.settings.Translation = domain.TranslationDefaults()
+	f.tools.section.Set(Defaults())
 
 	if err := f.translate.SetProvider(ctx, "custom"); err != nil {
 		t.Fatalf("SetProvider failed: %v", err)
@@ -595,7 +596,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if err := f.translate.SetCloseDelay(ctx, 1200*time.Millisecond); err != nil {
 		t.Fatalf("SetCloseDelay failed: %v", err)
 	}
-	if err := f.translate.SetCustomTranslator(ctx, domain.CustomTranslatorSettings{
+	if err := f.translate.SetCustomTranslator(ctx, CustomSettings{
 		BaseURL:     "api.example.com/v1/",
 		DisplayName: "  本地 Ollama  ",
 	}); err != nil {
@@ -621,14 +622,16 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if settings.Custom.DisplayName != "本地 Ollama" {
 		t.Errorf("custom name = %q, want it trimmed", settings.Custom.DisplayName)
 	}
-	// The clipboard switches are untouched: the two tools share one file,
-	// and writing one must not lose the other.
-	f.tools.settings.Clipboard.Monitoring = true
+	// Reading the translation settings does not disturb them. The two tools
+	// share one file, so what keeps one from losing the other's switches is
+	// that each section owns its own keys — a translation section has no
+	// clipboard field to write, which is what this used to check by hand.
+	before := f.tools.section.Current()
 	if _, err := f.translate.Settings(); err != nil {
 		t.Fatalf("Settings failed: %v", err)
 	}
-	if !f.tools.settings.Clipboard.Monitoring {
-		t.Error("saving the translation settings lost the clipboard switches")
+	if after := f.tools.section.Current(); after != before {
+		t.Errorf("reading the translation settings changed them: %+v then %+v", before, after)
 	}
 }
 
@@ -643,7 +646,7 @@ func TestSetProviderRefusesAnUnknownID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Settings failed: %v", err)
 	}
-	if settings.ProviderOr() != domain.DefaultTranslationProvider {
+	if settings.ProviderOr() != DefaultProvider {
 		t.Errorf("provider = %q, want the stored one kept", settings.ProviderOr())
 	}
 }
@@ -653,7 +656,7 @@ func TestSetProviderRefusesAnUnknownID(t *testing.T) {
 // to be written.
 func TestSettingsReportAWriteFailure(t *testing.T) {
 	f := newTranslate(t)
-	f.tools.settings.Translation = domain.TranslationDefaults()
+	f.tools.section.Set(Defaults())
 	f.tools.err = errors.New("the disk is full")
 	err := f.translate.SetPinned(context.Background(), true)
 	if err == nil {
@@ -672,7 +675,7 @@ func TestSettingsReportAWriteFailure(t *testing.T) {
 // configured with, and whether it can be used now.
 func TestProvidersDescribeWhatIsUsable(t *testing.T) {
 	f := newTranslate(t)
-	f.tools.settings.Translation = domain.TranslationDefaults()
+	f.tools.section.Set(Defaults())
 	views, err := f.translate.Providers(context.Background())
 	if err != nil {
 		t.Fatalf("Providers failed: %v", err)
@@ -701,7 +704,7 @@ func TestProvidersDescribeWhatIsUsable(t *testing.T) {
 		t.Errorf("endpoint = %q, want it empty before an address", views[1].Endpoint)
 	}
 
-	if err := f.translate.SetCustomTranslator(context.Background(), domain.CustomTranslatorSettings{
+	if err := f.translate.SetCustomTranslator(context.Background(), CustomSettings{
 		BaseURL: "https://api.example.com/v1",
 	}); err != nil {
 		t.Fatalf("SetCustomTranslator failed: %v", err)
@@ -824,7 +827,7 @@ func TestTranslateWithoutAnyTranslator(t *testing.T) {
 	service, err := NewTranslate(TranslateOptions{
 		Translators: newFakeTranslators(),
 		Secrets:     newMemoryStore(),
-		Tools:       &fakeTools{},
+		Section:     newFakeTools().section,
 	})
 	if err != nil {
 		t.Fatalf("NewTranslate failed: %v", err)
