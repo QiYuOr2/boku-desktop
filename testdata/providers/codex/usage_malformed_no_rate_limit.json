@@ -1,0 +1,8 @@
+{
+  "plan_type": "plus",
+  "credits": {
+    "has_credits": true,
+    "unlimited": false,
+    "balance": 12.5
+  }
+}

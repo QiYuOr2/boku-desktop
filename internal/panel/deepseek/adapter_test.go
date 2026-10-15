@@ -12,9 +12,11 @@ import (
 	"boku/internal/domain"
 )
 
-// fixtures live at the repository root, shared with the Apple target: both
-// ends map the same raw response to the same snapshot.
-const fixturesDir = "../../../../../fixtures/providers/deepseek"
+// The vectors live inside this module (testdata/providers) so it can be built
+// and tested on its own. They mirror the repository-level fixtures/ directory,
+// which both ends share: both ends map the same raw response to the same
+// snapshot. Change both copies.
+const fixturesDir = "../../../testdata/providers/deepseek"
 
 var fetchedAt = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 

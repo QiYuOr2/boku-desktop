@@ -10,9 +10,11 @@ import (
 	"boku/internal/domain"
 )
 
-// fixtures live at the repository root, shared with the Apple target: both
-// ends must read the same response the service sends.
-const fixturesDir = "../../../../../fixtures/providers/codex"
+// The vectors live inside this module (testdata/providers) so it can be built
+// and tested on its own. They mirror the repository-level fixtures/ directory,
+// which both ends share: both ends must read the same response the service
+// sends. Change both copies.
+const fixturesDir = "../../../testdata/providers/codex"
 
 // fetchedAt is the moment the fixtures are taken to be fetched at, and
 // sessionResetAt is the reset time usage_ok.json carries: the adapter counts
