@@ -4,21 +4,11 @@
 
 ## 这是什么
 
-Boku Desktop：托盘上的一个图标，点开是一张悬浮小卡片。
-
-- **Panel（面板）**：API 余额、软件订阅、读书时长、游戏时长、自定义指标
-- **Metric / Observation / Snapshot**：跨 Provider 的统一指标模型
-- **Provider / Adapter**：第三方数据接入与适配
-- **Tool（工具）**：划词翻译、JSON 格式化、剪贴板历史
+Boku Desktop：常驻系统托盘的桌面工具。功能与现状见 `README.md`。
+本文件只讲代码怎么组织。
 
 已放弃的能力（不得重新引入）：Note、Transaction、Timeline、Calendar、
 Folder、Tag、Wiki Link、Backlinks、Markdown 笔记。
-
-核心原则：
-
-> 外部服务失败只能让一张卡片失败，不能让应用或本地数据失败。
-
-> 凭据永远不落明文库。
 
 ## Before Coding
 
