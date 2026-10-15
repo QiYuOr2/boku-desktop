@@ -163,17 +163,6 @@ internal/      app / domain / kit / platform / contract / panel / clipboard
 testdata/      适配器测试用的原始响应样本
 ```
 
-## 贡献
-
-Issue 与 PR 都欢迎。请注意：
-
-- 一次只做一件事；改动尽量小而完整。
-- 新增业务逻辑要带测试（happy path / invalid input / edge case）。
-- 界面与布局不写像素断言测试，靠运行时验收。
-- 不要把外部服务失败显示成 0；不要用浮点数存金额或时长。
-
-架构规则与代码风格写在 [`AGENTS.md`](./AGENTS.md)。
-
 ## License
 
 [MIT](./LICENSE)
