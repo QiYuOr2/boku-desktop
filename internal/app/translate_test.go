@@ -11,7 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"boku/internal/domain"
-	"boku/internal/usecase"
+	"boku/internal/translate"
 )
 
 // The translation card is a state machine around a window: it is shown where
@@ -642,7 +642,7 @@ func TestALongTranslationScrollsUnderTheFoot(t *testing.T) {
 	state.showTranslation(mygo.Point{X: 10, Y: 10}, translationState{
 		status: translateReady,
 		source: strings.Repeat("コンパイラはソースコードを機械語に変換するソフトです。", 4),
-		result: usecase.Result{
+		result: translate.Result{
 			SourceText:     long,
 			TranslatedText: long,
 			SourceLang:     domain.LangJapanese,
@@ -676,8 +676,8 @@ func TestALongTranslationScrollsUnderTheFoot(t *testing.T) {
 }
 
 // usecaseResultFor is one line of translation, for the size tests.
-func usecaseResultFor(text string) usecase.Result {
-	return usecase.Result{
+func usecaseResultFor(text string) translate.Result {
+	return translate.Result{
 		SourceText:     "hello",
 		TranslatedText: text,
 		SourceLang:     domain.LangEnglish,

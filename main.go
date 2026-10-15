@@ -22,25 +22,20 @@ import (
 	"github.com/egoist/mygo"
 
 	"boku/internal/app"
-	adaptercodex "boku/internal/data/adapters/codex"
-	adapterdeepseek "boku/internal/data/adapters/deepseek"
-	clipboarddevice "boku/internal/data/clipboard"
-	"boku/internal/data/codexlogin"
-	"boku/internal/data/httpx"
-	"boku/internal/data/logging"
-	"boku/internal/data/provider"
-	providercodex "boku/internal/data/providers/codex"
-	providerdeepseek "boku/internal/data/providers/deepseek"
-	translatedefault "boku/internal/data/providers/translate/custom"
-	translatedeepseek "boku/internal/data/providers/translate/deepseek"
-	"boku/internal/data/secret"
-	"boku/internal/data/selection"
-	"boku/internal/data/settings"
-	"boku/internal/data/translator"
+	"boku/internal/clipboard"
+	"boku/internal/credential"
 	"boku/internal/domain"
-	panelcodex "boku/internal/domain/codex"
-	paneldeepseek "boku/internal/domain/deepseek"
-	"boku/internal/usecase"
+	"boku/internal/logging"
+	"boku/internal/panel"
+	codexpanel "boku/internal/panel/codex"
+	deepseekpanel "boku/internal/panel/deepseek"
+	"boku/internal/platform/httpc"
+	"boku/internal/platform/selection"
+	clipboarddevice "boku/internal/platform/sysclip"
+	"boku/internal/settings"
+	"boku/internal/translate"
+	customtranslator "boku/internal/translate/custom"
+	deepseektranslator "boku/internal/translate/deepseek"
 )
 
 // Name the application before Run: MyGo reads the name it registers with
@@ -162,44 +157,46 @@ func main() {
 // mismatched provider and adapter, or a panel that breaks its provider's
 // contract, is a startup error and worth catching without a graphical
 // session.
-func services(userData, version string) (*usecase.Panels, *usecase.Secrets, *usecase.Clipboard, *usecase.Translate, error) {
+func services(userData, version string) (*panel.Panels, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, error) {
 	// Credentials: a file of their own, never the database. The store is
 	// named here and nowhere else, so moving to the encrypted vault of
 	// Task 008 is a change to this function.
-	secretStore, err := secret.Open(filepath.Join(userData, "secrets.json"))
+	secretStore, err := credential.Open(filepath.Join(userData, "secrets.json"))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
 	}
-	secrets, err := usecase.NewSecrets(secretStore)
+	secrets, err := credential.NewSecrets(secretStore)
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("prepare the credential store: %w", err)
 	}
 
-	// The application's own settings and the clipboard history, next to
-	// the credentials. See internal/data/settings for why the history is a
-	// file rather than the table docs/database.md §3 describes.
-	store, err := settings.New(
-		filepath.Join(userData, "settings.json"),
-		filepath.Join(userData, "clipboard_history.json"),
-	)
+	// The application's own settings and the clipboard history, next to the
+	// credentials: two files, each owned by the feature that reads it. See
+	// internal/clipboard/store.go for why the history is a file rather than
+	// the table docs/database.md §3 describes.
+	prefs, err := settings.New(filepath.Join(userData, "settings.json"))
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
 	}
+	history, err := clipboard.NewHistory(filepath.Join(userData, "clipboard_history.json"))
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("open the clipboard history: %w", err)
+	}
 
-	client := httpx.New(httpx.Options{UserAgent: "Boku/" + applicationVersion(version)})
+	client := httpc.New(httpc.Options{UserAgent: "Boku/" + applicationVersion(version)})
 
 	// Providers and their adapters are registered in pairs: a provider
 	// without an adapter can only fail later, in front of the user.
-	registry := provider.NewRegistry()
+	registry := panel.NewRegistry()
 	if err := registry.Register(
-		providerdeepseek.New(client),
-		adapterdeepseek.NewAdapter(),
+		deepseekpanel.New(client),
+		deepseekpanel.NewAdapter(),
 	); err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
 	}
 	if err := registry.Register(
-		providercodex.New(client),
-		adaptercodex.NewAdapter(),
+		codexpanel.New(client),
+		codexpanel.NewAdapter(),
 	); err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("register the codex provider: %w", err)
 	}
@@ -210,23 +207,21 @@ func services(userData, version string) (*usecase.Panels, *usecase.Secrets, *use
 	// The Codex quota's credential is not one of Boku's: it is the ChatGPT
 	// login the Codex CLI already made, read where it lies and refreshed in
 	// memory (docs/security.md §9).
-	codexLogin := codexlogin.New(codexlogin.Options{Client: client})
+	codexLogin := codexpanel.NewLogin(codexpanel.LoginOptions{Client: client})
 
 	// The panels the application shows. Adding one means adding a definition
-	// here; the use case checks it against the provider's own contract.
-	// The panels the application shows. Adding one means adding a definition
-	// here; the use case checks it against the provider's own contract. A
+	// here; the panel service checks it against the provider's own contract. A
 	// panel marked optional is one the user can turn off in the settings
 	// window, and its switch is stored in the same settings file as the rest
 	// of the application's choices.
-	panels, err := usecase.NewPanels(registry, secretStore, store, []usecase.PanelDef{
+	panels, err := panel.NewPanels(registry, secretStore, prefs, []panel.PanelDef{
 		{
-			Panel:   paneldeepseek.Panel(),
-			Metrics: paneldeepseek.Metrics(),
+			Panel:   deepseekpanel.Panel(),
+			Metrics: deepseekpanel.Metrics(),
 		},
 		{
-			Panel:   panelcodex.Panel(),
-			Metrics: panelcodex.Metrics(),
+			Panel:   codexpanel.Panel(),
+			Metrics: codexpanel.Metrics(),
 			// The quota comes from the Codex CLI's own login on this
 			// machine, so reading it is the user's to allow.
 			Optional: true,
@@ -255,11 +250,11 @@ func services(userData, version string) (*usecase.Panels, *usecase.Secrets, *use
 			return false
 		}
 	})
-	clipboard, err := usecase.NewClipboard(usecase.ClipboardOptions{
+	clip, err := clipboard.NewClipboard(clipboard.ClipboardOptions{
 		Device: device,
-		Store:  store,
-		Tools:  store,
-		Clock:  usecase.SystemClock{},
+		Store:  history,
+		Tools:  prefs,
+		Clock:  domain.SystemClock{},
 	})
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
@@ -269,26 +264,26 @@ func services(userData, version string) (*usecase.Panels, *usecase.Secrets, *use
 	// adding a registration here; unlike a provider, a translator stands
 	// alone: it answers in the domain's own words, so there is no adapter to
 	// pair it with.
-	translators := translator.NewRegistry()
-	if err := translators.Register(translatedeepseek.New(client)); err != nil {
+	translators := translate.NewRegistry()
+	if err := translators.Register(deepseektranslator.New(client)); err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("register the deepseek translator: %w", err)
 	}
-	if err := translators.Register(translatedefault.New(client, func() domain.CustomTranslatorSettings {
+	if err := translators.Register(customtranslator.New(client, func() domain.CustomTranslatorSettings {
 		// The address is read from the settings each time it is asked for:
 		// the user may change it while the application runs, and the next
 		// translation should use the new one.
-		settings, err := store.Load(context.Background())
+		current, err := prefs.Load(context.Background())
 		if err != nil {
 			return domain.CustomTranslatorSettings{}
 		}
-		return settings.Normalize().Translation.Custom
+		return current.Normalize().Translation.Custom
 	})); err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("register the custom translator: %w", err)
 	}
-	translate, err := usecase.NewTranslate(usecase.TranslateOptions{
+	translation, err := translate.NewTranslate(translate.TranslateOptions{
 		Translators: translators,
 		Secrets:     secretStore,
-		Tools:       store,
+		Tools:       prefs,
 		// The selection is asked first and the clipboard second: what the
 		// user has selected is what they mean, and what is on the clipboard
 		// is what they copied last. The clipboard is also what the selection
@@ -297,15 +292,15 @@ func services(userData, version string) (*usecase.Panels, *usecase.Secrets, *use
 		// told to keep that borrowed value out of the history.
 		Selection: selection.New(selection.Options{
 			Clipboard:  device,
-			BeforeCopy: clipboard.IgnoreTheNextCopy,
+			BeforeCopy: clip.IgnoreTheNextCopy,
 		}),
 		Clipboard: device,
-		Clock:     usecase.SystemClock{},
+		Clock:     domain.SystemClock{},
 	})
 	if err != nil {
 		return nil, nil, nil, nil, fmt.Errorf("prepare the translation tool: %w", err)
 	}
-	return panels, secrets, clipboard, translate, nil
+	return panels, secrets, clip, translation, nil
 }
 
 // applicationVersion is the version to send as a user agent: a plain `go

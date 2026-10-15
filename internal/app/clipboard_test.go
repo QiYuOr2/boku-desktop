@@ -10,8 +10,8 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"boku/internal/clipboard"
 	"boku/internal/domain"
-	"boku/internal/usecase"
 )
 
 // The clipboard has two faces in this layer: one line in the quick window
@@ -521,7 +521,7 @@ func TestStateWithoutAClipboardIsSafe(t *testing.T) {
 // empty list, which would look like "nothing was ever copied".
 func TestHistoryWindowReportsAnUnreadableHistory(t *testing.T) {
 	state := clipboardState(t, &testDevice{}, &testToolStore{})
-	clipboard, err := usecase.NewClipboard(usecase.ClipboardOptions{
+	clipboard, err := clipboard.NewClipboard(clipboard.ClipboardOptions{
 		Device: &testDevice{},
 		Store:  failingEntryStore{},
 		Tools:  &testToolStore{},

@@ -25,9 +25,12 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	"boku/internal/assets"
+	"boku/internal/app/assets"
+	"boku/internal/clipboard"
+	"boku/internal/credential"
 	"boku/internal/domain"
-	"boku/internal/usecase"
+	"boku/internal/panel"
+	"boku/internal/translate"
 )
 
 const (
@@ -47,16 +50,16 @@ const (
 // Deps is what the presentation layer is assembled from, by main.
 type Deps struct {
 	// Panels reads and refreshes the panels.
-	Panels *usecase.Panels
+	Panels *panel.Panels
 	// Secrets stores the credentials those panels need.
-	Secrets *usecase.Secrets
+	Secrets *credential.Secrets
 	// Clipboard reads and records the system clipboard. It is what the
 	// quick window's clipboard line and the history window show; a State
 	// without one draws neither.
-	Clipboard *usecase.Clipboard
+	Clipboard *clipboard.Clipboard
 	// Translate is the selection-translation tool. A State without one
 	// draws no translation window and binds no shortcut for it.
-	Translate *usecase.Translate
+	Translate *translate.Translate
 	// Shortcuts binds the global shortcuts. A State without one still runs:
 	// a shortcut that cannot be bound is a tray application with one way in
 	// fewer, not a failure to start.
@@ -72,10 +75,10 @@ type Deps struct {
 // thread only.
 type State struct {
 	app           *mygo.Application
-	panelService  *usecase.Panels
-	secretService *usecase.Secrets
-	clipboard     *usecase.Clipboard
-	translate     *usecase.Translate
+	panelService  *panel.Panels
+	secretService *credential.Secrets
+	clipboard     *clipboard.Clipboard
+	translate     *translate.Translate
 	shortcuts     ShortcutRegistrar
 	version       string
 	quit          func()

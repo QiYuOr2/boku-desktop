@@ -10,27 +10,28 @@ import (
 	"strings"
 	"testing"
 
-	"boku/internal/data/logging"
+	contractdeepseek "boku/internal/contract/deepseek"
 	"boku/internal/domain"
-	panelcodex "boku/internal/domain/codex"
-	paneldeepseek "boku/internal/domain/deepseek"
-	"boku/internal/usecase"
+	"boku/internal/logging"
+	panelcodex "boku/internal/panel/codex"
+	paneldeepseek "boku/internal/panel/deepseek"
+	"boku/internal/translate"
 )
 
 // The assembly is the one place a provider and its adapter, or a panel and
 // its provider, can be paired wrongly. That is a startup error, and it can
 // be checked without a window.
 func TestServicesAssembleThePanels(t *testing.T) {
-	panels, secrets, clipboard, translate, err := services(t.TempDir(), "0.1.0")
+	panels, secrets, clip, translation, err := services(t.TempDir(), "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}
-	if panels == nil || secrets == nil || clipboard == nil || translate == nil {
+	if panels == nil || secrets == nil || clip == nil || translation == nil {
 		t.Fatal("services returned no services")
 	}
 	// The clipboard starts off, and nothing here reads the system
 	// clipboard: assembling a service is not using it.
-	if settings := clipboard.Settings(); settings.ClipboardMonitoring || settings.ClipboardRegionVisible {
+	if settings := clip.Settings(); settings.ClipboardMonitoring || settings.ClipboardRegionVisible {
 		t.Errorf("the clipboard starts enabled: %+v", settings)
 	}
 
@@ -38,21 +39,21 @@ func TestServicesAssembleThePanels(t *testing.T) {
 	if len(listed) != 2 {
 		t.Fatalf("the application has %d panels, want the balance and the quota: %+v", len(listed), listed)
 	}
-	if listed[0].ProviderID != paneldeepseek.ProviderID {
-		t.Errorf("the first panel's provider = %q, want %q", listed[0].ProviderID, paneldeepseek.ProviderID)
+	if listed[0].ProviderID != contractdeepseek.ProviderID {
+		t.Errorf("the first panel's provider = %q, want %q", listed[0].ProviderID, contractdeepseek.ProviderID)
 	}
 	if listed[1].ProviderID != panelcodex.ProviderID {
 		t.Errorf("the second panel's provider = %q, want %q", listed[1].ProviderID, panelcodex.ProviderID)
 	}
 
-	descriptor, err := panels.Descriptor(paneldeepseek.ProviderID)
+	descriptor, err := panels.Descriptor(contractdeepseek.ProviderID)
 	if err != nil {
 		t.Fatalf("Descriptor failed: %v", err)
 	}
 	if descriptor.DisplayName == "" || descriptor.DocsURL == "" || descriptor.Endpoint == "" {
 		t.Errorf("descriptor = %+v, want a display name, a docs link and an endpoint", descriptor)
 	}
-	if descriptor.CredentialKeys[0] != paneldeepseek.APIKeyCredential {
+	if descriptor.CredentialKeys[0] != contractdeepseek.APIKeyCredential {
 		t.Errorf("credential keys = %v", descriptor.CredentialKeys)
 	}
 	if descriptor.UsageURL != paneldeepseek.UsageURL {
@@ -228,11 +229,11 @@ func TestRecordPanicsWritesItDownAndRaisesItAgain(t *testing.T) {
 // a translator without a settings store, or one whose settings it cannot
 // read, is a startup mistake worth catching here.
 func TestServicesAssembleTheTranslators(t *testing.T) {
-	_, _, _, translate, err := services(t.TempDir(), "0.1.0")
+	_, _, _, translation, err := services(t.TempDir(), "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}
-	views, err := translate.Providers(context.Background())
+	views, err := translation.Providers(context.Background())
 	if err != nil {
 		t.Fatalf("Providers failed: %v", err)
 	}
@@ -253,7 +254,7 @@ func TestServicesAssembleTheTranslators(t *testing.T) {
 	}
 	// The tool starts with the built-in translator and no credential: it
 	// says where to configure one rather than reaching for the network.
-	if _, err := translate.Translate(context.Background(), usecase.Request{Text: "hello"}); !errors.Is(err, domain.ErrCredentialMissing) {
+	if _, err := translation.Translate(context.Background(), translate.Request{Text: "hello"}); !errors.Is(err, domain.ErrCredentialMissing) {
 		t.Errorf("Translate error = %v, want ErrCredentialMissing before anything is stored", err)
 	}
 }

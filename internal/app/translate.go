@@ -12,8 +12,8 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"boku/internal/domain"
-	"boku/internal/tools"
-	"boku/internal/usecase"
+	"boku/internal/kit"
+	"boku/internal/translate"
 )
 
 // The translation window is the tool's face: what was selected, what it
@@ -80,7 +80,7 @@ type translationState struct {
 	status translateStatus
 	// source is what was translated; result is what came back.
 	source string
-	result usecase.Result
+	result translate.Result
 	// failure is why the last attempt failed, in the words the window
 	// shows. It is set only with translateFailed.
 	failure string
@@ -172,9 +172,9 @@ func (s *State) startTranslation(at mygo.Point) {
 		// user can dismiss while they wait — Escape and the close the
 		// settings ask for are both about having the keyboard.
 		s.onMain(func() { s.focusTranslation(window) })
-		var result usecase.Result
+		var result translate.Result
 		if err == nil {
-			result, err = service.Translate(ctx, usecase.Request{Text: text})
+			result, err = service.Translate(ctx, translate.Request{Text: text})
 		}
 		s.onMain(func() {
 			switch {
@@ -197,7 +197,7 @@ func (s *State) startTranslation(at mygo.Point) {
 				slog.Warn("the translation failed", "error", err)
 				s.translation = translationState{
 					status:  translationFailureStatus(err),
-					result:  usecase.Result{},
+					result:  translate.Result{},
 					failure: friendlyError(err),
 					pinned:  s.translation.pinned,
 				}
@@ -703,7 +703,7 @@ func (s *State) requestAnnotation() {
 		s.translateWindow.Update(func() {})
 	}
 
-	request := usecase.Request{Text: text, Target: s.translation.result.TargetLang, Annotate: true}
+	request := translate.Request{Text: text, Target: s.translation.result.TargetLang, Annotate: true}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), translationTimeout)
 		defer cancel()
@@ -915,7 +915,7 @@ func (s *State) copyTranslation(which string) {
 		Kind:        domain.ClipKindText,
 		Content:     value,
 		Display:     value,
-		ContentHash: tools.ClipContentHash(value),
+		ContentHash: kit.ClipContentHash(value),
 		CopiedAt:    time.Now().UTC(),
 	}
 	// The write runs off the main thread, and the mark is taken back when

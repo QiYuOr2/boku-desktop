@@ -10,8 +10,8 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"boku/internal/domain"
-	"boku/internal/tools"
-	"boku/internal/usecase"
+	"boku/internal/kit"
+	"boku/internal/panel"
 )
 
 // card draws the panels the quick window shows: one block each, with the line
@@ -45,7 +45,7 @@ func (s *State) card(c *ui.Context) {
 
 // panelBlock draws one panel: the design's room around the block, its head,
 // and what it knows.
-func (s *State) panelBlock(c *ui.Context, view usecase.View) {
+func (s *State) panelBlock(c *ui.Context, view panel.View) {
 	quickBlock(c, func() {
 		ui.Column(c).FillWidth().Gap(float32(8)).Children(func() {
 			s.panelHead(c, view)
@@ -66,7 +66,7 @@ func (s *State) panelBlock(c *ui.Context, view usecase.View) {
 // because both are longer than the room left beside a 320-point name once the
 // age and the refresh are on the same line; put there, they would all be
 // ellipsised.
-func (s *State) panelHead(c *ui.Context, view usecase.View) {
+func (s *State) panelHead(c *ui.Context, view panel.View) {
 	ui.Column(c).FillWidth().Gap(float32(2)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(float32(8)).Children(func() {
@@ -144,7 +144,7 @@ func (s *State) providerMark(providerID string) panelMark {
 // quotaPanel reports whether a panel's headline is a proportion rather than a
 // figure: a percentage is read as a shape before it is read as a number, so
 // such a panel is drawn as one. A second quota panel needs no code here.
-func quotaPanel(view usecase.View) bool {
+func quotaPanel(view panel.View) bool {
 	if len(view.Metrics) == 0 {
 		return false
 	}
@@ -164,7 +164,7 @@ type quota struct {
 // readQuota reads a quota snapshot by what its metrics are rather than by what
 // they are called: a percentage is what is left, a duration is when it resets,
 // and a text is the plan the account is on.
-func readQuota(view usecase.View) quota {
+func readQuota(view panel.View) quota {
 	var found quota
 	for _, metric := range view.Metrics {
 		observation, ok := view.Snapshot.Observation(metric.Key)
@@ -192,7 +192,7 @@ func readQuota(view usecase.View) quota {
 // quotaAccount is what the account is and when its window resets, as one line:
 // "Plus · 下次重置 10-14 20:00". A plan the service did not name is left out
 // rather than guessed at.
-func quotaAccount(view usecase.View) string {
+func quotaAccount(view panel.View) string {
 	found := readQuota(view)
 	parts := make([]string, 0, 2)
 	if plan := planLabel(found.plan); plan != "" {
@@ -216,7 +216,7 @@ func quotaAccount(view usecase.View) string {
 // shows the complement: what a person wants to know about a quota they are
 // spending is how much of it is gone. Nothing here is invented: a share the
 // answer does not have is not a share, so the second result says which it is.
-func quotaUsed(view usecase.View) (int64, bool) {
+func quotaUsed(view panel.View) (int64, bool) {
 	found := readQuota(view)
 	if !found.hasLeft {
 		return 0, false
@@ -256,7 +256,7 @@ func planLabel(plan string) string {
 // window is spent is the one a person reads without thinking. A failure, an
 // empty answer and a window nothing is known about draw no fill at all, which
 // is what keeps "0% used" an answer rather than a missing one.
-func (s *State) quotaBody(c *ui.Context, view usecase.View) {
+func (s *State) quotaBody(c *ui.Context, view panel.View) {
 	switch {
 	case view.NeedsCredentials():
 		ui.Column(c).FillWidth().Gap(float32(10)).Children(func() {
@@ -302,7 +302,7 @@ func (s *State) quotaBody(c *ui.Context, view usecase.View) {
 // loginAction is the way to the login a quota panel is waiting for: the tool's
 // own login, started in a terminal, or its documentation when it cannot be
 // started here.
-func (s *State) loginAction(c *ui.Context, view usecase.View) {
+func (s *State) loginAction(c *ui.Context, view panel.View) {
 	name := s.providerName(view.Panel.ProviderID)
 	ui.Row(c).FillWidth().Gap(float32(8)).Children(func() {
 		if button := designButton(c, "登录 "+name, buttonPrimary); button.Clicked() {
@@ -369,7 +369,7 @@ const (
 // click answers with: the numbers stay as they are until an answer arrives,
 // and a still mark beside them would leave the user wondering whether the
 // click landed.
-func (s *State) refreshButton(c *ui.Context, view usecase.View) ui.Element {
+func (s *State) refreshButton(c *ui.Context, view panel.View) ui.Element {
 	label := "刷新"
 	if view.Err != nil && view.HasSnapshot {
 		// One action, two situations: the reason the last attempt failed is
@@ -413,7 +413,7 @@ func (s *State) refreshButton(c *ui.Context, view usecase.View) ui.Element {
 // state — no credential, no snapshot, a failure — says what to do about it
 // instead of drawing numbers; a snapshot is drawn as its headline, and the
 // smaller numbers stay folded away until the user asks for them.
-func (s *State) cardNumbers(c *ui.Context, view usecase.View) {
+func (s *State) cardNumbers(c *ui.Context, view panel.View) {
 	switch {
 	case view.NeedsCredentials():
 		ui.Column(c).FillWidth().Gap(float32(10)).Children(func() {
@@ -452,7 +452,7 @@ func (s *State) cardNumbers(c *ui.Context, view usecase.View) {
 // The design puts the label over the number and the disclosure at the far end
 // of that same row: the label says what the big number is ("总余额"), and the
 // control beside it says there is more behind it.
-func balance(c *ui.Context, view usecase.View, detailsOpen *bool) {
+func balance(c *ui.Context, view panel.View, detailsOpen *bool) {
 	if len(view.Metrics) == 0 {
 		return
 	}
@@ -482,7 +482,7 @@ func balance(c *ui.Context, view usecase.View, detailsOpen *bool) {
 // balanceHeadline is the panel's big number with what it is called over it,
 // and at the end of that row the control that opens the rest, when there is a
 // rest to open.
-func balanceHeadline(c *ui.Context, view usecase.View, headline domain.Metric, detailsOpen *bool) {
+func balanceHeadline(c *ui.Context, view panel.View, headline domain.Metric, detailsOpen *bool) {
 	ui.Row(c).FillWidth().AlignItems(ui.End).Children(func() {
 		ui.Column(c).Gap(float32(2)).Children(func() {
 			ui.Text(c, headline.Label).
@@ -503,7 +503,7 @@ func balanceHeadline(c *ui.Context, view usecase.View, headline domain.Metric, d
 // it is kept, and the number is the thing the user is looking at when that
 // thought arrives. It wears a pointer and the brand green under the pointer,
 // so that it is not a hidden action.
-func balanceNumber(c *ui.Context, view usecase.View, headline domain.Metric) {
+func balanceNumber(c *ui.Context, view panel.View, headline domain.Metric) {
 	number := formatMetric(view.Snapshot, headline)
 	if view.UsageURL == "" {
 		ui.Text(c, number).
@@ -641,7 +641,7 @@ func actionRow(c *ui.Context, label string, run func()) {
 // freshness says how old the numbers are. The design writes the clock alone
 // beside the refresh action; a number from a failed attempt is marked as old
 // in the color of a warning, because the number is still worth more than none.
-func freshness(c *ui.Context, view usecase.View) {
+func freshness(c *ui.Context, view panel.View) {
 	switch {
 	case view.HasSnapshot && view.Stale:
 		ui.Text(c, "旧数据 · "+clock(view.FetchedAt)).
@@ -693,7 +693,7 @@ func formatMetric(snapshot domain.Snapshot, metric domain.Metric) string {
 	if err != nil {
 		return "—"
 	}
-	return tools.FormatMoney(number, currency, metric.Precision)
+	return kit.FormatMoney(number, currency, metric.Precision)
 }
 
 // friendlyError says what went wrong in the interface's own words. The

@@ -12,8 +12,8 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"boku/internal/domain"
-	"boku/internal/tools"
-	"boku/internal/usecase"
+	"boku/internal/kit"
+	"boku/internal/panel"
 )
 
 // The settings window is a sidebar and the page it navigates: the sidebar
@@ -1737,7 +1737,7 @@ func (s *State) copyVersionInfo() {
 		Kind:        domain.ClipKindText,
 		Content:     info,
 		Display:     info,
-		ContentHash: tools.ClipContentHash(info),
+		ContentHash: kit.ClipContentHash(info),
 		CopiedAt:    time.Now().UTC(),
 	}
 	s.clipboard.CopyAsync(entry, nil)
@@ -1778,7 +1778,7 @@ func (s *State) setPanelOn(panelID string, on bool) {
 // says how they are described to a person. A panel with no copy of its own
 // gets the panel's own name, so that adding one never leaves a nameless
 // switch.
-func panelSwitchCopy(panel usecase.OptionalPanel) (label, note string) {
+func panelSwitchCopy(panel panel.OptionalPanel) (label, note string) {
 	switch panel.Panel.ProviderID {
 	case "codex":
 		return "本地 Codex 额度监控",

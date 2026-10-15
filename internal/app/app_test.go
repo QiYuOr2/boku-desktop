@@ -7,8 +7,9 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	"boku/internal/domain/deepseek"
-	"boku/internal/usecase"
+	"boku/internal/credential"
+	"boku/internal/panel"
+	"boku/internal/panel/deepseek"
 )
 
 // The quick window's own behaviour: what it needs to be built, what its
@@ -16,15 +17,15 @@ import (
 // is in card_test.go, the layout in layout_test.go, the settings window in
 // settings_test.go, and the clipboard in clipboard_test.go.
 func TestNewRequiresItsDependencies(t *testing.T) {
-	secrets, err := usecase.NewSecrets(newTestStore())
+	secrets, err := credential.NewSecrets(newTestStore())
 	if err != nil {
 		t.Fatalf("NewSecrets failed: %v", err)
 	}
-	panels, err := usecase.NewPanels(
+	panels, err := panel.NewPanels(
 		testRegistry{provider: newTestProvider(), adapter: testAdapter{provider: newTestProvider()}},
 		newTestStore(),
 		nil,
-		[]usecase.PanelDef{{Panel: deepseek.Panel(), Metrics: deepseek.Metrics()}},
+		[]panel.PanelDef{{Panel: deepseek.Panel(), Metrics: deepseek.Metrics()}},
 	)
 	if err != nil {
 		t.Fatalf("NewPanels failed: %v", err)

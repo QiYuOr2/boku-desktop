@@ -14,9 +14,13 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"boku/internal/clipboard"
+	contractdeepseek "boku/internal/contract/deepseek"
+	"boku/internal/credential"
 	"boku/internal/domain"
-	"boku/internal/domain/deepseek"
-	"boku/internal/usecase"
+	"boku/internal/panel"
+	"boku/internal/panel/deepseek"
+	"boku/internal/translate"
 )
 
 // The presentation layer is tested without a window and without a network:
@@ -110,7 +114,7 @@ func newTestProvider() *testProvider {
 		descriptor: domain.ProviderDescriptor{
 			ID:                "deepseek",
 			DisplayName:       "DeepSeek",
-			CredentialKeys:    []string{deepseek.APIKeyCredential},
+			CredentialKeys:    []string{contractdeepseek.APIKeyCredential},
 			DocsURL:           "https://platform.deepseek.com/api_keys",
 			UsageURL:          deepseek.UsageURL,
 			Endpoint:          "https://api.deepseek.com/user/balance",
@@ -253,16 +257,16 @@ func testStateWith(t testing.TB, provider *testProvider, store *testStore, versi
 	if store == nil {
 		store = newTestStore()
 	}
-	panels, err := usecase.NewPanels(
+	panels, err := panel.NewPanels(
 		testRegistry{provider: provider, adapter: testAdapter{provider: provider}},
 		store,
 		nil,
-		[]usecase.PanelDef{{Panel: deepseek.Panel(), Metrics: deepseek.Metrics()}},
+		[]panel.PanelDef{{Panel: deepseek.Panel(), Metrics: deepseek.Metrics()}},
 	)
 	if err != nil {
 		t.Fatalf("NewPanels failed: %v", err)
 	}
-	secrets, err := usecase.NewSecrets(store)
+	secrets, err := credential.NewSecrets(store)
 	if err != nil {
 		t.Fatalf("NewSecrets failed: %v", err)
 	}
@@ -287,7 +291,7 @@ func testStateWith(t testing.TB, provider *testProvider, store *testStore, versi
 // testTranslateFixture is the translation tool with the fakes it was built
 // over, so that a test can change what it answers.
 type testTranslateFixture struct {
-	service   *usecase.Translate
+	service   *translate.Translate
 	deepseek  *testTranslator
 	custom    *testTranslator
 	tools     *testToolStore
@@ -372,7 +376,7 @@ func testTranslate(t testing.TB, store *testStore, device *testDevice) *testTran
 	// stands in for a store that has already been read once.
 	tools := &testToolStore{settings: domain.ToolSettings{Translation: domain.TranslationDefaults()}}
 	selection := &testSelection{timeline: timeline}
-	service, err := usecase.NewTranslate(usecase.TranslateOptions{
+	service, err := translate.NewTranslate(translate.TranslateOptions{
 		Translators: testTranslators{reply, custom},
 		Secrets:     store,
 		Tools:       tools,
@@ -615,7 +619,7 @@ func (s *testShortcuts) failWith(err error) {
 
 // testClipboard is a clipboard tool over a device and a store the test owns,
 // so that a view test never touches the system clipboard.
-func testClipboard(t testing.TB, device *testDevice, tools *testToolStore) *usecase.Clipboard {
+func testClipboard(t testing.TB, device *testDevice, tools *testToolStore) *clipboard.Clipboard {
 	t.Helper()
 	if device == nil {
 		device = &testDevice{}
@@ -627,7 +631,7 @@ func testClipboard(t testing.TB, device *testDevice, tools *testToolStore) *usec
 	// history is ordered by the times the device reports.
 	clock := &testClock{at: time.Date(2026, 2, 3, 9, 0, 0, 0, time.UTC)}
 	device.now = clock.now
-	clipboard, err := usecase.NewClipboard(usecase.ClipboardOptions{
+	clipboard, err := clipboard.NewClipboard(clipboard.ClipboardOptions{
 		Device: device,
 		Store:  &testClipStore{},
 		Tools:  tools,
@@ -858,15 +862,15 @@ func (s *testToolStore) Save(_ context.Context, settings domain.ToolSettings) er
 
 // withCredential adds the DeepSeek key the panel needs.
 func withCredential(store *testStore) *testStore {
-	store.set(domain.CredentialKey("deepseek", deepseek.APIKeyCredential), "sk-test-0001")
+	store.set(domain.CredentialKey("deepseek", contractdeepseek.APIKeyCredential), "sk-test-0001")
 	return store
 }
 
 // emptyPanelService is a service with no panels defined.
-func emptyPanelService(t *testing.T) *usecase.Panels {
+func emptyPanelService(t *testing.T) *panel.Panels {
 	t.Helper()
 	provider := newTestProvider()
-	panels, err := usecase.NewPanels(
+	panels, err := panel.NewPanels(
 		testRegistry{provider: provider, adapter: testAdapter{provider: provider}},
 		newTestStore(),
 		nil,

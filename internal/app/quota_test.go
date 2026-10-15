@@ -11,10 +11,11 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"boku/internal/credential"
 	"boku/internal/domain"
-	codexdomain "boku/internal/domain/codex"
-	"boku/internal/domain/deepseek"
-	"boku/internal/usecase"
+	"boku/internal/panel"
+	codexdomain "boku/internal/panel/codex"
+	"boku/internal/panel/deepseek"
 )
 
 // The quota block is driven here without a network and without the codex
@@ -129,15 +130,15 @@ func quotaState(t *testing.T, adapter quotaAdapter, provider *quotaProvider, sou
 	if source == nil {
 		source = &quotaSource{}
 	}
-	secrets, err := usecase.NewSecrets(newTestStore())
+	secrets, err := credential.NewSecrets(newTestStore())
 	if err != nil {
 		t.Fatalf("NewSecrets failed: %v", err)
 	}
-	panels, err := usecase.NewPanels(
+	panels, err := panel.NewPanels(
 		testRegistry{provider: provider, adapter: adapter},
 		newTestStore(),
 		nil,
-		[]usecase.PanelDef{{Panel: codexdomain.Panel(), Metrics: codexdomain.Metrics()}},
+		[]panel.PanelDef{{Panel: codexdomain.Panel(), Metrics: codexdomain.Metrics()}},
 		source,
 	)
 	if err != nil {
@@ -171,11 +172,11 @@ func TestThePanelSwitchTakesTheBlockAway(t *testing.T) {
 	provider := &quotaProvider{}
 	source := &quotaSource{}
 	tools := &testToolStore{}
-	panels, err := usecase.NewPanels(
+	panels, err := panel.NewPanels(
 		testRegistry{provider: provider, adapter: quotaAdapter{remaining: 68, resetsIn: 7200, plan: "plus"}},
 		newTestStore(),
 		tools,
-		[]usecase.PanelDef{{
+		[]panel.PanelDef{{
 			Panel:    codexdomain.Panel(),
 			Metrics:  codexdomain.Metrics(),
 			Optional: true,
@@ -188,7 +189,7 @@ func TestThePanelSwitchTakesTheBlockAway(t *testing.T) {
 	if err := panels.LoadChoices(context.Background()); err != nil {
 		t.Fatalf("LoadChoices failed: %v", err)
 	}
-	secrets, err := usecase.NewSecrets(newTestStore())
+	secrets, err := credential.NewSecrets(newTestStore())
 	if err != nil {
 		t.Fatalf("NewSecrets failed: %v", err)
 	}
@@ -460,11 +461,11 @@ func (r twoProviders) Adapter(id string) (domain.Adapter, error) {
 func bothBlocksState(t *testing.T) *State {
 	t.Helper()
 	balance, quota := newTestProvider(), &quotaProvider{}
-	secrets, err := usecase.NewSecrets(withCredential(newTestStore()))
+	secrets, err := credential.NewSecrets(withCredential(newTestStore()))
 	if err != nil {
 		t.Fatalf("NewSecrets failed: %v", err)
 	}
-	panels, err := usecase.NewPanels(
+	panels, err := panel.NewPanels(
 		twoProviders{
 			balance:        balance,
 			balanceAdapter: testAdapter{provider: balance},
@@ -473,7 +474,7 @@ func bothBlocksState(t *testing.T) *State {
 		},
 		withCredential(newTestStore()),
 		nil,
-		[]usecase.PanelDef{
+		[]panel.PanelDef{
 			{Panel: deepseek.Panel(), Metrics: deepseek.Metrics()},
 			// The quota panel is the optional one: it reads the login the
 			// Codex command line already made, so the settings window

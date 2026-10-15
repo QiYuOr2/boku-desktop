@@ -13,7 +13,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"boku/internal/domain"
-	"boku/internal/domain/deepseek"
+	"boku/internal/panel/deepseek"
 )
 
 // cardText is the texts of one frame of the quick window.

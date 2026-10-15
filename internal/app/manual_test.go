@@ -14,8 +14,8 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"boku/internal/domain"
-	"boku/internal/domain/deepseek"
-	"boku/internal/usecase"
+	"boku/internal/panel/deepseek"
+	"boku/internal/translate"
 )
 
 // This file is the package's manual harness: what is here needs a human to
@@ -174,7 +174,7 @@ func TestRenderScreensForInspection(t *testing.T) {
 	annotated := translationState{
 		status: translateReady,
 		source: "コンパイラはソースコードを機械語に変換するソフトです。",
-		result: usecase.Result{
+		result: translate.Result{
 			SourceText:     "コンパイラはソースコードを機械語に変換するソフトです。",
 			TranslatedText: "编译器是将源代码转换成机器语言的软件。",
 			SourceLang:     domain.LangJapanese,
@@ -239,7 +239,7 @@ func TestRenderScreensForInspection(t *testing.T) {
 	renderTranslationCard(t, "translate-long.png", translationState{
 		status: translateReady,
 		source: strings.Repeat("コンパイラはソースコードを機械語に変換するソフトです。", 4),
-		result: usecase.Result{
+		result: translate.Result{
 			SourceText:     strings.Repeat("コンパイラはソースコードを機械語に変換するソフトです。", 4),
 			TranslatedText: strings.Repeat("编译器是把源代码转换成机器语言的软件。", 40),
 			SourceLang:     domain.LangJapanese,
