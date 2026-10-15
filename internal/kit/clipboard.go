@@ -22,7 +22,7 @@ const (
 	ClipDisplayLimit = 120
 	// ClipEllipsis marks a value that was shortened.
 	ClipEllipsis = "…"
-	// ClipHashPrefix names the digest, the way docs/data-model.md §7 writes
+	// ClipHashPrefix names the digest, the way §7 of the domain model writes
 	// a content hash.
 	ClipHashPrefix = "sha256:"
 )

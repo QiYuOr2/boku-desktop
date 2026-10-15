@@ -65,7 +65,7 @@ type shortcutBinding struct {
 
 // shortcutState is what became of the translation shortcut. It is what the
 // settings window reads to say either the binding or why there is none:
-// docs/tools.md §6 requires a registration failure to be visible rather than
+// §6 of the tool design requires a registration failure to be visible rather than
 // silent.
 type shortcutState struct {
 	// accelerator is the binding the platform holds, which is what the

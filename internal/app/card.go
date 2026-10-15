@@ -212,7 +212,7 @@ func quotaAccount(view panel.View) string {
 // answer at all.
 //
 // The panel's own metric is what is *left* — that is what the provider
-// reports and what docs/providers.md §7 fixes for both ends — and the window
+// reports and what §7 of the provider contract fixes for both ends — and the window
 // shows the complement: what a person wants to know about a quota they are
 // spending is how much of it is gone. Nothing here is invented: a share the
 // answer does not have is not a share, so the second result says which it is.
@@ -252,7 +252,7 @@ func planLabel(plan string) string {
 // there is nothing to draw — what to do about it.
 //
 // The bar fills with what is *used*, not with what is left: the panel's metric
-// is the remaining share (docs/providers.md §7), and a bar that grows as the
+// is the remaining share (§7 of the provider contract), and a bar that grows as the
 // window is spent is the one a person reads without thinking. A failure, an
 // empty answer and a window nothing is known about draw no fill at all, which
 // is what keeps "0% used" an answer rather than a missing one.

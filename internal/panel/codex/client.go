@@ -3,7 +3,7 @@
 // numbers mean, and which metrics they become, is adapter.go's business.
 //
 // The endpoint is not documented by OpenAI: it is what the Codex CLI itself
-// calls (docs/providers.md §4.6). A response that is not the shape below is
+// calls (§4.6 of the provider contract). A response that is not the shape below is
 // therefore reported as a bad response rather than guessed at, and the
 // adapter is where a renamed field is caught.
 package codex
@@ -28,7 +28,7 @@ const (
 	defaultBaseURL = "https://chatgpt.com"
 	usagePath      = "/backend-api/wham/usage"
 	// docsURL is where the user reads how to log the CLI in. The login is
-	// the CLI's, not Boku's: docs/security.md §9.
+	// the CLI's, not Boku's: §9 of the security design.
 	docsURL = "https://github.com/openai/codex"
 	// minRefreshSeconds is the shortest interval the endpoint tolerates.
 	minRefreshSeconds = 60

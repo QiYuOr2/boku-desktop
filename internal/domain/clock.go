@@ -14,7 +14,7 @@ type Clock interface {
 }
 
 // SystemClock is the clock the application runs on: wall time, in UTC, the
-// way docs/data-model.md §11 stores it.
+// way §11 of the domain model stores it.
 type SystemClock struct{}
 
 // Now returns the current time in UTC. An implementation that rounds it does

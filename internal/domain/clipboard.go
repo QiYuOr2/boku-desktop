@@ -182,7 +182,7 @@ type ClipboardEntry struct {
 	CreatedAt time.Time
 	// DeletedAt is the soft delete of the documented model. This
 	// application's store keeps no deleted entries yet; the field exists
-	// so the shape matches docs/data-model.md §7.
+	// so the shape matches §7 of the domain model.
 	DeletedAt *time.Time
 }
 

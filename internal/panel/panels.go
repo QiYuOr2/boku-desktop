@@ -115,7 +115,7 @@ func (v View) NeedsCredentials() bool {
 //
 // A source is registered per provider for a credential that is not Boku's to
 // keep: the Codex panel reads the login the Codex CLI already made
-// (docs/security.md §9). A source is optional, and the store is asked for
+// (§9 of the security design). A source is optional, and the store is asked for
 // every provider that has none.
 //
 // section holds the choices about the optional panels, and saver is the store

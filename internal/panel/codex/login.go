@@ -4,7 +4,7 @@
 // It is the one place in the application that opens another tool's
 // credential file. Nothing is copied into Boku's own store, nothing is
 // written back to the CLI's file, and the token only ever leaves this process
-// for ChatGPT (docs/security.md §9). It is a domain.CredentialSource, which
+// for ChatGPT (§9 of the security design). It is a domain.CredentialSource, which
 // is how the panel feature is handed a credential Boku does not keep.
 package codex
 

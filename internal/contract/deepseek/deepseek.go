@@ -7,7 +7,7 @@
 // They are separate features with separate lifetimes, but they must agree on
 // the provider id and on the credential key — "deepseek.apiKey" is one entry
 // in the credential store and one name in the cross-end contract
-// (docs/providers.md §7), and two copies of a string that must match is two
+// (§7 of the provider contract), and two copies of a string that must match is two
 // chances to get it wrong.
 //
 // Nothing here does anything: it is the service's name and address, and the

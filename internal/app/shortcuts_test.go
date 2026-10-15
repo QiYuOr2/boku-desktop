@@ -75,7 +75,7 @@ func TestShortcutCallbackReturnsAtOnce(t *testing.T) {
 }
 
 // A registration the platform refuses is visible and does not stop the
-// application: docs/tools.md §6.
+// application: §6 of the tool design.
 func TestRegisterShortcutsReportsAFailure(t *testing.T) {
 	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
 	shortcuts.failWith(errors.New("already registered by another application"))

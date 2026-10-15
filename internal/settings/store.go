@@ -52,7 +52,7 @@ const FileVersion = 1
 type Section interface {
 	// Name is the section's name, for errors. It is not a key in the file:
 	// the settings of every feature share one flat object there, which is
-	// the shape docs/database.md §8 documents and a person reads.
+	// the shape §8 of the storage design documents and a person reads.
 	Name() string
 	// Decode reads this feature's settings out of values, which holds the
 	// keys of every feature. A key that is absent leaves the setting as it
@@ -80,7 +80,7 @@ type Store struct {
 //
 // The settings of every feature sit in one "tools" object rather than in one
 // entry each. That is the shape every file already in the wild has, and the
-// shape docs/database.md §8 describes to a user; keeping it is what lets this
+// shape §8 of the storage design describes to a user; keeping it is what lets this
 // package stop knowing the fields without any file needing a migration.
 type document struct {
 	Version int                        `json:"version"`

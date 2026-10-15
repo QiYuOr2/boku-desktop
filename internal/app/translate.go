@@ -140,7 +140,7 @@ type annotationState struct {
 // The card appears before the keyboard is taken, and the text to translate is
 // read in between: what has to be read is what the user selected in the
 // application they were working in, and an application that has just lost the
-// keyboard cannot be asked what is selected in it (docs/tools.md §2.2). The
+// keyboard cannot be asked what is selected in it (§2.2 of the tool design). The
 // wait is the read — the platform's own call, bounded by the selection device —
 // not the translation: the card has the keyboard while the request is in
 // flight.
@@ -260,7 +260,7 @@ func (s *State) showTranslation(at mygo.Point, state translationState) {
 // It is what the shortcut asks for, and the card keeps the keyboard out of it
 // only until the text to translate has been read: the read is what the
 // application the user was working in still answers, and this call is the one
-// that would stop it answering (docs/tools.md §2.2). focusTranslation is the
+// that would stop it answering (§2.2 of the tool design). focusTranslation is the
 // other half, and the two are always a pair — the card is on screen the moment
 // the shortcut is pressed, the keyboard follows the read.
 func (s *State) showTranslationInactive(at mygo.Point, state translationState) {
@@ -327,7 +327,7 @@ type cardWindow interface {
 	// and Focus gives it the keyboard. They are separate because the text
 	// a translation is about is read out of the application the user is
 	// working in, and the card must not take that application's keyboard
-	// until the read is done (docs/tools.md §2.2). The framework's own
+	// until the read is done (§2.2 of the tool design). The framework's own
 	// Show is not part of this: it shows and focuses in one step, which is
 	// the pair this is meant to keep apart.
 	ShowInactive()
@@ -357,7 +357,7 @@ func (s *State) newCardWindow(onClosed, onBlur, onFocus func()) cardWindow {
 		// window created without this is shown *and focused* by the
 		// framework as it is built, which is the keyboard taken before the
 		// selection has been read — the card would be shown by the very
-		// call that makes it unreadable (docs/tools.md §2.2).
+		// call that makes it unreadable (§2.2 of the tool design).
 		Hidden:    true,
 		Frameless: true,
 		// No resize: the card is exactly as tall as what is in it — measured

@@ -124,7 +124,7 @@ type State struct {
 	// keyMark and infoMark are the settings window's sidebar's other two
 	// marks. Every entry draws the mark its own section carries — the key,
 	// the translation mark, the clipboard, the gear, the info circle
-	// (docs/design.md §2.1) — and these are the two the page did not have
+	// (§2.1 of the design system) — and these are the two the page did not have
 	// before the sidebar named every section at once. They are parsed once
 	// at startup like every other mark.
 	keyMark  *ui.SVG

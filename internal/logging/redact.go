@@ -9,7 +9,7 @@ import (
 
 // redacting is the handler that keeps credentials out of the file.
 //
-// docs/security.md §5 says a credential never reaches a log, and AGENTS.md
+// §5 of the security design says a credential never reaches a log, and AGENTS.md
 // says it must pass `redact()` first. Trusting the call sites is not enough —
 // one `slog.Warn("…", "error", err)` carrying a provider's own message is all
 // it takes — so the scrubbing happens here, once, on the way to disk. What a

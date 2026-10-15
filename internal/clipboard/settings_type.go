@@ -7,7 +7,7 @@
 // feature — domain is for the entities and ports several features share.
 //
 // The file it is written to is still the application's one settings file, and
-// the keys it is written under are still the ones docs/database.md §8
+// the keys it is written under are still the ones §8 of the storage design
 // describes: the grouping is a property of the value, not of where it is
 // stored. internal/settings owns that file and does not know this type.
 package clipboard
@@ -71,8 +71,8 @@ func (s Settings) KeepsHistory() int {
 func (s Settings) Reads() bool { return s.RegionVisible && s.Monitoring }
 
 // Bounds on the clipboard poll. The floor keeps a mistaken configuration from
-// turning the poll into a busy loop; the default is the interval docs/tools.md
-// §4.1 names.
+// turning the poll into a busy loop; the default is the interval §4.1 of the
+// tool design names.
 const (
 	MinPollInterval     = 200 * time.Millisecond
 	DefaultPollInterval = 700 * time.Millisecond

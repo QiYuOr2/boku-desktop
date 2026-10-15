@@ -48,7 +48,7 @@ func init() {
 func main() {
 	// One process, one tray icon. A second launch hands its command line to
 	// the instance that is already running and leaves; that instance brings
-	// its quick window forward instead (docs/desktop.md §2). The lock is
+	// its quick window forward instead (§2 of the desktop design). The lock is
 	// taken before anything is opened, so a second launch costs no more than
 	// the hand-over itself.
 	if !mygo.App.RequestSingleInstanceLock() {
@@ -63,7 +63,7 @@ func main() {
 
 	// The log comes first, before anything that can fail: it is where a
 	// failure that happens before a window exists is found afterwards.
-	// docs/known-issues asks for facts before a guess, and this is the only
+	// the known-issues notes ask for facts before a guess, and this is the only
 	// place they are written down.
 	logFile, err := startLogging(userData, version)
 	if err != nil {
@@ -174,7 +174,7 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 	// The application's own settings and the clipboard history, next to the
 	// credentials: two files, each owned by the feature that reads it. See
 	// internal/clipboard/store.go for why the history is a file rather than
-	// the table docs/database.md §3 describes.
+	// the table §3 of the storage design describes.
 	//
 	// The settings file is shared, so each feature that has settings is
 	// registered with the store: the store itself knows nothing about what is
@@ -224,7 +224,7 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 
 	// The Codex quota's credential is not one of Boku's: it is the ChatGPT
 	// login the Codex CLI already made, read where it lies and refreshed in
-	// memory (docs/security.md §9).
+	// memory (§9 of the security design).
 	codexLogin := codexpanel.NewLogin(codexpanel.LoginOptions{Client: client})
 
 	// The panels the application shows. Adding one means adding a definition

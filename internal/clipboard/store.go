@@ -6,7 +6,7 @@
 // when Task 016 moves it to the clipboard_entries table it will move here and
 // nowhere else.
 //
-// The shape of an entry does not change with that move: docs/database.md §3
+// The shape of an entry does not change with that move: §3 of the storage design
 // describes the same fields, and this file is written whole on every copy
 // because the history is short enough for that to be the simplest thing that
 // is also correct.

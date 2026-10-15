@@ -384,7 +384,7 @@ const testText = "Hello, this is a connection test."
 // asking the application the user is working in, and the card that shows the
 // translation takes the keyboard away from that application. Read first, show
 // the card, then translate — the translation the shortcut asks for is about the
-// text this answered (docs/tools.md §2.2).
+// text this answered (§2.2 of the tool design).
 //
 // Nothing readable in either place is an empty answer, not an error: the
 // platform saying "nothing is selected" and the clipboard holding a file list

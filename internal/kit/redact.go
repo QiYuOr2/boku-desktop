@@ -4,8 +4,8 @@
 // It lives here, and not with the HTTP client that first needed it, because
 // the logger needs exactly the same rule and reaching into a network package
 // to get it would make the log depend on the network. What a credential looks
-// like is one rule in one place; AGENTS.md's Secrets Rules and
-// docs/security.md §5 both point at this file.
+// like is one rule in one place; AGENTS.md's Secrets Rules and the security
+// design §5 both point at this file.
 package kit
 
 import (

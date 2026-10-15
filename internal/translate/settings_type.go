@@ -8,7 +8,7 @@
 // features share.
 //
 // The file it is written to is still the application's one settings file, and
-// the keys it is written under are still the ones docs/database.md §8
+// the keys it is written under are still the ones §8 of the storage design
 // describes. internal/settings owns that file and does not know this type.
 package translate
 

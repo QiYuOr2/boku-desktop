@@ -2,7 +2,7 @@
 // user data directory and keeps the last RetentionDays of them.
 //
 // It exists because Boku is a tray icon with no console: an error the user
-// cannot see is an error nobody can act on, and docs/known-issues asks for
+// cannot see is an error nobody can act on, and the known-issues notes ask for
 // facts before a guess. The log is that record.
 //
 // Only main.go uses this package, and it uses it once. Everything else logs

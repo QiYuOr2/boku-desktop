@@ -9,7 +9,7 @@
 // Unlock accepts anything and Unlocked always answers true: pretending
 // otherwise would make a plain-text file look protected.
 //
-// docs/security.md §4 keeps this implementation and the encrypted vault of
+// §4 of the security design keeps this implementation and the encrypted vault of
 // Task 008 behind one domain.SecretStore interface, so moving to the vault
 // changes this package and nothing above it.
 //

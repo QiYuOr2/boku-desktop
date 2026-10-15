@@ -20,7 +20,7 @@ import (
 const (
 	// FileMode is what a written file is restricted to. On Windows this
 	// permission bit does not decide access — an ACL does — so it is a
-	// request rather than a boundary; see docs/security.md §4.
+	// request rather than a boundary; see §4 of the security design.
 	FileMode = 0o600
 	// DirMode is what a directory created for a written file gets.
 	DirMode = 0o700

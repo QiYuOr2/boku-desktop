@@ -5,7 +5,7 @@ import "context"
 // CredentialSource hands a provider what it needs when the credential is not
 // Boku's to keep: the Codex quota reads the ChatGPT login the Codex CLI
 // already made, and copying that token into Boku's own store would be both
-// pointless and worse (docs/security.md §9).
+// pointless and worse (§9 of the security design).
 //
 // A source is registered by the assembly for one provider id. It is what the
 // use case asks instead of the secret store, and it is the only other place a

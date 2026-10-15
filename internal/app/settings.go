@@ -540,7 +540,7 @@ func (s *State) apiKeyCardHead(c *ui.Context, card translateCard) {
 // Removing a credential is the one thing here that typing cannot undo — the
 // key itself is gone — so the design's single red word becomes two, and the
 // user can leave without answering by pressing 取消. It is the two-step
-// confirmation docs/tasks/todo/009-credentials-ui.md asks for, drawn in the
+// confirmation the credential UI design asks for, drawn in the
 // card that holds the credential rather than in a dialog over it.
 func (s *State) deleteActions(c *ui.Context, card translateCard) {
 	if s.form.deleteArmed != card.id {
@@ -979,7 +979,7 @@ func (s *State) shortcutSwitches(c *ui.Context) {
 
 		// What is bound now, or why nothing is. A registration that failed
 		// has to be visible rather than silent, which is what
-		// docs/tools.md §6 asks for.
+		// §6 of the tool design asks for.
 		text, kind := s.shortcutLine()
 		notice(c, kind, text)
 		if note, noteKind := s.shortcutNote(); note != "" {

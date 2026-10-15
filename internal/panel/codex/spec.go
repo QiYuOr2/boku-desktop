@@ -16,7 +16,7 @@ package codex
 import "boku/internal/domain"
 
 // ProviderID is the provider this panel reads, as registered and as named in
-// the cross-end contract (docs/providers.md §7).
+// the cross-end contract (§7 of the provider contract).
 const ProviderID = "codex"
 
 const (
@@ -31,7 +31,7 @@ const (
 
 	// AccessTokenCredential is the credential the provider asks for. It does
 	// not come from the secret store: it is the token the Codex CLI already
-	// logged in with, and Boku reads it where it lies (docs/security.md §9).
+	// logged in with, and Boku reads it where it lies (§9 of the security design).
 	// It is named here so that the descriptor, the refresh call and the
 	// error messages agree on one name.
 	AccessTokenCredential = "accessToken"

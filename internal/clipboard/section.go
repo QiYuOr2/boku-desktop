@@ -20,7 +20,7 @@ import (
 )
 
 // The keys this feature owns in settings.json. They are the names
-// docs/database.md §8 documents and a person may edit, so they are spelled
+// §8 of the storage design documents and a person may edit, so they are spelled
 // once, here, and never derived from a Go field name.
 const (
 	keyRegionVisible = "clipboardRegionVisible"

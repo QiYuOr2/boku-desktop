@@ -93,7 +93,7 @@ var (
 // reached by. They are the same 24-unit stroked drawings the rest of the
 // application uses, so they take the color of the line they sit on. Every
 // other entry draws the mark its own section already carries
-// (docs/design.md §2.1).
+// (§2.1 of the design system).
 var (
 	//go:embed key.svg
 	keySVG []byte
