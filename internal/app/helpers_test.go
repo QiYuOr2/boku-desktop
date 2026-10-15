@@ -736,6 +736,22 @@ func (d *testDevice) WriteFiles(_ context.Context, paths []string) error {
 	return nil
 }
 
+func (d *testDevice) WriteImage(_ context.Context, png []byte) error {
+	if len(png) == 0 {
+		return domain.ErrUnsupportedClipboardFormat
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.images = append(d.images, append([]byte(nil), png...))
+	d.reading = d.stamp(domain.ClipContent{
+		Kind:       domain.ClipKindImage,
+		HasImage:   true,
+		ImageBytes: len(png),
+		Image:      append([]byte(nil), png...),
+	})
+	return nil
+}
+
 func (d *testDevice) set(reading domain.ClipContent) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -777,6 +793,35 @@ func (d *testDevice) writtenImages() [][]byte {
 type testClipStore struct {
 	mu      sync.Mutex
 	entries []domain.ClipboardEntry
+	// images is the image store beside the history.
+	images map[string][]byte
+}
+
+func (s *testClipStore) SaveImage(_ context.Context, ref string, png []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.images == nil {
+		s.images = map[string][]byte{}
+	}
+	s.images[ref] = append([]byte(nil), png...)
+	return nil
+}
+
+func (s *testClipStore) LoadImage(_ context.Context, ref string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	png, ok := s.images[ref]
+	if !ok {
+		return nil, domain.ErrUnsupportedClipboardFormat
+	}
+	return append([]byte(nil), png...), nil
+}
+
+func (s *testClipStore) DeleteImage(_ context.Context, ref string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.images, ref)
+	return nil
 }
 
 func (s *testClipStore) LoadEntries(context.Context) ([]domain.ClipboardEntry, error) {

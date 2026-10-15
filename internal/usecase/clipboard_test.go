@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"boku/internal/domain"
+	"boku/internal/tools"
 )
 
 // The clipboard tool is tested against a device and a store the test owns:
@@ -417,13 +418,21 @@ func TestCopyWritesFilesBackAsFiles(t *testing.T) {
 	}
 }
 
-// An image is recorded with its size and copied back as its name: the
-// application does not keep the pixels of a screenshot.
-func TestCopyWritesAnImageBackAsItsName(t *testing.T) {
+// A picture is recorded with its bytes kept, and a click on it puts the picture
+// back. What a click used to do was put the line "[图片]" on the clipboard,
+// which is a text nobody can paste anywhere.
+func TestCopyWritesAPictureBackAsAPicture(t *testing.T) {
 	clock := newTestClock()
-	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{Clock: clock})
+	clipboard, device, store, _ := newTestClipboard(t, ClipboardOptions{Clock: clock})
 	ctx := context.Background()
-	device.set(domain.ClipContent{Kind: domain.ClipKindImage, HasImage: true, ImageBytes: 4096})
+	png := []byte("89504e470d0a1a0a-a-screenshot")
+	device.set(domain.ClipContent{
+		Kind:       domain.ClipKindImage,
+		HasImage:   true,
+		ImageBytes: len(png),
+		Image:      png,
+		ImageRef:   tools.ClipImageRef(png),
+	})
 	clipboard.Read(ctx)
 
 	history := clipboard.History(0)
@@ -434,31 +443,118 @@ func TestCopyWritesAnImageBackAsItsName(t *testing.T) {
 	if entry.Kind != domain.ClipKindImage {
 		t.Fatalf("the entry is %q, want an image", entry.Kind)
 	}
-	if entry.ImageBytes != 4096 {
-		t.Errorf("the recorded size is %d, want 4096", entry.ImageBytes)
+	if entry.ImageBytes != len(png) {
+		t.Errorf("the recorded size is %d, want %d", entry.ImageBytes, len(png))
+	}
+	if entry.ImageRef != tools.ClipImageRef(png) {
+		t.Errorf("the entry keeps the picture as %q, want its hash", entry.ImageRef)
+	}
+	if kept := store.keptImages(); len(kept) != 1 || string(kept[entry.ImageRef]) != string(png) {
+		t.Errorf("the image store holds %d pictures, want the bytes that were copied", len(kept))
 	}
 	if entry.Content != "[图片]" {
-		t.Errorf("the recorded content is %q, want the name", entry.Content)
+		t.Errorf("the line the interface shows is %q", entry.Content)
 	}
 
 	if err := clipboard.Copy(ctx, entry); err != nil {
 		t.Fatalf("Copy failed: %v", err)
 	}
-	if got := device.written(); len(got) != 1 || got[0] != "[图片]" {
-		t.Errorf("the image copy wrote %v, want its name as text", got)
+	if written := device.writtenImages(); len(written) != 1 || string(written[0]) != string(png) {
+		t.Errorf("the click wrote %d pictures, want the one that was copied", len(written))
+	}
+	if written := device.written(); len(written) != 0 {
+		t.Errorf("the click wrote the text %v as well", written)
+	}
+}
+
+// A picture whose bytes are gone says so rather than pasting its own name: the
+// entry is what the interface shows, not what the clipboard gets.
+func TestAPictureWithNoBytesIsNotPastedAsItsName(t *testing.T) {
+	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{})
+	entry := domain.ClipboardEntry{
+		ID: "one", Kind: domain.ClipKindImage, Content: "[图片]", Display: "[图片]",
+		ContentHash: tools.ClipContentHash("image:"), ImageBytes: 4096,
+	}
+	err := clipboard.Copy(context.Background(), entry)
+	if err == nil {
+		t.Fatal("copying a picture with no bytes kept succeeded")
+	}
+	if !errors.Is(err, domain.ErrUnsupportedClipboardFormat) {
+		t.Errorf("the error is %v, want an unsupported format", err)
+	}
+	if written := device.written(); len(written) != 0 {
+		t.Errorf("the name was written as text: %v", written)
+	}
+}
+
+// Dropping an entry drops the picture that belonged to it: an image store that
+// only grows is a directory full of screenshots nobody can reach any more.
+func TestEvictedEntriesTakeTheirPicturesWithThem(t *testing.T) {
+	clipboard, device, store, _ := newTestClipboard(t, ClipboardOptions{})
+	ctx := context.Background()
+	// One more picture than the smallest history the settings allow, so that
+	// the limit is what drops one.
+	copies := domain.ClipboardMinHistorySize + 1
+	refs := make([]string, 0, copies)
+	for i := 0; i < copies; i++ {
+		png := []byte(fmt.Sprintf("89504e470d0a1a0a-picture-%d", i))
+		ref := tools.ClipImageRef(png)
+		refs = append(refs, ref)
+		device.set(domain.ClipContent{
+			Kind: domain.ClipKindImage, HasImage: true,
+			Image: png, ImageBytes: len(png), ImageRef: ref,
+		})
+		clipboard.Read(ctx)
+	}
+	if kept := store.keptImages(); len(kept) != copies {
+		t.Fatalf("the image store holds %d pictures, want all %d copies", len(kept), copies)
 	}
 
-	// The clipboard now holds text, and the history says so: a copy of an
-	// image is recorded once as the picture it was, and once as the text it
-	// was turned into.
-	clock.advance(time.Second)
-	clipboard.Read(ctx)
-	history = clipboard.History(0)
-	if len(history) != 2 {
-		t.Fatalf("the history has %d entries after the write, want 2", len(history))
+	if err := clipboard.SetHistorySize(ctx, domain.ClipboardMinHistorySize); err != nil {
+		t.Fatalf("SetHistorySize failed: %v", err)
 	}
-	if history[0].Kind != domain.ClipKindText || history[0].Content != "[图片]" {
-		t.Errorf("what the clipboard now holds is not recorded: %+v", history[0])
+	// The entry goes first and its picture follows: the deletion happens
+	// behind the frame, so the test waits for it rather than assuming it.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && len(store.keptImages()) > domain.ClipboardMinHistorySize {
+		time.Sleep(10 * time.Millisecond)
+	}
+	kept := store.keptImages()
+	if len(kept) != domain.ClipboardMinHistorySize {
+		t.Fatalf("the image store holds %d pictures, want the %d entries that are left",
+			len(kept), domain.ClipboardMinHistorySize)
+	}
+	if _, ok := kept[refs[0]]; ok {
+		t.Error("the picture of the entry that was dropped is still kept")
+	}
+	if _, ok := kept[refs[copies-1]]; !ok {
+		t.Error("the picture of the newest entry was dropped with the oldest")
+	}
+}
+
+// Two screenshots of the same size are two pictures: comparing sizes alone made
+// the second one look like the first, so it was never recorded and a click on
+// the first put the wrong picture back.
+func TestTwoScreenshotsOfTheSameSizeAreTwoEntries(t *testing.T) {
+	one := Record(domain.ClipContent{
+		Kind: domain.ClipKindImage, HasImage: true, ImageBytes: 4096, ImageRef: "sha256:one",
+	})
+	two := Record(domain.ClipContent{
+		Kind: domain.ClipKindImage, HasImage: true, ImageBytes: 4096, ImageRef: "sha256:two",
+	})
+	if one.Hash == two.Hash {
+		t.Errorf("two pictures of the same size are one entry: %q", one.Hash)
+	}
+	if one.Display != two.Display {
+		t.Errorf("the two entries draw differently: %q and %q", one.Display, two.Display)
+	}
+
+	// The same picture twice is one entry, whichever way it was copied.
+	again := Record(domain.ClipContent{
+		Kind: domain.ClipKindImage, HasImage: true, ImageBytes: 4096, ImageRef: "sha256:one",
+	})
+	if again.Hash != one.Hash {
+		t.Errorf("the same picture is two entries: %q and %q", one.Hash, again.Hash)
 	}
 }
 

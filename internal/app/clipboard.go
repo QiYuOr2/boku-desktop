@@ -342,7 +342,7 @@ func kindLabel(kind domain.ClipKind) string {
 }
 
 // copyEntry puts a recorded copy back on the clipboard: a file list as
-// files, anything else as the text it was.
+// files, a picture as the picture it was, anything else as the text it was.
 //
 // The row is marked and the write is sent, both without waiting. A click is
 // answered by the next frame, and the write happens on the clipboard's own

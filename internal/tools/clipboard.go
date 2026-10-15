@@ -34,6 +34,18 @@ func ClipContentHash(text string) string {
 	return ClipHashPrefix + hex.EncodeToString(sum[:])
 }
 
+// ClipImageRef is the digest that identifies a copied picture: the hash of the
+// bitmap's bytes, and the name it is kept under.
+//
+// The picture itself is not in the history file — a screenshot is megabytes and
+// the file is written whole on every copy — so what identifies it has to be
+// cheap to store and impossible to confuse with another picture. Two
+// screenshots of the same size are two pictures; only their bytes say so.
+func ClipImageRef(png []byte) string {
+	sum := sha256.Sum256(png)
+	return ClipHashPrefix + hex.EncodeToString(sum[:])
+}
+
 // ClipDisplay is the one line the interface shows for a copied value:
 // whitespace folded into single spaces, then shortened to ClipDisplayLimit
 // runes with an ellipsis.

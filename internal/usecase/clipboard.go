@@ -423,6 +423,12 @@ func (c *Clipboard) record(reading domain.ClipContent) {
 		// and nothing to match, so it is not an entry.
 		return
 	}
+	if len(reading.Image) > 0 && record.ImageRef != "" && !c.keepImage(reading.Image, record.ImageRef) {
+		// The picture could not be kept. The entry still goes in — the user
+		// copied something — and a click on it says the picture is gone
+		// rather than pasting the line "[图片]".
+		record.ImageRef = ""
+	}
 	c.mu.Lock()
 	c.latest = &record
 	changed := c.append(record)
@@ -434,6 +440,18 @@ func (c *Clipboard) record(reading domain.ClipContent) {
 	if emit != nil {
 		emit()
 	}
+}
+
+// keepImage puts the bytes of a copied picture where a click on its entry can
+// find them again.
+//
+// This is the only moment they can be had: by the time anyone clicks, the
+// clipboard holds something else. It runs on the watcher's goroutine, which is
+// why it is one file written once per copy rather than part of the history
+// write — the history is written in the background, and this has to be there
+// before the entry that names it.
+func (c *Clipboard) keepImage(png []byte, ref string) bool {
+	return c.store.SaveImage(context.Background(), ref, png) == nil
 }
 
 // append adds a reading to the history, unless it is already there. The
@@ -481,6 +499,7 @@ func (c *Clipboard) append(record domain.ClipRecord) bool {
 		Display:     record.Display,
 		Files:       append([]string(nil), record.Files...),
 		ImageBytes:  record.ImageBytes,
+		ImageRef:    record.ImageRef,
 		Note:        record.Note,
 	}))
 	return true
@@ -520,7 +539,38 @@ func (c *Clipboard) prune(entries []domain.ClipboardEntry) []domain.ClipboardEnt
 	if unpinned > c.keep {
 		room = c.evictOldest(room, unpinned-c.keep)
 	}
+	c.forgetImages(entries, room)
 	return room
+}
+
+// forgetImages deletes the pictures of entries that are no longer in the
+// history: a picture whose entry is gone could never be put back, and an image
+// store that only grows is a directory full of screenshots nobody will see
+// again.
+//
+// It runs on a goroutine of its own. The caller holds the lock and is drawing
+// a frame or polling the clipboard, and deleting a file is not worth either.
+func (c *Clipboard) forgetImages(before, after []domain.ClipboardEntry) {
+	kept := make(map[string]bool, len(after))
+	for _, entry := range after {
+		if entry.ImageRef != "" {
+			kept[entry.ImageRef] = true
+		}
+	}
+	var dropped []string
+	for _, entry := range before {
+		if entry.ImageRef != "" && !kept[entry.ImageRef] {
+			dropped = append(dropped, entry.ImageRef)
+		}
+	}
+	if len(dropped) == 0 {
+		return
+	}
+	go func() {
+		for _, ref := range dropped {
+			_ = c.store.DeleteImage(context.Background(), ref)
+		}
+	}()
 }
 
 // evictOldest drops n unpinned entries, from the oldest back, for a list
@@ -625,10 +675,22 @@ func (c *Clipboard) CopyAsync(entry domain.ClipboardEntry, done func(error)) {
 // thing.
 //
 // A file list goes back as files: that is the copy whose value is in being
-// pasted into something that takes a file. Everything else goes back as the
-// text it was, an image included — the application does not keep the pixels
-// of a screenshot, only the note that there was one.
+// pasted into something that takes a file. A picture goes back as a picture,
+// loaded from the image store — what a click on one used to do was put the line
+// "[图片]" on the clipboard, which is a text nobody can paste anywhere.
+// Everything else goes back as the text it was.
 func (c *Clipboard) write(ctx context.Context, entry domain.ClipboardEntry) error {
+	if entry.Kind == domain.ClipKindImage {
+		if entry.ImageRef == "" {
+			return fmt.Errorf("%w: this copy is a picture whose bytes were not kept",
+				domain.ErrUnsupportedClipboardFormat)
+		}
+		png, err := c.store.LoadImage(ctx, entry.ImageRef)
+		if err != nil {
+			return err
+		}
+		return c.device.WriteImage(ctx, png)
+	}
 	if len(entry.Files) > 0 {
 		return c.device.WriteFiles(ctx, entry.Files)
 	}
@@ -815,6 +877,7 @@ func Record(reading domain.ClipContent) domain.ClipRecord {
 			Hash:       tools.ClipContentHash("files:" + strings.Join(reading.Files, "\n")),
 			Files:      append([]string(nil), reading.Files...),
 			ImageBytes: reading.ImageBytes,
+			ImageRef:   reading.ImageRef,
 			Note:       reading.Observation,
 			CapturedAt: reading.CapturedAt,
 		}
@@ -824,13 +887,22 @@ func Record(reading domain.ClipContent) domain.ClipRecord {
 			name = reading.Files[0]
 		}
 		display := "[" + tools.ClipImageName(name) + "]"
+		// The hash is the picture itself when its bytes came with the
+		// reading, so that two screenshots are two entries; without them
+		// there is only the name the platform offered, and every nameless
+		// picture is then the same picture — which is what used to happen.
+		hash := tools.ClipContentHash("image:" + tools.ClipFileName(name))
+		if reading.ImageRef != "" {
+			hash = tools.ClipContentHash("image:" + reading.ImageRef)
+		}
 		return domain.ClipRecord{
 			Kind:       reading.Kind,
 			Content:    display,
 			Display:    display,
-			Hash:       tools.ClipContentHash("image:" + tools.ClipFileName(name)),
+			Hash:       hash,
 			Files:      append([]string(nil), reading.Files...),
 			ImageBytes: reading.ImageBytes,
+			ImageRef:   reading.ImageRef,
 			Note:       reading.Observation,
 			CapturedAt: reading.CapturedAt,
 		}

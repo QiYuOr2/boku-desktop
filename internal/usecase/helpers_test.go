@@ -108,6 +108,18 @@ func (d *fakeDevice) WriteFiles(_ context.Context, paths []string) error {
 	return nil
 }
 
+// WriteImage puts a picture on the clipboard, which is what a click on an
+// image in the history does.
+func (d *fakeDevice) WriteImage(_ context.Context, png []byte) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.writeEr != nil {
+		return d.writeEr
+	}
+	d.images = append(d.images, append([]byte(nil), png...))
+	return nil
+}
+
 func (d *fakeDevice) readCount() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -147,6 +159,9 @@ type fakeStore struct {
 	saves   int
 	loadErr error
 	saveErr error
+	// images is the image store beside the history: the bytes of a copied
+	// picture, under the reference its entry keeps.
+	images map[string][]byte
 }
 
 func (s *fakeStore) LoadEntries(context.Context) ([]domain.ClipboardEntry, error) {
@@ -156,6 +171,52 @@ func (s *fakeStore) LoadEntries(context.Context) ([]domain.ClipboardEntry, error
 		return nil, s.loadErr
 	}
 	return append([]domain.ClipboardEntry(nil), s.entries...), nil
+}
+
+// SaveImage is the image store: the same reference saved twice is the same
+// picture, which is what the real store does too.
+func (s *fakeStore) SaveImage(_ context.Context, ref string, png []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	if s.images == nil {
+		s.images = map[string][]byte{}
+	}
+	if _, ok := s.images[ref]; ok {
+		return nil
+	}
+	s.images[ref] = append([]byte(nil), png...)
+	return nil
+}
+
+func (s *fakeStore) LoadImage(_ context.Context, ref string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	png, ok := s.images[ref]
+	if !ok {
+		return nil, fmt.Errorf("%w: no picture was kept", domain.ErrUnsupportedClipboardFormat)
+	}
+	return append([]byte(nil), png...), nil
+}
+
+func (s *fakeStore) DeleteImage(_ context.Context, ref string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.images, ref)
+	return nil
+}
+
+// keptImages is what the image store holds, for a test to look at.
+func (s *fakeStore) keptImages() map[string][]byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[string][]byte, len(s.images))
+	for ref, png := range s.images {
+		out[ref] = append([]byte(nil), png...)
+	}
+	return out
 }
 
 func (s *fakeStore) SaveEntries(_ context.Context, entries []domain.ClipboardEntry) error {

@@ -55,6 +55,18 @@ func TestQuitActionQuits(t *testing.T) {
 	}
 }
 
+// A second launch brings the quick window forward, but never against a tray
+// that does not exist yet: MyGo's NewFlyout refuses a flyout with neither a
+// tray nor a parent, and a launch arriving while the application is still
+// starting must not take it down.
+func TestActivateWithoutATrayOpensNothing(t *testing.T) {
+	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state.Activate()
+	if state.panel != nil {
+		t.Error("Activate opened a quick window with no tray to anchor it to")
+	}
+}
+
 // MyGo rebuilds the view for every input and repaint, so a view that
 // changed state would fight itself.
 func TestViewIsIdempotent(t *testing.T) {

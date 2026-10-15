@@ -116,13 +116,13 @@ type State struct {
 	// design gives it a mark of its own, and it is the application's own
 	// drawing rather than a brand's.
 	translationMark *ui.SVG
-	// keyMark, bookMark and infoMark are the settings window's sidebar's
-	// other three marks. The clipboard entry and the general entry draw the
-	// marks those sections already carry; these are the ones the page did
-	// not have before the sidebar named every section at once. They are
-	// parsed once at startup like every other mark.
+	// keyMark and infoMark are the settings window's sidebar's other two
+	// marks. Every entry draws the mark its own section carries — the key,
+	// the translation mark, the clipboard, the gear, the info circle
+	// (docs/design.md §2.1) — and these are the two the page did not have
+	// before the sidebar named every section at once. They are parsed once
+	// at startup like every other mark.
 	keyMark  *ui.SVG
-	bookMark *ui.SVG
 	infoMark *ui.SVG
 
 	tray           *mygo.Tray
@@ -309,14 +309,10 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	// The sidebar reaches every section, including the two that had no mark
 	// of their own: the key section and the about box. The key is the
 	// design's own drawing for the page that configures services, and the
-	// book and the info mark are the ones it draws beside the other two.
+	// info mark is the one it draws beside the other one.
 	keyMark, err := ui.ParseSVG(assets.Key())
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the key mark: %w", err)
-	}
-	bookMark, err := ui.ParseSVG(assets.Book())
-	if err != nil {
-		return nil, fmt.Errorf("app: parse the book mark: %w", err)
 	}
 	infoMark, err := ui.ParseSVG(assets.Info())
 	if err != nil {
@@ -347,7 +343,6 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		closeMark:       closeMark,
 		translationMark: translationMark,
 		keyMark:         keyMark,
-		bookMark:        bookMark,
 		infoMark:        infoMark,
 	}, nil
 }
@@ -462,6 +457,25 @@ func (s *State) popUpMenu() {
 func (s *State) Toggle() {
 	if s.panel != nil {
 		s.panel.Close()
+		return
+	}
+	s.Open()
+}
+
+// Activate brings the quick window forward: it is what a second launch of
+// the application asks for, since the running instance owns the tray and has
+// no window of its own to raise. The window already open is focused rather
+// than opened again, so a second launch never leaves two of them behind.
+//
+// A tray that does not exist yet is one nothing can be anchored to: MyGo's
+// NewFlyout refuses a flyout without a tray or a parent, and a second launch
+// arriving while the application is still starting has nothing to show.
+func (s *State) Activate() {
+	if s.tray == nil {
+		return
+	}
+	if s.panel != nil {
+		s.panel.Focus()
 		return
 	}
 	s.Open()

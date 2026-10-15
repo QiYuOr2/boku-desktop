@@ -75,7 +75,7 @@ func (s *State) settingsPages() []*settingsPage {
 		{kind: sectionAPIKey, name: "API Key", mark: s.keyMark, build: s.apiKeySection},
 		{kind: sectionTranslate, name: "划词翻译", mark: s.translationMark, build: s.translateSection},
 		{kind: sectionClipboard, name: "剪贴板", mark: s.clipboardMark, build: s.clipboardSection},
-		{kind: sectionGeneral, name: "通用", mark: s.bookMark, build: s.generalSection},
+		{kind: sectionGeneral, name: "通用", mark: s.settingsMark, build: s.generalSection},
 		{kind: sectionAbout, name: "关于", mark: s.infoMark, build: s.aboutSection},
 	}
 }

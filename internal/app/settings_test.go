@@ -133,6 +133,30 @@ func TestSettingsSidebarNamesEverySection(t *testing.T) {
 	}
 }
 
+// The sidebar's mark for an entry is the mark its own section draws
+// (docs/design.md §2.1): the key, the translation mark, the clipboard, the
+// gear, the info circle. The general entry in particular is the gear the
+// section's heading carries, not a drawing chosen for the sidebar alone.
+func TestSettingsSidebarDrawsEachSectionMark(t *testing.T) {
+	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	want := map[settingsSectionKind]*ui.SVG{
+		sectionAPIKey:    state.keyMark,
+		sectionTranslate: state.translationMark,
+		sectionClipboard: state.clipboardMark,
+		sectionGeneral:   state.settingsMark,
+		sectionAbout:     state.infoMark,
+	}
+	for _, page := range state.settingsPages() {
+		mark, known := want[page.kind]
+		if !known {
+			t.Fatalf("the sidebar has an entry for section %v that this test does not know", page.kind)
+		}
+		if page.mark != mark {
+			t.Errorf("the entry for %q draws a mark of its own, want the mark its section draws", page.name)
+		}
+	}
+}
+
 // The sidebar's entries are what navigates the page: the whole entry is the
 // target, clicking one marks it open straight away, and it is what sends the
 // page to that section.

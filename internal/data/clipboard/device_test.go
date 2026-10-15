@@ -146,13 +146,22 @@ func TestAPictureThatCouldNotBeReadIsNoted(t *testing.T) {
 		t.Error("a file list with an unreadable picture was not noted")
 	}
 
-	// A complete reading carries no note.
-	if got := Convert(platformFacts{
-		formats:    []transfer.Format{transfer.PNG},
-		hasImage:   true,
-		imageBytes: 100,
-	}); got.Observation != "" {
-		t.Errorf("a complete reading was noted: %q", got.Observation)
+	// A complete reading carries no note, and carries the bitmap itself: a
+	// picture that was read can be put back, which is what a click on it in
+	// the history does.
+	complete := Convert(platformFacts{
+		formats:  []transfer.Format{transfer.PNG},
+		hasImage: true,
+		image:    []byte("89504e470d0a1a0a"),
+	})
+	if complete.Observation != "" {
+		t.Errorf("a complete reading was noted: %q", complete.Observation)
+	}
+	if complete.ImageBytes != len("89504e470d0a1a0a") {
+		t.Errorf("imageBytes = %d, want the size of the bitmap that was read", complete.ImageBytes)
+	}
+	if string(complete.Image) != "89504e470d0a1a0a" {
+		t.Errorf("image = %q, want the bytes the platform handed over", complete.Image)
 	}
 }
 

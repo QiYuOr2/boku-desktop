@@ -113,6 +113,27 @@ func (d *Device) WriteFiles(ctx context.Context, paths []string) error {
 	return nil
 }
 
+// WriteImage puts a picture on the clipboard: a click on an image in the
+// history, and the selection tool putting back what it borrowed while reading
+// a selection.
+//
+// The bytes are what the platform handed over as PNG, and they go back the way
+// they came.
+func (d *Device) WriteImage(ctx context.Context, png []byte) error {
+	if len(png) == 0 {
+		return domain.ErrUnsupportedClipboardFormat
+	}
+	var err error
+	ran := d.call(ctx, func() { err = mygo.Clipboard.WriteImage(png) })
+	if !ran {
+		return domain.ErrUnsupportedClipboardFormat
+	}
+	if err != nil {
+		return fmt.Errorf("%w: write the image: %v", domain.ErrUnsupportedClipboardFormat, err)
+	}
+	return nil
+}
+
 // call runs fn through the dispatcher and reports whether it ran. A
 // dispatcher that has not answered within the timeout is left behind: this
 // returns, and the goroutine it was waiting for ends when the main thread
@@ -165,7 +186,7 @@ func (d *Device) snapshot() (domain.ClipContent, error) {
 	}
 	if facts.hasImage {
 		png, err := mygo.Clipboard.ReadFormat(transfer.PNG)
-		facts.imageBytes, facts.imageErr = len(png), err
+		facts.image, facts.imageErr = png, err
 	}
 	// The text and the file list are read one flavour at a time, and a
 	// flavour that is not there is not an error: a clipboard with a picture
@@ -196,12 +217,13 @@ type platformFacts struct {
 	html     string
 	files    []string
 	hasImage bool
-	// imageBytes is how large the bitmap on the clipboard is, when one was
-	// read; imageErr is why it is missing when the formats said there was
-	// one. Neither is guessed: the first is a measurement, the second is
-	// what the platform answered.
-	imageBytes int
-	imageErr   error
+	// image is the bitmap on the clipboard as the platform hands it over, when
+	// one was read; imageErr is why it is missing when the formats said there
+	// was one. The bytes are kept because a picture has to be able to go back
+	// — a click on it in the history, or the selection tool giving the
+	// clipboard back — and this is the only moment it can be read.
+	image    []byte
+	imageErr error
 }
 
 // Convert turns one platform reading into what the application records.
@@ -217,9 +239,10 @@ func Convert(facts platformFacts) domain.ClipContent {
 			Kind:       domain.ClipKindFile,
 			Files:      facts.files,
 			HasImage:   facts.hasImage,
-			ImageBytes: facts.imageBytes,
+			ImageBytes: len(facts.image),
+			Image:      facts.image,
 		}
-		if facts.hasImage && facts.imageBytes == 0 && facts.imageErr != nil {
+		if facts.hasImage && len(facts.image) == 0 && facts.imageErr != nil {
 			content = content.WithObservation(
 				"图片没能读出：" + facts.imageErr.Error() + "；已记下文件名")
 		}
@@ -228,9 +251,10 @@ func Convert(facts platformFacts) domain.ClipContent {
 		content := domain.ClipContent{
 			Kind:       domain.ClipKindImage,
 			HasImage:   true,
-			ImageBytes: facts.imageBytes,
+			ImageBytes: len(facts.image),
+			Image:      facts.image,
 		}
-		if facts.imageBytes == 0 {
+		if len(facts.image) == 0 {
 			reason := "剪贴板没有给出图片数据"
 			if facts.imageErr != nil {
 				reason = facts.imageErr.Error()

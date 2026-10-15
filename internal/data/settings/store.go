@@ -145,10 +145,13 @@ type historyEntry struct {
 	// what the entry writes back, so that pasting a copy of files pastes
 	// the files.
 	Files []string `json:"files"`
-	// ImageBytes is how large the bitmap the copy held was. The bytes
-	// themselves are not stored: the history is a list of what was copied,
-	// not an image store.
+	// ImageBytes is how large the bitmap the copy held was.
 	ImageBytes int `json:"imageBytes"`
+	// ImageRef names the picture kept for this entry in the image directory
+	// beside this file. The bytes are there rather than here because a
+	// screenshot is megabytes and this file is written whole on every copy;
+	// a click on the entry loads them and puts the picture back.
+	ImageRef string `json:"imageRef,omitempty"`
 	// Note is what the reading noticed about itself, such as a picture it
 	// could not read.
 	Note string `json:"note"`
@@ -321,6 +324,7 @@ func (s *Settings) LoadEntries(ctx context.Context) ([]domain.ClipboardEntry, er
 			Display:     stored.Display,
 			Files:       append([]string(nil), stored.Files...),
 			ImageBytes:  stored.ImageBytes,
+			ImageRef:    stored.ImageRef,
 			Note:        stored.Note,
 		})
 	}
@@ -356,6 +360,7 @@ func (s *Settings) SaveEntries(ctx context.Context, entries []domain.ClipboardEn
 			Display:     entry.Display,
 			Files:       append([]string(nil), entry.Files...),
 			ImageBytes:  entry.ImageBytes,
+			ImageRef:    entry.ImageRef,
 			Note:        entry.Note,
 		})
 	}
@@ -368,6 +373,98 @@ func (s *Settings) SaveEntries(ctx context.Context, entries []domain.ClipboardEn
 	}
 	s.entries = append([]domain.ClipboardEntry(nil), entries...)
 	return nil
+}
+
+// The pictures of recorded copies live in a directory of their own beside the
+// history file, one file per picture, named after the hash of its bytes. They
+// are files rather than part of the history file because a screenshot is
+// megabytes and the history file is written whole on every copy — and because
+// a picture is the one thing in the history that can also just be dropped.
+const imageDirName = "clipboard_images"
+
+// SaveImage keeps the bytes of a copied picture under ref.
+//
+// Saving the same ref twice is not a second copy: the same picture is the same
+// file, and the poll may well record it twice over. A store with no history
+// path keeps nothing, which is how a test or an assembly without a user
+// directory runs.
+func (s *Settings) SaveImage(ctx context.Context, ref string, png []byte) error {
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+	if len(png) == 0 {
+		return fmt.Errorf("%w: there are no image bytes to keep", domain.ErrInvalidArgument)
+	}
+	path, err := s.imagePath(ref)
+	if err != nil {
+		return err
+	}
+	if path == "" {
+		return nil // kept in memory only, and there is nothing to keep it in
+	}
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return writeFile(path, png)
+}
+
+// LoadImage returns the picture kept under ref.
+func (s *Settings) LoadImage(ctx context.Context, ref string) ([]byte, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+	path, err := s.imagePath(ref)
+	if err != nil {
+		return nil, err
+	}
+	if path == "" {
+		return nil, fmt.Errorf("%w: no picture was kept", domain.ErrUnsupportedClipboardFormat)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read the picture: %v", domain.ErrUnsupportedClipboardFormat, err)
+	}
+	return data, nil
+}
+
+// DeleteImage forgets the picture kept under ref. A picture that is already
+// gone is not an error: dropping an entry twice is not a failure.
+func (s *Settings) DeleteImage(ctx context.Context, ref string) error {
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+	path, err := s.imagePath(ref)
+	if err != nil {
+		return err
+	}
+	if path == "" {
+		return nil
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("settings: delete the picture: %w", err)
+	}
+	return nil
+}
+
+// imagePath is where the picture with this ref is kept. An empty path means
+// there is no image directory to keep one in.
+//
+// The ref is a file name, and a file can be edited, so it is checked rather
+// than trusted: a reference with a separator or a leading dot in it would name
+// a file outside the directory. The colon in "sha256:…" becomes a dash, which
+// is the one character a Windows file name cannot hold.
+func (s *Settings) imagePath(ref string) (string, error) {
+	if strings.TrimSpace(s.HistoryPath) == "" {
+		return "", nil
+	}
+	if ref == "" || len(ref) > 200 || strings.ContainsAny(ref, `/\`) ||
+		strings.HasPrefix(ref, ".") {
+		return "", fmt.Errorf("%w: %q is not a picture reference", domain.ErrInvalidArgument, ref)
+	}
+	name := strings.ReplaceAll(ref, ":", "-") + ".png"
+	return filepath.Join(filepath.Dir(s.HistoryPath), imageDirName, name), nil
 }
 
 // panelChoices copies the panels the user chose about, so that a caller can

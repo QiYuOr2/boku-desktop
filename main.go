@@ -44,6 +44,15 @@ func init() {
 }
 
 func main() {
+	// One process, one tray icon. A second launch hands its command line to
+	// the instance that is already running and leaves; that instance brings
+	// its quick window forward instead (docs/desktop.md §2). The lock is
+	// taken before anything is opened, so a second launch costs no more than
+	// the hand-over itself.
+	if !mygo.App.RequestSingleInstanceLock() {
+		return
+	}
+
 	userData, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil {
 		log.Fatalf("boku: locate the user data directory: %v", err)
@@ -79,6 +88,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	// A launch that reached the running instance is the user asking for the
+	// window, not for a second application: the tray is already there, so
+	// the handler only brings the quick window forward.
+	mygo.App.OnSecondInstance(func([]string, string) {
+		state.Activate()
+	})
 
 	// macOS: the tray icon is the entry point, so keep the app out of the
 	// Dock. Windows and Linux ignore this.

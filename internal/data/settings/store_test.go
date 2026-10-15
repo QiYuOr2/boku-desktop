@@ -634,3 +634,162 @@ func TestWriteLeavesNoTemporaryFile(t *testing.T) {
 		}
 	}
 }
+
+// A copied picture is kept beside the history, under the hash of its bytes, and
+// comes back byte for byte: it is the only copy left once the clipboard moves
+// on, and a click on the entry is what asks for it.
+func TestAPictureIsKeptBesideTheHistory(t *testing.T) {
+	store, _, historyPath := newStore(t)
+	ctx := context.Background()
+	png := []byte("89504e470d0a1a0a-a-screenshot")
+
+	if err := store.SaveImage(ctx, "sha256:abc123", png); err != nil {
+		t.Fatalf("SaveImage failed: %v", err)
+	}
+	kept, err := store.LoadImage(ctx, "sha256:abc123")
+	if err != nil {
+		t.Fatalf("LoadImage failed: %v", err)
+	}
+	if !reflect.DeepEqual(kept, png) {
+		t.Errorf("the picture came back as %q, want what was kept", kept)
+	}
+
+	// It is a file of its own, named after the reference: a colon is the one
+	// character a Windows file name cannot hold.
+	dir := filepath.Join(filepath.Dir(historyPath), imageDirName)
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("the picture was not kept in its own directory: %v", err)
+	}
+	if len(files) != 1 || files[0].Name() != "sha256-abc123.png" {
+		t.Errorf("the image directory holds %v", fileNames(files))
+	}
+
+	// Saving the same picture twice is not a second file.
+	if err := store.SaveImage(ctx, "sha256:abc123", png); err != nil {
+		t.Fatalf("SaveImage failed the second time: %v", err)
+	}
+	files, err = os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read the directory again: %v", err)
+	}
+	if len(files) != 1 {
+		t.Errorf("the same picture was kept %d times", len(files))
+	}
+
+	if err := store.DeleteImage(ctx, "sha256:abc123"); err != nil {
+		t.Fatalf("DeleteImage failed: %v", err)
+	}
+	if _, err := store.LoadImage(ctx, "sha256:abc123"); err == nil {
+		t.Error("a deleted picture was read back")
+	}
+	// Deleting it twice is not a failure: an entry can be dropped once.
+	if err := store.DeleteImage(ctx, "sha256:abc123"); err != nil {
+		t.Errorf("deleting a picture that is already gone: %v", err)
+	}
+}
+
+// A reference is a file name, and a file can be edited: one that would name a
+// file outside the image directory is refused rather than joined.
+func TestAPictureReferenceCannotLeaveItsDirectory(t *testing.T) {
+	store, _, _ := newStore(t)
+	ctx := context.Background()
+	for _, ref := range []string{"", "..", "../secrets", `..\secrets`, "/etc/passwd", ".hidden", strings.Repeat("a", 201)} {
+		if err := store.SaveImage(ctx, ref, []byte("x")); err == nil {
+			t.Errorf("a picture was kept under the reference %q", ref)
+		}
+		if _, err := store.LoadImage(ctx, ref); err == nil {
+			t.Errorf("a picture was read under the reference %q", ref)
+		}
+	}
+	if err := store.SaveImage(ctx, "sha256:abc", nil); err == nil {
+		t.Error("a picture with no bytes was kept")
+	}
+}
+
+// A picture is dropped with its entry, which is also how the store stops
+// growing: an image directory that only grows is a directory of screenshots
+// nobody will see again.
+func TestDroppedEntriesTakeTheirPicturesWithThem(t *testing.T) {
+	store, _, historyPath := newStore(t)
+	dir := filepath.Join(filepath.Dir(historyPath), imageDirName)
+	if err := store.SaveImage(context.Background(), "sha256:one", []byte("a")); err != nil {
+		t.Fatalf("SaveImage failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sha256-one.png")); err != nil {
+		t.Fatalf("the picture was not written: %v", err)
+	}
+	if err := store.DeleteImage(context.Background(), "sha256:one"); err != nil {
+		t.Fatalf("DeleteImage failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sha256-one.png")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the picture is still there: %v", err)
+	}
+}
+
+// A store with no history path keeps no pictures: there is nowhere to keep
+// them, and a test or an assembly without a user directory still runs.
+func TestAPictureIsNotKeptWithoutAHistoryPath(t *testing.T) {
+	store, err := New(filepath.Join(t.TempDir(), "settings.json"), "")
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	ctx := context.Background()
+	if err := store.SaveImage(ctx, "sha256:abc", []byte("x")); err != nil {
+		t.Fatalf("SaveImage failed: %v", err)
+	}
+	if _, err := store.LoadImage(ctx, "sha256:abc"); err == nil {
+		t.Error("a picture came back from a store that keeps none")
+	}
+	if err := store.DeleteImage(ctx, "sha256:abc"); err != nil {
+		t.Errorf("DeleteImage failed: %v", err)
+	}
+}
+
+// A picture reference survives the history file: it is a short name, and the
+// bytes are beside it.
+func TestAPictureReferenceSurvivesTheHistoryFile(t *testing.T) {
+	store, _, historyPath := newStore(t)
+	ctx := context.Background()
+	entry := domain.ClipboardEntry{
+		ID: "one", Content: "[图片]", Display: "[图片]", Kind: domain.ClipKindImage,
+		ContentHash: "sha256:abc", ImageBytes: 4, ImageRef: "sha256:abcdef",
+		CopiedAt: time.Now().UTC(), CreatedAt: time.Now().UTC(),
+	}
+	if err := store.SaveEntries(ctx, []domain.ClipboardEntry{entry}); err != nil {
+		t.Fatalf("SaveEntries failed: %v", err)
+	}
+	data, err := os.ReadFile(historyPath)
+	if err != nil {
+		t.Fatalf("read the history file: %v", err)
+	}
+	if !strings.Contains(string(data), `"imageRef": "sha256:abcdef"`) {
+		t.Errorf("the history file does not name the picture: %s", data)
+	}
+	// No bytes in the history file itself: a screenshot is megabytes and this
+	// file is written whole on every copy.
+	if strings.Contains(string(data), "image\":") {
+		t.Errorf("the history file holds image bytes: %s", data)
+	}
+
+	reloaded, err := New(filepath.Join(filepath.Dir(historyPath), "settings.json"), historyPath)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	entries, err := reloaded.LoadEntries(ctx)
+	if err != nil {
+		t.Fatalf("LoadEntries failed: %v", err)
+	}
+	if len(entries) != 1 || entries[0].ImageRef != "sha256:abcdef" {
+		t.Errorf("the reference did not survive the file: %+v", entries)
+	}
+}
+
+// fileNames is what a directory listing holds, for a test's message.
+func fileNames(entries []os.DirEntry) []string {
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names
+}

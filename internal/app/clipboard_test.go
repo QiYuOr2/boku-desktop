@@ -577,3 +577,12 @@ func (failingEntryStore) LoadEntries(context.Context) ([]domain.ClipboardEntry, 
 }
 
 func (failingEntryStore) SaveEntries(context.Context, []domain.ClipboardEntry) error { return nil }
+
+// The pictures beside the history are not what this fake fails at.
+func (failingEntryStore) SaveImage(context.Context, string, []byte) error { return nil }
+
+func (failingEntryStore) LoadImage(context.Context, string) ([]byte, error) {
+	return nil, domain.ErrUnsupportedClipboardFormat
+}
+
+func (failingEntryStore) DeleteImage(context.Context, string) error { return nil }

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"boku/internal/domain"
+	"boku/internal/tools"
 )
 
 // Clock is where the application reads the time, so a test can decide it.
@@ -92,6 +93,7 @@ func (w *Watcher) poll(ctx context.Context, at time.Time) {
 	if !reading.Valid() {
 		return
 	}
+	reading.ImageRef = imageRef(reading)
 	if !w.started {
 		w.started = true
 		w.last = &reading
@@ -103,6 +105,22 @@ func (w *Watcher) poll(ctx context.Context, at time.Time) {
 	}
 	w.last = &reading
 	w.emit(reading)
+}
+
+// imageRef is the identity of the bitmap in a reading: the hash of its bytes,
+// which is what tells two screenshots of the same size apart — comparing sizes
+// alone made the second one look like the first and it was never recorded — and
+// what the history keeps the picture under.
+//
+// It is computed here rather than in the device because a digest is a storage
+// decision: the device reads what the platform has, and this is where the
+// application's own names for things are made. It costs one hash per poll while
+// a picture is on the clipboard.
+func imageRef(reading domain.ClipContent) string {
+	if len(reading.Image) == 0 {
+		return ""
+	}
+	return tools.ClipImageRef(reading.Image)
 }
 
 func (w *Watcher) emit(reading domain.ClipContent) {

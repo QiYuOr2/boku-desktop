@@ -49,10 +49,18 @@ type ClipContent struct {
 	// HasImage is set when an image is on the clipboard.
 	HasImage bool
 	// ImageBytes is how large the bitmap on the clipboard is, when one was
-	// read. The bytes themselves are not kept: the application records that
-	// a picture was copied and how big it was, and copies back the file
-	// when the platform also offered one.
+	// read.
 	ImageBytes int
+	// Image is the bitmap itself, as PNG bytes, up to MaxClipImageBytes. It
+	// is kept — rather than only measured, which is what this did until
+	// 2026-10-15 — because a picture has to be able to go back where it came
+	// from: a click on an image in the history puts it there, and the
+	// selection tool borrows the clipboard and gives it back.
+	Image []byte
+	// ImageRef identifies the bitmap: the hash of the bytes above, which is
+	// what the history stores and compares. Two screenshots of the same
+	// size are two pictures, and only the hash can say so.
+	ImageRef string
 	// HTML is the rich-text flavour of the copy, when the platform has one.
 	// The application keeps no markup: it is read for the text it shows.
 	HTML string
@@ -76,13 +84,24 @@ func (c ClipContent) WithObservation(note string) ClipContent {
 func (c ClipContent) Valid() bool { return c.Kind.Valid() }
 
 // Unchanged reports whether two readings are the same content, which is what
-// keeps the poll from recording the same copy twice. A bitmap is compared by
-// its size: a screenshot is the same screenshot while nobody takes another
-// one.
+// keeps the poll from recording the same copy twice.
+//
+// A bitmap is compared by the hash of its bytes when both readings carry one:
+// comparing the size alone — which is what this did until 2026-10-15 — made
+// two different screenshots of the same size look like one picture, so the
+// second was never recorded and clicking the first put the wrong one back.
+// Readings that carry no hash (a test's, or a picture whose bytes could not be
+// read) fall back to the size.
 func (c ClipContent) Unchanged(other ClipContent) bool {
 	if c.Kind != other.Kind || c.HasImage != other.HasImage ||
-		c.Display != other.Display || c.Text != other.Text ||
-		c.ImageBytes != other.ImageBytes {
+		c.Display != other.Display || c.Text != other.Text {
+		return false
+	}
+	if c.ImageRef != "" || other.ImageRef != "" {
+		if c.ImageRef != other.ImageRef {
+			return false
+		}
+	} else if c.ImageBytes != other.ImageBytes {
 		return false
 	}
 	if len(c.Files) != len(other.Files) {
@@ -110,9 +129,13 @@ type ClipRecord struct {
 	// Files are the paths the copy holds, when it is a file list.
 	Files []string
 	// ImageBytes is the size of the bitmap the copy held, when the platform
-	// offered one. The bytes are not kept; the size says that there was a
-	// picture, and how large it was.
+	// offered one.
 	ImageBytes int
+	// ImageRef identifies that bitmap: the hash of its bytes, which is what
+	// a click on the entry loads from the image store to put the picture
+	// back. It is empty when the copy held no picture, or when its bytes
+	// could not be read.
+	ImageRef string
 	// Note is what the reading noticed about itself, for the interface to
 	// show: something it could not read, or something it had to make do
 	// without. It is empty when the reading was complete.
@@ -136,8 +159,13 @@ type ClipboardEntry struct {
 	// pastes the files.
 	Files []string
 	// ImageBytes is the size of the bitmap the copy held, when an image was
-	// on the clipboard and was read: the bytes are not kept.
+	// on the clipboard and was read.
 	ImageBytes int
+	// ImageRef is the picture this copy holds, kept in the image store
+	// rather than in the history file: a click on the entry loads it and
+	// puts the picture back on the clipboard. Empty when the copy held no
+	// picture, or when its bytes could not be read.
+	ImageRef string
 	// Note is what the reading noticed about itself, for the interface to
 	// show. It is empty when the reading was complete.
 	Note string
@@ -544,6 +572,14 @@ type ToolStore interface {
 type ClipboardStore interface {
 	LoadEntries(ctx context.Context) ([]ClipboardEntry, error)
 	SaveEntries(ctx context.Context, entries []ClipboardEntry) error
+	// SaveImage keeps the bytes of a copied picture under ref, so that a
+	// click on its entry can put the picture back. Saving the same ref twice
+	// is not an error and not a second copy.
+	SaveImage(ctx context.Context, ref string, png []byte) error
+	// LoadImage returns what SaveImage kept.
+	LoadImage(ctx context.Context, ref string) ([]byte, error)
+	// DeleteImage forgets it, which is what dropping its entry does.
+	DeleteImage(ctx context.Context, ref string) error
 }
 
 // ClipboardDevice is the platform clipboard. Read runs on the thread the
@@ -559,6 +595,10 @@ type ClipboardDevice interface {
 	// recorded copy of files should do is copy the files again, not the
 	// text of their paths.
 	WriteFiles(ctx context.Context, paths []string) error
+	// WriteImage puts a bitmap back on the clipboard, as the PNG bytes it
+	// was read as. A click on an image in the history is what uses it, and
+	// so is the selection tool putting back what it borrowed.
+	WriteImage(ctx context.Context, png []byte) error
 }
 
 // ErrClipboardChanged reports content that changed while it was being read,

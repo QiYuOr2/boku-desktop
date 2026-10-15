@@ -28,6 +28,16 @@ func (s *slowStore) LoadEntries(context.Context) ([]domain.ClipboardEntry, error
 	return nil, nil
 }
 
+// What this fake is about is the history write; the pictures beside it are not
+// stored, which is what a store with nowhere to put one does.
+func (s *slowStore) SaveImage(context.Context, string, []byte) error { return nil }
+
+func (s *slowStore) LoadImage(context.Context, string) ([]byte, error) {
+	return nil, domain.ErrUnsupportedClipboardFormat
+}
+
+func (s *slowStore) DeleteImage(context.Context, string) error { return nil }
+
 func (s *slowStore) SaveEntries(_ context.Context, entries []domain.ClipboardEntry) error {
 	time.Sleep(s.delay)
 	select {
@@ -137,6 +147,16 @@ type countingStore struct {
 func (s *countingStore) LoadEntries(context.Context) ([]domain.ClipboardEntry, error) {
 	return nil, nil
 }
+
+// This fake counts history writes; the pictures beside the history are not what
+// it is about.
+func (s *countingStore) SaveImage(context.Context, string, []byte) error { return nil }
+
+func (s *countingStore) LoadImage(context.Context, string) ([]byte, error) {
+	return nil, domain.ErrUnsupportedClipboardFormat
+}
+
+func (s *countingStore) DeleteImage(context.Context, string) error { return nil }
 
 func (s *countingStore) SaveEntries(context.Context, []domain.ClipboardEntry) error {
 	if s.mu == nil {

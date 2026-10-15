@@ -17,6 +17,8 @@ type fakeClipboard struct {
 	writes []string
 	// files is what a file list was put back as.
 	files [][]string
+	// images is what a bitmap was put back as.
+	images [][]byte
 }
 
 func (f *fakeClipboard) Read(context.Context) (domain.ClipContent, error) {
@@ -32,6 +34,12 @@ func (f *fakeClipboard) WriteText(_ context.Context, text string) error {
 func (f *fakeClipboard) WriteFiles(_ context.Context, paths []string) error {
 	f.files = append(f.files, paths)
 	f.content = domain.ClipContent{Kind: domain.ClipKindFile, Files: paths, Display: paths[0]}
+	return nil
+}
+
+func (f *fakeClipboard) WriteImage(_ context.Context, png []byte) error {
+	f.images = append(f.images, append([]byte(nil), png...))
+	f.content = domain.ClipContent{Kind: domain.ClipKindImage, HasImage: true, Image: png, ImageBytes: len(png)}
 	return nil
 }
 
@@ -80,11 +88,39 @@ func TestACopyThatChangesNothingIsNoSelection(t *testing.T) {
 	}
 }
 
-// An image on the clipboard is never copied over: this application does not
-// keep image bytes, so the user's screenshot would be gone for a translation
-// that is not worth it.
-func TestAnImageIsNotCopiedOver(t *testing.T) {
-	clipboard := &fakeClipboard{content: domain.ClipContent{Kind: domain.ClipKindImage, ImageBytes: 2048}}
+// A picture on the clipboard is not a reason to refuse to read the selection:
+// it is saved, the copy is made over it, and the picture goes back. This is
+// what the user hit — a screenshot on the clipboard made every selection
+// translation answer "the clipboard holds no text".
+func TestAPictureOnTheClipboardIsPutBack(t *testing.T) {
+	picture := []byte("89504e470d0a1a0a-screenshot")
+	clipboard := &fakeClipboard{content: domain.ClipContent{
+		Kind: domain.ClipKindImage, HasImage: true, Image: picture, ImageBytes: len(picture),
+	}}
+	var sequence uint32 = 3
+	text := readWithACopy(context.Background(), clipboard, nil,
+		func() uint32 { return sequence },
+		func() {
+			clipboard.content = domain.ClipContent{Kind: domain.ClipKindText, Text: "the selection"}
+			sequence++
+		})
+	if text != "the selection" {
+		t.Errorf("read = %q, want the text the application copied over the picture", text)
+	}
+	if len(clipboard.images) != 1 || string(clipboard.images[0]) != string(picture) {
+		t.Errorf("the picture was put back as %q, want the bytes that were there", clipboard.images)
+	}
+	if clipboard.content.Kind != domain.ClipKindImage {
+		t.Errorf("the clipboard holds %q, want the picture back", clipboard.content.Kind)
+	}
+}
+
+// A picture whose bytes could not be read is the one thing still left alone:
+// copying over it would lose it, and this tool cannot put it back.
+func TestAPictureWithoutItsBytesIsNotCopiedOver(t *testing.T) {
+	clipboard := &fakeClipboard{content: domain.ClipContent{
+		Kind: domain.ClipKindImage, HasImage: true, ImageBytes: 4096,
+	}}
 	pressed := false
 	text := readWithACopy(context.Background(), clipboard, nil,
 		func() uint32 { return 3 },
@@ -93,7 +129,7 @@ func TestAnImageIsNotCopiedOver(t *testing.T) {
 		t.Errorf("read = %q, want nothing", text)
 	}
 	if pressed {
-		t.Error("the application was asked to copy over an image")
+		t.Error("the application was asked to copy over a picture that could not be restored")
 	}
 }
 

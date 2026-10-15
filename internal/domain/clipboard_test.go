@@ -23,6 +23,37 @@ func TestClipKindValid(t *testing.T) {
 	}
 }
 
+// A reading is compared with the one before it to decide whether the user
+// copied something new. Two screenshots of the same size are two pictures: the
+// size alone said they were one, so the second was never recorded.
+func TestABitmapIsComparedByItsBytesNotItsSize(t *testing.T) {
+	screenshot := ClipContent{
+		Kind: ClipKindImage, HasImage: true, ImageBytes: 4096, ImageRef: "sha256:one",
+	}
+	another := ClipContent{
+		Kind: ClipKindImage, HasImage: true, ImageBytes: 4096, ImageRef: "sha256:two",
+	}
+	if screenshot.Unchanged(another) {
+		t.Error("two pictures of the same size are the same reading")
+	}
+	same := ClipContent{
+		Kind: ClipKindImage, HasImage: true, ImageBytes: 4096, ImageRef: "sha256:one",
+	}
+	if !screenshot.Unchanged(same) {
+		t.Error("the same picture read twice is not the same reading")
+	}
+
+	// A reading whose bitmap could not be read carries no hash, and falls back
+	// to the size: there is nothing better to compare it by.
+	unread := ClipContent{Kind: ClipKindImage, HasImage: true, ImageBytes: 4096}
+	if screenshot.Unchanged(unread) {
+		t.Error("a picture with a hash is the same as one without")
+	}
+	if !unread.Unchanged(ClipContent{Kind: ClipKindImage, HasImage: true, ImageBytes: 4096}) {
+		t.Error("two unread pictures of the same size are not the same reading")
+	}
+}
+
 // The record range is one of three, and anything else — a file that predates
 // the setting, or a number a person edited in — is the default rather than a
 // reason not to start.

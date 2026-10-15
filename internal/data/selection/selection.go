@@ -15,10 +15,10 @@
 // here rather than hidden because it is the one thing this package does that
 // the user can notice.
 //
-// What is on the clipboard and cannot be put back — an image, whose bytes this
-// application does not keep — is never copied over: a translation is not worth
-// losing it. A copy in a console window is not made either: there the copy
-// combination is a signal, not a copy.
+// What is on the clipboard and cannot be put back — a bitmap whose bytes the
+// platform would not hand over — is never copied over: a translation is not
+// worth losing the user's screenshot. A copy in a console window is not made
+// either: there the copy combination is a signal, not a copy.
 //
 // A system with no such interface at all, an application that answers nothing
 // and a selection of nothing are all ordinary answers: they mean the caller
@@ -119,8 +119,8 @@ func readUntilAnswered(ctx context.Context, read attempt, attempts int, gap time
 // The write counter is what tells "nothing is selected" from "an empty
 // selection": an application with nothing selected answers the copy with
 // nothing, and its counter does not move. The wait is bounded, and so is the
-// damage — an image on the clipboard is left alone rather than copied over,
-// because this application cannot put it back.
+// damage — a clipboard this tool cannot put back is left alone rather than
+// copied over.
 //
 // It is here rather than in the platform file so that the whole of the decision
 // can be tested with a fake clipboard and a fake copy.
@@ -155,10 +155,18 @@ func readWithACopy(ctx context.Context, clipboard domain.ClipboardDevice, before
 }
 
 // putBackable reports whether what is on the clipboard can be put back after a
-// synthetic copy has replaced it. Text and a file list can; an image cannot,
-// because this application does not keep image bytes.
+// synthetic copy has replaced it: text, a file list, and a bitmap whose bytes
+// came with the reading. A bitmap whose bytes could not be read cannot — and
+// nothing may destroy what it cannot restore, which is what the user's
+// screenshot would be.
 func putBackable(content domain.ClipContent) bool {
-	return content.Kind == domain.ClipKindText || content.Kind == domain.ClipKindFile
+	switch content.Kind {
+	case domain.ClipKindText, domain.ClipKindFile:
+		return true
+	case domain.ClipKindImage:
+		return len(content.Image) > 0
+	}
+	return false
 }
 
 // putBack puts the clipboard back the way the copy found it.
@@ -171,7 +179,9 @@ func putBack(ctx context.Context, clipboard domain.ClipboardDevice, saved domain
 	switch saved.Kind {
 	case domain.ClipKindFile:
 		_ = clipboard.WriteFiles(ctx, saved.Files)
-	case domain.ClipKindText:
+	case domain.ClipKindImage:
+		_ = clipboard.WriteImage(ctx, saved.Image)
+	default:
 		_ = clipboard.WriteText(ctx, saved.Text)
 	}
 }

@@ -91,12 +91,12 @@ var (
 
 // The settings window's sidebar marks: what each section of the page is
 // reached by. They are the same 24-unit stroked drawings the rest of the
-// application uses, so they take the color of the line they sit on.
+// application uses, so they take the color of the line they sit on. Every
+// other entry draws the mark its own section already carries
+// (docs/design.md §2.1).
 var (
 	//go:embed key.svg
 	keySVG []byte
-	//go:embed book.svg
-	bookSVG []byte
 	//go:embed info.svg
 	infoSVG []byte
 )
@@ -132,10 +132,6 @@ func Clipboard() []byte { return clipboardSVG }
 // Key returns the mark that heads the key section and its sidebar entry:
 // the drawing of a key the design gives it.
 func Key() []byte { return keySVG }
-
-// Book returns the mark for reading: what the general section's sidebar
-// entry is drawn with.
-func Book() []byte { return bookSVG }
 
 // Info returns the mark of the application itself, drawn beside 关于.
 func Info() []byte { return infoSVG }
