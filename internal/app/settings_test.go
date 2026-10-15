@@ -443,14 +443,18 @@ func TestSettingsSidebarTakesThePageToTheSection(t *testing.T) {
 	want := translate.Y - settingsAnchor
 
 	tt.ClickAt(rects[sectionTranslate].X+2, rects[sectionTranslate].Y+rects[sectionTranslate].H/2)
-	// The page travels: a scroll is a glide rather than a jump. Frames are
-	// run until it stops.
-	for frame := 0; frame < 90; frame++ {
-		before := state.settingsScroll.Y
+	// The page travels: a scroll is a glide rather than a jump. Frames are run
+	// until it stops, and "it stopped" is asked of the scroll rather than read
+	// off two consecutive offsets.
+	//
+	// A glide's step shrinks as it approaches its target, so one frame moving
+	// by nothing is not proof that the page has arrived — the easing can round
+	// a step away while the scroll is still running. Reading the offsets that
+	// way made this test pass or fail depending on where the frames happened
+	// to land, which is not something a test about where the page stops should
+	// depend on.
+	for frame := 0; frame < 240 && state.settingsScroll.Scrolling(); frame++ {
 		tt.Frame()
-		if state.settingsScroll.Y == before {
-			break
-		}
 	}
 
 	if got := state.settingsScroll.Y; got < want-24 || got > want {

@@ -860,6 +860,18 @@ func (s *testToolStore) Save(_ context.Context, settings domain.ToolSettings) er
 	return nil
 }
 
+// Update is the store's read-modify-write, in one critical section.
+func (s *testToolStore) Update(_ context.Context, change func(*domain.ToolSettings) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	settings := s.settings
+	if err := change(&settings); err != nil {
+		return err
+	}
+	s.settings = settings.Normalize()
+	return nil
+}
+
 // withCredential adds the DeepSeek key the panel needs.
 func withCredential(store *testStore) *testStore {
 	store.set(domain.CredentialKey("deepseek", contractdeepseek.APIKeyCredential), "sk-test-0001")

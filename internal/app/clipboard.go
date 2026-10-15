@@ -92,7 +92,7 @@ func (s *State) clipboardHistorySize() int {
 	if s.clipboard == nil {
 		return domain.ClipboardDefaultHistorySize
 	}
-	return s.clipboard.Settings().HistorySize()
+	return s.clipboard.Settings().Clipboard.KeepsHistory()
 }
 
 // clipboardHistory is the recorded copies, newest first, at most the record

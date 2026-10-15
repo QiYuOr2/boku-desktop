@@ -142,10 +142,19 @@ func (t *Translate) Settings() (domain.TranslationSettings, error) {
 }
 
 // SaveSettings changes the configuration through a function, so that every
-// switch is written the same way: read what is there, change one thing, put
-// it back. A switch that cannot be saved is reported, and the settings the
-// application runs on are the ones on disk rather than the ones that were
-// meant to be written.
+// switch is written the same way: read what is there, change one thing, put it
+// back — as one step, through the store's Update.
+//
+// It does not Load and then Save. The file holds every feature's settings, and
+// a value read here and written back would put back whatever another feature
+// changed in between: flipping a translation switch would undo a clipboard
+// switch flipped while this one was reading. Update reads, changes and writes
+// without letting go of the file, so what lands is the translation setting and
+// nothing else.
+//
+// A switch that cannot be saved is reported, and the settings the application
+// runs on are the ones on disk rather than the ones that were meant to be
+// written.
 func (t *Translate) SaveSettings(ctx context.Context, change func(*domain.TranslationSettings)) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -153,14 +162,11 @@ func (t *Translate) SaveSettings(ctx context.Context, change func(*domain.Transl
 	if t.tools == nil {
 		return nil // kept in memory only, which is what a test wants
 	}
-	settings, err := t.tools.Load(ctx)
-	if err != nil {
-		return err
-	}
-	settings = settings.Normalize()
-	change(&settings.Translation)
-	settings.Translation = settings.Translation.Normalize()
-	return t.tools.Save(ctx, settings)
+	return t.tools.Update(ctx, func(current *domain.ToolSettings) error {
+		change(&current.Translation)
+		current.Translation = current.Translation.Normalize()
+		return nil
+	})
 }
 
 // SetEnabled turns the tool on or off.

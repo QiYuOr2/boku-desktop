@@ -80,7 +80,7 @@ func TestClipboardRegionShowsTheCurrentContent(t *testing.T) {
 		device := &testDevice{}
 		device.set(c.reading)
 		state := clipboardState(t, device, &testToolStore{
-			settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+			settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 		})
 
 		// Reading once is what the poll would have done before the frame.
@@ -104,7 +104,7 @@ func TestClipboardRegionIsLabelledByItsMark(t *testing.T) {
 	device := &testDevice{}
 	device.set(domain.ClipContent{Kind: domain.ClipKindText, Text: "copied"})
 	state := clipboardState(t, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	state.clipboard.Read(context.Background())
 
@@ -153,7 +153,7 @@ func closeTo(got, want uint8, tolerance int) bool {
 func TestARowShowsWhatTheReadingNoticed(t *testing.T) {
 	device := &testDevice{}
 	state := clipboardState(t, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	note := "图片没能读出：unsupported clipboard format"
 	device.set(domain.ClipContent{
@@ -235,7 +235,7 @@ func TestEntryLabelIsOneWordAtMost(t *testing.T) {
 func TestHistoryRowLabelsAFileOnce(t *testing.T) {
 	device := &testDevice{}
 	state := clipboardState(t, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	ctx := context.Background()
 	device.set(domain.ClipContent{Kind: domain.ClipKindFile, Files: []string{"/tmp/a.txt"}})
@@ -258,7 +258,7 @@ func TestHistoryRowLabelsAFileOnce(t *testing.T) {
 // with nothing after it would read as a region that failed to load.
 func TestClipboardRegionDrawsNothingBeforeThereIsACopy(t *testing.T) {
 	state := clipboardState(t, &testDevice{}, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	tt := ui.NewTester(state.View, panelWidth, panelHeight)
 	if tt.HasText("历史") {
@@ -281,7 +281,7 @@ func TestClipboardRegionSitsBetweenTheContentAndTheFooter(t *testing.T) {
 	device := &testDevice{}
 	device.set(domain.ClipContent{Kind: domain.ClipKindText, Text: "copied text"})
 	state := clipboardState(t, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	state.clipboard.Read(context.Background())
 	tt := ui.NewTester(state.View, panelWidth, panelHeight)
@@ -334,9 +334,11 @@ func TestHistoryWindowListsAndCopiesBack(t *testing.T) {
 	device := &testDevice{}
 	state := clipboardState(t, device, &testToolStore{
 		settings: domain.ToolSettings{
-			ClipboardRegionVisible: true,
-			ClipboardMonitoring:    true,
-			ClipboardHistorySize:   domain.ClipboardMinHistorySize,
+			Clipboard: domain.ClipboardSettings{
+				RegionVisible: true,
+				Monitoring:    true,
+				HistorySize:   domain.ClipboardMinHistorySize,
+			},
 		},
 	})
 	ctx := context.Background()
@@ -395,7 +397,7 @@ func TestHistoryWindowSaysWhenThereIsNothingYet(t *testing.T) {
 func TestHistoryPageFollowsTheRecordRange(t *testing.T) {
 	device := &testDevice{}
 	state := clipboardState(t, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	ctx := context.Background()
 	total := domain.ClipboardMinHistorySize + 2
@@ -429,7 +431,7 @@ func TestHistoryPageFollowsTheRecordRange(t *testing.T) {
 func TestSettingsChooseTheRecordRange(t *testing.T) {
 	device := &testDevice{}
 	state := clipboardState(t, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	ctx := context.Background()
 	for i := 0; i < domain.ClipboardDefaultHistorySize+2; i++ {
@@ -452,7 +454,7 @@ func TestSettingsChooseTheRecordRange(t *testing.T) {
 	// history and says so.
 	state.setClipboardHistorySize(domain.ClipboardMinHistorySize)
 	tt.Frame()
-	if got := state.clipboard.Settings().HistorySize(); got != domain.ClipboardMinHistorySize {
+	if got := state.clipboard.Settings().Clipboard.KeepsHistory(); got != domain.ClipboardMinHistorySize {
 		t.Fatalf("the record range is %d after the choice, want %d", got, domain.ClipboardMinHistorySize)
 	}
 	if got := len(state.clipboard.History(0)); got != domain.ClipboardMinHistorySize {
@@ -467,8 +469,10 @@ func TestSettingsChooseTheRecordRange(t *testing.T) {
 // on screen and the value in the file are the same question.
 func TestClipboardRangeControlOffersAllThree(t *testing.T) {
 	state := clipboardState(t, nil, &testToolStore{settings: domain.ToolSettings{
-		ClipboardRegionVisible: true,
-		ClipboardMonitoring:    true,
+		Clipboard: domain.ClipboardSettings{
+			RegionVisible: true,
+			Monitoring:    true,
+		},
 	}})
 	texts := settingsText(t, state)
 	for _, want := range []string{"记录范围", "10 条", "30 条", "50 条"} {
@@ -544,7 +548,7 @@ func TestHistoryWindowReportsAnUnreadableHistory(t *testing.T) {
 func TestHistoryIsReachableFromTheQuickWindow(t *testing.T) {
 	device := &testDevice{}
 	state := clipboardState(t, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	device.set(domain.ClipContent{Kind: domain.ClipKindText, Text: "copied"})
 	state.clipboard.Read(t.Context())

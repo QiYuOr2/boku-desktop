@@ -21,7 +21,7 @@ func historyState(t testing.TB, copies ...string) *State {
 	t.Helper()
 	device := &testDevice{}
 	state := clipboardState(t, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	for _, copy := range copies {
 		device.set(domain.ClipContent{Kind: domain.ClipKindText, Text: copy})
@@ -130,7 +130,7 @@ func TestARowDarkensUnderThePointer(t *testing.T) {
 func TestAClickedRowIsMarkedAndThenCleared(t *testing.T) {
 	device := &testDevice{}
 	state := clipboardState(t, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	device.set(domain.ClipContent{Kind: domain.ClipKindText, Text: "a copy that can be clicked"})
 	state.clipboard.Read(context.Background())

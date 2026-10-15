@@ -62,33 +62,36 @@ func TestToolSettingsNormalizesTheRecordRange(t *testing.T) {
 		if !ValidClipboardHistorySize(size) {
 			t.Errorf("%d is one of the record ranges but is not valid", size)
 		}
-		settings := ToolSettings{ClipboardHistorySize: size}
-		if got := settings.Normalize().ClipboardHistorySize; got != size {
+		settings := ToolSettings{Clipboard: ClipboardSettings{HistorySize: size}}
+		if got := settings.Normalize().Clipboard.HistorySize; got != size {
 			t.Errorf("Normalize kept %d as %d, want %d", size, got, size)
 		}
-		if got := settings.HistorySize(); got != size {
-			t.Errorf("HistorySize of %d = %d", size, got)
+		if got := settings.Clipboard.KeepsHistory(); got != size {
+			t.Errorf("KeepsHistory of %d = %d", size, got)
 		}
 	}
 	for _, size := range []int{0, -1, 7, 11, 100, 1000} {
 		if ValidClipboardHistorySize(size) {
 			t.Errorf("%d should not be a record range", size)
 		}
-		settings := ToolSettings{ClipboardHistorySize: size}
-		if got := settings.Normalize().HistorySize(); got != ClipboardDefaultHistorySize {
+		settings := ToolSettings{Clipboard: ClipboardSettings{HistorySize: size}}
+		if got := settings.Normalize().Clipboard.KeepsHistory(); got != ClipboardDefaultHistorySize {
 			t.Errorf("Normalize of the record range %d = %d, want the default %d",
 				size, got, ClipboardDefaultHistorySize)
 		}
-		if got := settings.HistorySize(); got != ClipboardDefaultHistorySize {
-			t.Errorf("HistorySize of %d = %d, want the default %d", size, got, ClipboardDefaultHistorySize)
+		if got := settings.Clipboard.KeepsHistory(); got != ClipboardDefaultHistorySize {
+			t.Errorf("KeepsHistory of %d = %d, want the default %d", size, got, ClipboardDefaultHistorySize)
 		}
 	}
 
 	// Normalizing the range does not disturb the interval, which has its own
 	// rule.
-	settings := ToolSettings{ClipboardPollInterval: time.Second, ClipboardHistorySize: 7}.Normalize()
-	if settings.Interval() != time.Second {
-		t.Errorf("Normalize changed the interval to %s", settings.Interval())
+	settings := ToolSettings{Clipboard: ClipboardSettings{
+		PollInterval: time.Second,
+		HistorySize:  7,
+	}}.Normalize()
+	if settings.Clipboard.Interval() != time.Second {
+		t.Errorf("Normalize changed the interval to %s", settings.Clipboard.Interval())
 	}
 }
 
@@ -97,20 +100,20 @@ func TestToolSettingsNormalizesTheRecordRange(t *testing.T) {
 // — every file written before the switch existed — reads as "on".
 func TestAPanelNobodyChoseAboutIsOn(t *testing.T) {
 	var none ToolSettings
-	if !none.PanelOn("panel-1") {
+	if !none.Panels.On("panel-1") {
 		t.Error("a panel is off in settings that say nothing about it")
 	}
-	chosen := ToolSettings{Panels: map[string]bool{"panel-1": false, "panel-2": true}}
-	if chosen.PanelOn("panel-1") {
+	chosen := ToolSettings{Panels: PanelSettings{Choices: map[string]bool{"panel-1": false, "panel-2": true}}}
+	if chosen.Panels.On("panel-1") {
 		t.Error("a panel the file turns off reports itself on")
 	}
-	if !chosen.PanelOn("panel-2") {
+	if !chosen.Panels.On("panel-2") {
 		t.Error("a panel the file turns on reports itself off")
 	}
-	if !chosen.PanelOn("panel-3") {
+	if !chosen.Panels.On("panel-3") {
 		t.Error("a panel the file does not name is off")
 	}
-	if chosen.PanelOn(" panel-1 ") {
+	if chosen.Panels.On(" panel-1 ") {
 		t.Error("an id with room around it did not find the choice that was stored")
 	}
 }

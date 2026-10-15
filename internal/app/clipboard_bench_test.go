@@ -16,7 +16,7 @@ import (
 func BenchmarkHistoryFrame(b *testing.B) {
 	device := &testDevice{}
 	state := clipboardState(b, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	// A full record range, so the frame is measured at the size the user can
 	// ask for.
@@ -44,7 +44,7 @@ func BenchmarkHistoryFrame(b *testing.B) {
 func BenchmarkFlyoutFrame(b *testing.B) {
 	device := &testDevice{}
 	state := clipboardState(b, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	device.set(domain.ClipContent{Kind: domain.ClipKindText, Text: "https://example.com/some/rather/long/path"})
 	state.clipboard.Read(context.Background())
@@ -60,7 +60,7 @@ func BenchmarkFlyoutFrame(b *testing.B) {
 func BenchmarkHistoryRead(b *testing.B) {
 	device := &testDevice{}
 	state := clipboardState(b, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	ctx := context.Background()
 	for i := 0; i < state.clipboardHistorySize(); i++ {

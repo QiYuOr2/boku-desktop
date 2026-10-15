@@ -271,8 +271,8 @@ func TestAnOptionalPanelCanBeTurnedOff(t *testing.T) {
 		t.Errorf("the switches are %+v, want the optional panel off", choices)
 	}
 	// The choice is in the file, not only in memory.
-	if on, chosen := tools.settings.Panels[optional.Panel.ID]; !chosen || on {
-		t.Errorf("the stored choices are %v, want the panel off", tools.settings.Panels)
+	if on, chosen := tools.settings.Panels.Choices[optional.Panel.ID]; !chosen || on {
+		t.Errorf("the stored choices are %v, want the panel off", tools.settings.Panels.Choices)
 	}
 	if tools.saves != 1 {
 		t.Errorf("the settings were saved %d times, want once", tools.saves)
@@ -333,7 +333,9 @@ func TestTheStoredChoicesAreReadAtAssembly(t *testing.T) {
 	reg.add(provider, fakeAdapter{id: "fake"})
 	def := testDef()
 	def.Optional = true
-	tools := &fakeTools{settings: domain.ToolSettings{Panels: map[string]bool{def.Panel.ID: false}}}
+	tools := &fakeTools{settings: domain.ToolSettings{
+		Panels: domain.PanelSettings{Choices: map[string]bool{def.Panel.ID: false}},
+	}}
 
 	panels, err := NewPanels(reg, newMemoryStore(), tools, []PanelDef{def})
 	if err != nil {

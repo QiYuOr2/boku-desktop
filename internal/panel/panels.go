@@ -281,8 +281,8 @@ func (p *Panels) LoadChoices(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	choices := make(map[string]bool, len(settings.Panels))
-	for id, on := range settings.Panels {
+	choices := make(map[string]bool, len(settings.Panels.Choices))
+	for id, on := range settings.Panels.Choices {
 		choices[id] = on
 	}
 	p.mu.Lock()
@@ -293,11 +293,12 @@ func (p *Panels) LoadChoices(ctx context.Context) error {
 
 // SetPanelOn turns an optional panel on or off and stores the choice.
 //
-// The file is read, changed and written rather than written from a copy of
-// the settings this service holds: every part of the application writes the
-// same file, and a copy would write back the other switches as they were when
-// this service started. A store that cannot be written is reported, and the
-// switch has already taken effect for this run.
+// The change goes through the store's Update rather than a Load and a Save of
+// its own: the file holds every feature's settings, and a value read here and
+// written back would put back whatever another feature changed in between.
+// Update reads, changes and writes as one step, so what it writes is this
+// panel's choice and nothing else. A store that cannot be written is reported,
+// and the switch has already taken effect for this run.
 func (p *Panels) SetPanelOn(ctx context.Context, panelID string, on bool) error {
 	p.mu.Lock()
 	def, known := p.byID[panelID]
@@ -311,18 +312,10 @@ func (p *Panels) SetPanelOn(ctx context.Context, panelID string, on bool) error 
 
 	var failed error
 	if p.tools != nil {
-		settings, err := p.tools.Load(ctx)
-		if err != nil {
-			failed = err
-		} else {
-			if settings.Panels == nil {
-				settings.Panels = make(map[string]bool)
-			}
-			settings.Panels[panelID] = on
-			if err := p.tools.Save(ctx, settings); err != nil {
-				failed = err
-			}
-		}
+		failed = p.tools.Update(ctx, func(settings *domain.ToolSettings) error {
+			settings.Panels = settings.Panels.Set(panelID, on)
+			return nil
+		})
 	}
 
 	p.mu.Lock()

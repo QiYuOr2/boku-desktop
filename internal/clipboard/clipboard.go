@@ -125,7 +125,7 @@ func NewClipboard(opts ClipboardOptions) (*Clipboard, error) {
 	// The interval the two switches were read with is the one the poll and
 	// the loop-suppression window use; an option overrides it, which is
 	// what a test wants.
-	clipboard.interval = clipboard.settings.Interval()
+	clipboard.interval = clipboard.settings.Clipboard.Interval()
 	if opts.PollIn >= domain.ClipboardMinPollInterval {
 		clipboard.interval = opts.PollIn
 	}
@@ -153,7 +153,7 @@ func (c *Clipboard) load(ctx context.Context) error {
 		c.settings = domain.ToolSettings{}.Normalize()
 	}
 	if c.keep <= 0 {
-		c.keep = c.settings.HistorySize()
+		c.keep = c.settings.Clipboard.KeepsHistory()
 	}
 	entries, err := c.store.LoadEntries(ctx)
 	if err != nil {
@@ -184,7 +184,7 @@ func (c *Clipboard) SetEmit(emit func()) {
 // Hiding it stops nothing: what the user turned off is the drawing.
 func (c *Clipboard) SetRegionVisible(ctx context.Context, visible bool) error {
 	c.mu.Lock()
-	c.settings.ClipboardRegionVisible = visible
+	c.settings.Clipboard.RegionVisible = visible
 	settings := c.settings
 	c.mu.Unlock()
 	return c.saveSettings(ctx, settings)
@@ -195,11 +195,11 @@ func (c *Clipboard) SetRegionVisible(ctx context.Context, visible bool) error {
 // read in flight.
 func (c *Clipboard) SetMonitoring(ctx context.Context, enabled bool) error {
 	c.mu.Lock()
-	if c.settings.ClipboardMonitoring == enabled {
+	if c.settings.Clipboard.Monitoring == enabled {
 		c.mu.Unlock()
 		return nil
 	}
-	c.settings.ClipboardMonitoring = enabled
+	c.settings.Clipboard.Monitoring = enabled
 	settings := c.settings
 	c.mu.Unlock()
 	if err := c.saveSettings(ctx, settings); err != nil {
@@ -213,13 +213,25 @@ func (c *Clipboard) SetMonitoring(ctx context.Context, enabled bool) error {
 	return nil
 }
 
-// saveSettings writes the switches, and remembers them even when the file
-// could not be written: the switch the user just flipped has taken effect.
+// saveSettings writes the clipboard's own switches.
+//
+// It goes through the store's Update rather than a Save of the whole settings
+// value: the file holds every feature's settings, and writing back the copy
+// this service holds would put back whatever another feature changed since
+// that copy was read. Update reads, applies the change and writes as one step,
+// touching nothing but the clipboard's four values.
+//
+// It remembers the new switches here as well, even when the file could not be
+// written: the switch the user just flipped has taken effect for this run.
 func (c *Clipboard) saveSettings(ctx context.Context, settings domain.ToolSettings) error {
 	if c.tools == nil {
 		return nil
 	}
-	return c.tools.Save(ctx, settings)
+	wanted := settings.Clipboard
+	return c.tools.Update(ctx, func(current *domain.ToolSettings) error {
+		current.Clipboard = wanted
+		return nil
+	})
 }
 
 // SetHistorySize chooses how many of the most recent copies are kept, and
@@ -235,11 +247,11 @@ func (c *Clipboard) SetHistorySize(ctx context.Context, size int) error {
 		size = domain.ClipboardDefaultHistorySize
 	}
 	c.mu.Lock()
-	if c.settings.ClipboardHistorySize == size {
+	if c.settings.Clipboard.HistorySize == size {
 		c.mu.Unlock()
 		return nil
 	}
-	c.settings.ClipboardHistorySize = size
+	c.settings.Clipboard.HistorySize = size
 	settings := c.settings
 	c.keep = size
 	c.history = c.prune(c.history)
@@ -257,7 +269,7 @@ func (c *Clipboard) SetHistorySize(ctx context.Context, size int) error {
 // Start begins monitoring when the settings say so. main.go calls it once
 // the application is ready.
 func (c *Clipboard) Start(ctx context.Context) {
-	if !c.Settings().ClipboardMonitoring {
+	if !c.Settings().Clipboard.Monitoring {
 		return
 	}
 	c.begin(ctx)
@@ -324,8 +336,7 @@ func (c *Clipboard) stop() {
 // Show reports whether the interface has a reason to read the clipboard: the
 // region is drawn and the content it would draw is being collected.
 func (c *Clipboard) Show() bool {
-	settings := c.Settings()
-	return settings.ClipboardRegionVisible && settings.ClipboardMonitoring
+	return c.Settings().Clipboard.Reads()
 }
 
 // Latest is the most recent reading, and whether there is one.

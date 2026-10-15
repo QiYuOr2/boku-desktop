@@ -116,7 +116,7 @@ func TestRenderScreensForInspection(t *testing.T) {
 	})
 	withClipboard := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
 	withClipboard.clipboard = testClipboard(t, device, &testToolStore{
-		settings: domain.ToolSettings{ClipboardRegionVisible: true, ClipboardMonitoring: true},
+		settings: domain.ToolSettings{Clipboard: domain.ClipboardSettings{RegionVisible: true, Monitoring: true}},
 	})
 	loaded(t, withClipboard)
 	withClipboard.clipboard.Read(context.Background())

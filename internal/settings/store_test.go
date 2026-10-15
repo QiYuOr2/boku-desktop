@@ -44,11 +44,11 @@ func TestLoadWithoutAFileGivesTheDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if settings.ClipboardRegionVisible || settings.ClipboardMonitoring {
+	if settings.Clipboard.RegionVisible || settings.Clipboard.Monitoring {
 		t.Errorf("the defaults enable the clipboard: %+v", settings)
 	}
-	if settings.Interval() != domain.ClipboardDefaultPollInterval {
-		t.Errorf("interval = %s, want %s", settings.Interval(), domain.ClipboardDefaultPollInterval)
+	if settings.Clipboard.Interval() != domain.ClipboardDefaultPollInterval {
+		t.Errorf("interval = %s, want %s", settings.Clipboard.Interval(), domain.ClipboardDefaultPollInterval)
 	}
 }
 
@@ -122,11 +122,13 @@ func TestSaveAndLoadRoundTrip(t *testing.T) {
 	// store normalizes what it reads: a stored setting is never a partly
 	// filled struct.
 	want := domain.ToolSettings{
-		ClipboardRegionVisible: true,
-		ClipboardMonitoring:    true,
-		ClipboardPollInterval:  1500 * time.Millisecond,
-		ClipboardHistorySize:   domain.ClipboardMaxHistorySize,
-		Panels:                 map[string]bool{"0198a1b2-0000-7000-8000-000000000002": false},
+		Clipboard: domain.ClipboardSettings{
+			RegionVisible: true,
+			Monitoring:    true,
+			PollInterval:  1500 * time.Millisecond,
+			HistorySize:   domain.ClipboardMaxHistorySize,
+		},
+		Panels: domain.PanelSettings{Choices: map[string]bool{"0198a1b2-0000-7000-8000-000000000002": false}},
 		Translation: domain.TranslationSettings{
 			Enabled:       true,
 			Provider:      "custom",
@@ -201,7 +203,7 @@ func TestLoadNormalizesTheRecordRange(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load(%s) failed: %v", written, err)
 		}
-		if got := settings.HistorySize(); got != domain.ClipboardDefaultHistorySize {
+		if got := settings.Clipboard.KeepsHistory(); got != domain.ClipboardDefaultHistorySize {
 			t.Errorf("Load(%s) gave the record range %d, want the default %d",
 				written, got, domain.ClipboardDefaultHistorySize)
 		}
@@ -226,10 +228,10 @@ func TestAFileWithoutPanelChoicesTurnsNothingOff(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load(%s) failed: %v", written, err)
 		}
-		if len(settings.Panels) != 0 {
-			t.Errorf("Load(%s) invented the choices %v", written, settings.Panels)
+		if len(settings.Panels.Choices) != 0 {
+			t.Errorf("Load(%s) invented the choices %v", written, settings.Panels.Choices)
 		}
-		if !settings.PanelOn("panel-1") {
+		if !settings.Panels.On("panel-1") {
 			t.Errorf("Load(%s) turned a panel off", written)
 		}
 	}
@@ -246,8 +248,8 @@ func TestLoadNormalizesAndRefusesOtherVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	if settings.Interval() != domain.ClipboardDefaultPollInterval {
-		t.Errorf("interval = %s, want the default after normalization", settings.Interval())
+	if settings.Clipboard.Interval() != domain.ClipboardDefaultPollInterval {
+		t.Errorf("interval = %s, want the default after normalization", settings.Clipboard.Interval())
 	}
 
 	if err := os.WriteFile(path, []byte(`{"version":99,"tools":{}}`), 0o600); err != nil {
@@ -369,8 +371,10 @@ func TestConcurrentWrites(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			settings := domain.ToolSettings{
-				ClipboardRegionVisible: i%2 == 0,
-				ClipboardMonitoring:    i%2 == 1,
+				Clipboard: domain.ClipboardSettings{
+					RegionVisible: i%2 == 0,
+					Monitoring:    i%2 == 1,
+				},
 			}
 			if err := store.Save(context.Background(), settings); err != nil {
 				t.Errorf("Save failed: %v", err)
@@ -384,7 +388,7 @@ func TestConcurrentWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load failed after concurrent writes: %v", err)
 	}
-	if settings.Interval() == 0 {
+	if settings.Clipboard.Interval() == 0 {
 		t.Error("the settings file did not survive the writes")
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -396,7 +400,9 @@ func TestConcurrentWrites(t *testing.T) {
 // holds no half-written document.
 func TestWriteLeavesNoTemporaryFile(t *testing.T) {
 	store, path := newSettings(t)
-	if err := store.Save(context.Background(), domain.ToolSettings{ClipboardRegionVisible: true}); err != nil {
+	if err := store.Save(context.Background(), domain.ToolSettings{
+		Clipboard: domain.ClipboardSettings{RegionVisible: true},
+	}); err != nil {
 		t.Fatalf("Save failed: %v", err)
 	}
 	entries, err := os.ReadDir(filepath.Dir(path))
@@ -407,5 +413,95 @@ func TestWriteLeavesNoTemporaryFile(t *testing.T) {
 		if strings.HasPrefix(entry.Name(), ".atomic-") {
 			t.Errorf("a temporary file was left behind: %s", entry.Name())
 		}
+	}
+}
+
+// A change made through Update cannot be lost by another one.
+//
+// The file holds every feature's settings, and each feature changes only its
+// own: the clipboard flips its switch, the panels flip one of theirs. Both go
+// through Update, which reads, changes and writes as one step. Done as a Load
+// and a Save instead, the two would read the same file, each write back what
+// it read plus its own change, and the second write would undo the first —
+// which is the bug this test exists to keep out.
+func TestTwoFeaturesChangingTheirOwnSettingsBothSurvive(t *testing.T) {
+	store, _ := newSettings(t)
+	const panelID = "0198a1b2-0000-7000-8000-000000000002"
+
+	// Many rounds: a lost update is a race, and one run of it is not evidence.
+	for round := 0; round < 50; round++ {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			err := store.Update(context.Background(), func(s *domain.ToolSettings) error {
+				s.Clipboard.Monitoring = true
+				return nil
+			})
+			if err != nil {
+				t.Errorf("the clipboard's change failed: %v", err)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			err := store.Update(context.Background(), func(s *domain.ToolSettings) error {
+				s.Panels = s.Panels.Set(panelID, false)
+				return nil
+			})
+			if err != nil {
+				t.Errorf("the panel's change failed: %v", err)
+			}
+		}()
+		wg.Wait()
+
+		got, err := store.Load(context.Background())
+		if err != nil {
+			t.Fatalf("Load failed: %v", err)
+		}
+		if !got.Clipboard.Monitoring {
+			t.Fatalf("round %d lost the clipboard's switch: %+v", round, got)
+		}
+		if got.Panels.On(panelID) {
+			t.Fatalf("round %d lost the panel's choice: %+v", round, got)
+		}
+
+		// Reset for the next round, through the same one-step write.
+		if err := store.Update(context.Background(), func(s *domain.ToolSettings) error {
+			s.Clipboard.Monitoring = false
+			s.Panels = domain.PanelSettings{}
+			return nil
+		}); err != nil {
+			t.Fatalf("resetting failed: %v", err)
+		}
+	}
+}
+
+// A change that fails leaves the file as it was.
+func TestUpdateLeavesTheFileAloneWhenTheChangeFails(t *testing.T) {
+	store, path := newSettings(t)
+	if err := store.Update(context.Background(), func(s *domain.ToolSettings) error {
+		s.Clipboard.Monitoring = true
+		return nil
+	}); err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the settings file: %v", err)
+	}
+
+	wanted := errors.New("the change refused")
+	if err := store.Update(context.Background(), func(s *domain.ToolSettings) error {
+		s.Clipboard.RegionVisible = true
+		return wanted
+	}); !errors.Is(err, wanted) {
+		t.Fatalf("Update = %v, want the change's own error", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the settings file again: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Error("a change that failed still wrote the file")
 	}
 }

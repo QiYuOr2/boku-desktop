@@ -36,6 +36,23 @@ func (f *fakeTools) Save(_ context.Context, settings domain.ToolSettings) error 
 	return nil
 }
 
+// Update is the store's read-modify-write, in one critical section: it is what
+// a feature uses to change a setting without overwriting anybody else's.
+func (f *fakeTools) Update(_ context.Context, change func(*domain.ToolSettings) error) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	settings := f.settings
+	if err := change(&settings); err != nil {
+		return err
+	}
+	f.saves++
+	if f.err != nil {
+		return f.err
+	}
+	f.settings = settings.Normalize()
+	return nil
+}
+
 // memoryStore is a domain.SecretStore in memory: these tests do not depend on
 // the file store, and a panel that needs a credential is handed one directly.
 type memoryStore struct {

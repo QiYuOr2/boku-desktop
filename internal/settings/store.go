@@ -124,10 +124,53 @@ func New(path string) (*Store, error) {
 }
 
 // Load reads the settings, and returns the defaults when there is no file.
+//
+// A caller that means to change something should use Update instead: reading
+// here and writing with Save is two steps, and a change made between them is
+// lost.
 func (s *Store) Load(ctx context.Context) (domain.ToolSettings, error) {
 	if err := kit.ContextErr(ctx); err != nil {
 		return domain.ToolSettings{}, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.read()
+}
+
+// Update reads the settings, lets change modify them, and writes the result —
+// all under one lock, so that a change made while another one is in flight
+// cannot be lost.
+//
+// This is the only way the application changes a setting it already has. A
+// caller that reads with Load, changes what it read and writes it back with
+// Save is doing the same thing in three steps, and two such callers overwrite
+// each other: both read the file as it was, both write back what they read
+// plus their own change, and the second write undoes the first. Keeping the
+// three steps in one critical section is what makes that impossible, and it is
+// why Save is not enough on its own for a change to existing settings.
+//
+// A missing file is not an error: change is handed the defaults.
+func (s *Store) Update(ctx context.Context, change func(*domain.ToolSettings) error) error {
+	if err := kit.ContextErr(ctx); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	settings, err := s.read()
+	if err != nil {
+		return err
+	}
+	if err := change(&settings); err != nil {
+		return err
+	}
+	return s.write(settings.Normalize())
+}
+
+// read returns the settings on disk, or the defaults when there is no file.
+//
+// It is the body of Load without the locking: the lock is taken by whoever
+// calls it, so that a read and the write that follows it are one step.
+func (s *Store) read() (domain.ToolSettings, error) {
 	data, err := os.ReadFile(s.Path)
 	if errors.Is(err, os.ErrNotExist) {
 		return defaultTools(), nil
@@ -172,41 +215,48 @@ func (s *Store) Load(ctx context.Context) (domain.ToolSettings, error) {
 	if doc.Tools.TranslateLoanwordGloss != nil {
 		translation.LoanwordGloss = *doc.Tools.TranslateLoanwordGloss
 	}
-	settings := domain.ToolSettings{
-		ClipboardRegionVisible: doc.Tools.ClipboardRegionVisible,
-		ClipboardMonitoring:    doc.Tools.ClipboardMonitoring,
-		ClipboardPollInterval:  time.Duration(doc.Tools.ClipboardPollIntervalMs) * time.Millisecond,
-		ClipboardHistorySize:   doc.Tools.ClipboardHistorySize,
-		Panels:                 panelChoices(doc.Tools.Panels),
-		Translation:            translation,
-	}.Normalize()
-	s.mu.Lock()
-	s.settings, s.loaded = settings, true
-	s.mu.Unlock()
-	return settings, nil
+	return domain.ToolSettings{
+		Clipboard: domain.ClipboardSettings{
+			RegionVisible: doc.Tools.ClipboardRegionVisible,
+			Monitoring:    doc.Tools.ClipboardMonitoring,
+			PollInterval:  time.Duration(doc.Tools.ClipboardPollIntervalMs) * time.Millisecond,
+			HistorySize:   doc.Tools.ClipboardHistorySize,
+		},
+		Panels:      domain.PanelSettings{Choices: panelChoices(doc.Tools.Panels)},
+		Translation: translation,
+	}.Normalize(), nil
 }
 
-// Save writes the settings.
+// Save writes the settings whole.
 //
-// The write happens under the lock: two writes to one file, through two
-// temporary files and two renames, are exactly what the file system refuses
-// to interleave, and the file is a few hundred bytes.
+// A caller that means to change one thing should use Update instead. Save
+// replaces the file with what it was given, so a value this build read earlier
+// and put back here is a value that overwrites whatever was written in
+// between.
 func (s *Store) Save(ctx context.Context, settings domain.ToolSettings) error {
 	if err := kit.ContextErr(ctx); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	translation := settings.Translation.Normalize()
+	return s.write(settings)
+}
+
+// write puts the settings on disk. The caller holds the lock: a write is the
+// second half of a read-modify-write, and is never done on its own by a caller
+// that meant to change something.
+func (s *Store) write(settings domain.ToolSettings) error {
+	settings = settings.Normalize()
+	translation := settings.Translation
 	enabled, furigana, gloss := translation.Enabled, translation.Furigana, translation.LoanwordGloss
 	doc := toolDocument{
 		Version: fileVersion,
 		Tools: tool{
-			ClipboardRegionVisible:  settings.ClipboardRegionVisible,
-			ClipboardMonitoring:     settings.ClipboardMonitoring,
-			ClipboardPollIntervalMs: settings.Interval().Milliseconds(),
-			ClipboardHistorySize:    settings.HistorySize(),
-			Panels:                  panelChoices(settings.Panels),
+			ClipboardRegionVisible:  settings.Clipboard.RegionVisible,
+			ClipboardMonitoring:     settings.Clipboard.Monitoring,
+			ClipboardPollIntervalMs: settings.Clipboard.Interval().Milliseconds(),
+			ClipboardHistorySize:    settings.Clipboard.KeepsHistory(),
+			Panels:                  panelChoices(settings.Panels.Choices),
 
 			TranslateEnabled:       &enabled,
 			TranslateAccelerator:   translation.AcceleratorOr(),

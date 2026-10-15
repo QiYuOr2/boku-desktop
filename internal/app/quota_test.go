@@ -234,8 +234,8 @@ func TestThePanelSwitchTakesTheBlockAway(t *testing.T) {
 		t.Errorf("the switch said nothing about what happened: %q", settingsText(t, state))
 	}
 	// The choice is in the file, so the next launch starts without the panel.
-	if on, chosen := tools.settings.Panels[codexdomain.PanelID]; !chosen || on {
-		t.Errorf("the stored choices are %v, want the panel off", tools.settings.Panels)
+	if on, chosen := tools.settings.Panels.Choices[codexdomain.PanelID]; !chosen || on {
+		t.Errorf("the stored choices are %v, want the panel off", tools.settings.Panels.Choices)
 	}
 
 	// Back on: it is drawn again.

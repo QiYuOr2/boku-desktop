@@ -1072,12 +1072,12 @@ func (s *State) clipboardSection(c *ui.Context, head *ui.Handle) {
 			stacked(c, float32(12), func() {
 				notice(c, notePlain, "剪贴板内容可能包含密码、验证码与私人对话；默认不读取。")
 
-				monitor := settings.ClipboardMonitoring
+				monitor := settings.Clipboard.Monitoring
 				ui.Checkbox(c, &monitor, "监听剪贴板（每 "+intervalLabel(settings)+" 读取一次）").
 					FontSize(sizeBody).
 					OnClick(func() { s.setClipboardMonitoring(monitor) })
 
-				visible := settings.ClipboardRegionVisible
+				visible := settings.Clipboard.RegionVisible
 				ui.Checkbox(c, &visible, "在快捷窗口底部显示剪贴板内容").
 					FontSize(sizeBody).
 					OnClick(func() { s.setClipboardRegionVisible(visible) })
@@ -1089,7 +1089,7 @@ func (s *State) clipboardSection(c *ui.Context, head *ui.Handle) {
 				sizes := domain.ClipboardHistorySizes()
 				selected := 0
 				for index, size := range sizes {
-					if size == settings.HistorySize() {
+					if size == settings.Clipboard.KeepsHistory() {
 						selected = index
 					}
 				}
@@ -1102,9 +1102,9 @@ func (s *State) clipboardSection(c *ui.Context, head *ui.Handle) {
 							s.setClipboardHistorySize(sizes[selected])
 						}
 					})
-					notice(c, notePlain, "只保留最近 "+strconv.Itoa(settings.HistorySize())+
+					notice(c, notePlain, "只保留最近 "+strconv.Itoa(settings.Clipboard.KeepsHistory())+
 						" 条；缩短范围会立刻丢弃更早的记录。")
-					if !settings.ClipboardMonitoring {
+					if !settings.Clipboard.Monitoring {
 						notice(c, notePlain, "关闭监听后不再读取剪贴板，历史里已有的记录仍然保留。")
 					}
 				})
@@ -1255,7 +1255,7 @@ func aboutLine(c *ui.Context, label, value string) {
 
 // intervalLabel names the poll interval the way the switch reads.
 func intervalLabel(settings domain.ToolSettings) string {
-	interval := settings.Interval()
+	interval := settings.Clipboard.Interval()
 	if interval%time.Second == 0 {
 		return strconv.Itoa(int(interval/time.Second)) + " 秒"
 	}
@@ -1270,7 +1270,7 @@ func (s *State) setClipboardMonitoring(enabled bool) {
 	switch {
 	case err != nil:
 		s.clipboardStatus = "开关没能写进设置文件：" + friendlyError(err) + "（本次运行内已生效）"
-	case settings.ClipboardMonitoring:
+	case settings.Clipboard.Monitoring:
 		s.clipboardStatus = "已开始读取剪贴板。"
 	default:
 		s.clipboardStatus = "已停止读取剪贴板。"
@@ -1286,7 +1286,7 @@ func (s *State) setClipboardRegionVisible(visible bool) {
 	switch {
 	case err != nil:
 		s.clipboardStatus = "开关没能写进设置文件：" + friendlyError(err) + "（本次运行内已生效）"
-	case settings.ClipboardRegionVisible:
+	case settings.Clipboard.RegionVisible:
 		s.clipboardStatus = "快捷窗口底部会显示剪贴板内容。"
 	default:
 		s.clipboardStatus = "快捷窗口底部不再显示剪贴板内容。"

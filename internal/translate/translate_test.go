@@ -623,11 +623,11 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 	// The clipboard switches are untouched: the two tools share one file,
 	// and writing one must not lose the other.
-	f.tools.settings.ClipboardMonitoring = true
+	f.tools.settings.Clipboard.Monitoring = true
 	if _, err := f.translate.Settings(); err != nil {
 		t.Fatalf("Settings failed: %v", err)
 	}
-	if !f.tools.settings.ClipboardMonitoring {
+	if !f.tools.settings.Clipboard.Monitoring {
 		t.Error("saving the translation settings lost the clipboard switches")
 	}
 }

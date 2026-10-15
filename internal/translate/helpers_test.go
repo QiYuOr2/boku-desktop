@@ -176,6 +176,22 @@ func (f *fakeTools) Save(_ context.Context, settings domain.ToolSettings) error 
 	return nil
 }
 
+// Update is the store's read-modify-write, in one critical section.
+func (f *fakeTools) Update(_ context.Context, change func(*domain.ToolSettings) error) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	settings := f.settings
+	if err := change(&settings); err != nil {
+		return err
+	}
+	f.saves++
+	if f.err != nil {
+		return f.err
+	}
+	f.settings = settings.Normalize()
+	return nil
+}
+
 // testClock is a clock the test moves by hand.
 type testClock struct {
 	mu  sync.Mutex
