@@ -284,6 +284,35 @@ func TestRedactTextRemovesCredentialFields(t *testing.T) {
 	}
 }
 
+// A log record prints an attribute as `name=value`, and the name is what
+// says whether the value is a credential: a bare key has nothing else in it
+// to recognize.
+func TestRedactField(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"apiKey", "sk-live-1234567890", "redacted"},
+		{"api_key", "sk-live-1234567890", "redacted"},
+		{"key", "abc123", "redacted"},
+		{"token", "eyJhbGciOi", "redacted"},
+		{"authorization", "Bearer abc123", "redacted"},
+		{"panel", "deepseek", "deepseek"},
+		{"note", "call ?key=abc failed", "call ?key=redacted failed"},
+		// A name that is not a credential, with a value that carries no
+		// credential either, is left exactly as it was.
+		{"status", "error", "error"},
+		{"", "left alone", "left alone"},
+		{"apiKey", "", ""},
+	}
+	for _, c := range cases {
+		if got := RedactField(c.name, c.value); got != c.want {
+			t.Errorf("RedactField(%q, %q) = %q, want %q", c.name, c.value, got, c.want)
+		}
+	}
+}
+
 // The snippet that reaches a caller is redacted where it is built, so a
 // status error cannot carry a credential even when the body is JSON.
 func TestBadResponseSnippetIsRedacted(t *testing.T) {

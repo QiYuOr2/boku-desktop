@@ -11,7 +11,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
+	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -22,6 +27,7 @@ import (
 	clipboarddevice "boku/internal/data/clipboard"
 	"boku/internal/data/codexlogin"
 	"boku/internal/data/httpx"
+	"boku/internal/data/logging"
 	"boku/internal/data/provider"
 	providercodex "boku/internal/data/providers/codex"
 	providerdeepseek "boku/internal/data/providers/deepseek"
@@ -58,6 +64,25 @@ func main() {
 		log.Fatalf("boku: locate the user data directory: %v", err)
 	}
 	version := mygo.App.Version()
+
+	// The log comes first, before anything that can fail: it is where a
+	// failure that happens before a window exists is found afterwards.
+	// docs/known-issues asks for facts before a guess, and this is the only
+	// place they are written down.
+	logFile, err := startLogging(userData, version)
+	if err != nil {
+		// A log that cannot be written is one way fewer to diagnose this
+		// application, not a reason for it not to start: the records go to
+		// stderr, which is where they went before there was a file.
+		log.Printf("boku: %v; this run is not being recorded", err)
+	} else {
+		defer func() { _ = logFile.Close() }()
+		// A tray application has no console: a panic that is only printed
+		// is a crash nobody can explain. It is recorded, and then raised
+		// again unchanged — how the process ends is not this defer's
+		// business.
+		defer recordPanics()
+	}
 
 	panels, secrets, clipboard, translate, err := services(userData, version)
 	if err != nil {
@@ -104,6 +129,7 @@ func main() {
 	// listens.
 	mygo.App.OnWindowAllClosed(func() {})
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
+		slog.Info("boku is quitting")
 		// The clipboard poll is a goroutine, and it ends before the
 		// process does: a read that arrives while the backend is going
 		// away is a read nobody asked for.
@@ -121,6 +147,7 @@ func main() {
 		// only if the user turned it on.
 		state.RegisterShortcuts()
 		clipboard.Start(nil)
+		slog.Info("boku is ready")
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
@@ -288,4 +315,53 @@ func applicationVersion(version string) string {
 		return "dev"
 	}
 	return version
+}
+
+// logDirectory is where the daily logs live: a directory of their own under
+// the user data directory, so that the logs are one thing to look at and one
+// thing to delete. BOKU_LOG_DIR moves them, which is what a support run
+// wants — the file is then somewhere that can be handed over whole.
+func logDirectory(userData string) string {
+	if dir := strings.TrimSpace(os.Getenv(logging.DirEnv)); dir != "" {
+		return dir
+	}
+	return filepath.Join(userData, "logs")
+}
+
+// startLogging opens the day's log, makes it the process's own, and records
+// the launch.
+//
+// It is a function of its own, like services, so that a test can check it
+// without a window: the first record of a run is where a failure that happens
+// before anything else exists is found afterwards.
+func startLogging(userData, version string) (*logging.Log, error) {
+	logFile, err := logging.Open(logging.Options{
+		Dir:   logDirectory(userData),
+		Level: logging.LevelFromEnv(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	logFile.Install()
+	slog.Info("boku started",
+		"version", applicationVersion(version),
+		"os", runtime.GOOS,
+		"arch", runtime.GOARCH,
+		"data", userData,
+		"log", logFile.File(),
+		"retentionDays", logging.RetentionDays,
+	)
+	return logFile, nil
+}
+
+// recordPanics writes down why the process is dying, then lets it die the way
+// it was going to: the reason is in the file for the next launch to find, and
+// nothing about how the process ends changes.
+func recordPanics() {
+	reason := recover()
+	if reason == nil {
+		return
+	}
+	slog.Error("boku panicked", "reason", reason, "stack", string(debug.Stack()))
+	panic(reason)
 }

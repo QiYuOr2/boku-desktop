@@ -3,8 +3,14 @@ package main
 import (
 	"context"
 	"errors"
+	"log"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"boku/internal/data/logging"
 	"boku/internal/domain"
 	panelcodex "boku/internal/domain/codex"
 	paneldeepseek "boku/internal/domain/deepseek"
@@ -98,6 +104,122 @@ func TestServicesAssembleThePanels(t *testing.T) {
 	// named, and is not created until something is stored in it.
 	if path := secrets.Path(); path == "" {
 		t.Error("the credential store has no path")
+	}
+}
+
+// The logs live beside the rest of the application's files, in a directory of
+// their own: one thing to look at, and one thing to delete.
+func TestLogDirectoryIsUnderTheUserData(t *testing.T) {
+	t.Setenv(logging.DirEnv, "")
+	userData := t.TempDir()
+	want := filepath.Join(userData, "logs")
+	if got := logDirectory(userData); got != want {
+		t.Errorf("logDirectory(%q) = %q, want %q", userData, got, want)
+	}
+}
+
+// BOKU_LOG_DIR moves the logs, which is what a support run wants: the file is
+// then somewhere that can be handed over whole.
+func TestLogDirectoryFollowsTheEnvironment(t *testing.T) {
+	elsewhere := filepath.Join(t.TempDir(), "somewhere else")
+	t.Setenv(logging.DirEnv, "  "+elsewhere+"  ")
+	if got := logDirectory(t.TempDir()); got != elsewhere {
+		t.Errorf("logDirectory() = %q, want the environment's %q", got, elsewhere)
+	}
+}
+
+// The first record of a run is where a failure that happens before any window
+// exists is found afterwards, so the launch has to open the log, install it
+// process-wide, and say what this run is — under the user data directory the
+// caller named, and nowhere else.
+func TestStartLoggingRecordsTheLaunchUnderTheUserData(t *testing.T) {
+	keepStandardLoggers(t)
+	t.Setenv(logging.DirEnv, "")
+	userData := t.TempDir()
+
+	logFile, err := startLogging(userData, "")
+	if err != nil {
+		t.Fatalf("startLogging: %v", err)
+	}
+	lives := filepath.Join(userData, "logs")
+	if !strings.HasPrefix(logFile.File(), lives+string(filepath.Separator)) {
+		t.Errorf("the log is at %q, want it under %q", logFile.File(), lives)
+	}
+	// Install is what puts the standard logger and slog's default logger
+	// here; both are process-wide, so this is the only place to check it.
+	slog.Info("through the default logger")
+	if err := logFile.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	data, err := os.ReadFile(logFile.File())
+	if err != nil {
+		t.Fatalf("read the log: %v", err)
+	}
+	text := string(data)
+	for _, want := range []string{`msg="boku started"`, "version=dev", "retentionDays=30", "through the default logger"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the log does not have %q in it:\n%s", want, text)
+		}
+	}
+}
+
+// keepStandardLoggers puts the process's loggers back the way they were: a
+// test that installs a log owns the whole process while it runs.
+func keepStandardLoggers(t *testing.T) {
+	t.Helper()
+	previousLogger := slog.Default()
+	previousOut := log.Writer()
+	previousFlags := log.Flags()
+	previousPrefix := log.Prefix()
+	t.Cleanup(func() {
+		slog.SetDefault(previousLogger)
+		log.SetOutput(previousOut)
+		log.SetFlags(previousFlags)
+		log.SetPrefix(previousPrefix)
+	})
+}
+
+// A tray application has no console, so a panic that is only printed is a
+// crash nobody can explain. It is written down — and then raised again, so
+// that how the process ends is unchanged.
+func TestRecordPanicsWritesItDownAndRaisesItAgain(t *testing.T) {
+	keepStandardLoggers(t)
+	dir := t.TempDir()
+	logFile, err := logging.Open(logging.Options{Dir: dir})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	slog.SetDefault(logFile.Logger())
+	t.Cleanup(func() { _ = logFile.Close() })
+
+	func() {
+		defer func() {
+			reason := recover()
+			if reason == nil {
+				t.Fatal("recordPanics swallowed the panic")
+			}
+			if reason != "the tray could not be created" {
+				t.Errorf("the panic came back as %v, want it unchanged", reason)
+			}
+		}()
+		func() {
+			defer recordPanics()
+			panic("the tray could not be created")
+		}()
+	}()
+
+	_ = logFile.Close()
+	data, err := os.ReadFile(logFile.File())
+	if err != nil {
+		t.Fatalf("read the log: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, "level=ERROR") || !strings.Contains(text, "the tray could not be created") {
+		t.Errorf("the panic is not in the log:\n%s", text)
+	}
+	if !strings.Contains(text, "goroutine") {
+		t.Errorf("the log has no stack:\n%s", text)
 	}
 }
 

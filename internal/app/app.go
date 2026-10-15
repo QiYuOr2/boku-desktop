@@ -16,6 +16,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"runtime"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"boku/internal/assets"
+	"boku/internal/domain"
 	"boku/internal/usecase"
 )
 
@@ -617,10 +619,25 @@ func (s *State) refreshPanelAsync(panelID string, force bool) {
 	}
 	go func() {
 		ctx := context.Background()
+		// What a refresh found, and what it failed with, is written down
+		// here: a card can only say a little about a wrong key, a timeout or
+		// a service that answered something else, and it is gone when the
+		// window closes. The log keeps it.
+		var (
+			snapshot domain.Snapshot
+			asked    = true
+			err      error
+		)
 		if force {
-			_, _ = panels.Refresh(ctx, panelID)
+			snapshot, err = panels.Refresh(ctx, panelID)
 		} else {
-			_, _, _ = panels.RefreshIfNeeded(ctx, panelID)
+			snapshot, asked, err = panels.RefreshIfNeeded(ctx, panelID)
+		}
+		switch {
+		case err != nil:
+			slog.Warn("the panel could not be refreshed", "panel", panelID, "error", err)
+		case asked:
+			slog.Info("the panel was refreshed", "panel", panelID, "status", string(snapshot.Status))
 		}
 		if window != nil {
 			// Window.Update runs on the main thread; an empty one only

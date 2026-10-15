@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"strconv"
 	"time"
 
@@ -360,6 +361,12 @@ func (s *State) copyEntry(entry domain.ClipboardEntry) {
 		window.Update(func() {})
 	}
 	s.clipboard.CopyAsync(entry, func(err error) {
+		if err != nil {
+			// The row's mark is taken back, so the window does not claim a
+			// copy that did not happen — and this is the only place that
+			// could say why there was none.
+			slog.Warn("the clipboard entry could not be written back", "error", err)
+		}
 		if err == nil || window == nil {
 			return
 		}

@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"sync"
@@ -278,9 +279,17 @@ func (c *Clipboard) begin(ctx context.Context) {
 	c.cancel, c.done, c.watcher = cancel, done, watcher
 	c.mu.Unlock()
 
+	// A poll that runs for hours is worth one line saying it started: it is
+	// the only record of what the application was doing at the time.
+	slog.Info("clipboard monitoring started", "interval", watcher.Interval.String())
+
 	go func() {
 		defer close(done)
-		_ = watcher.Run(runCtx)
+		if err := watcher.Run(runCtx); err != nil {
+			// The loop only gives up on an error it cannot continue past —
+			// a device that does not exist — and nothing else will say so.
+			slog.Warn("the clipboard poll stopped", "error", err)
+		}
 	}()
 }
 
@@ -297,6 +306,7 @@ func (c *Clipboard) stop() {
 	if done != nil {
 		<-done
 	}
+	slog.Info("clipboard monitoring stopped")
 }
 
 // Show reports whether the interface has a reason to read the clipboard: the
@@ -568,7 +578,12 @@ func (c *Clipboard) forgetImages(before, after []domain.ClipboardEntry) {
 	}
 	go func() {
 		for _, ref := range dropped {
-			_ = c.store.DeleteImage(context.Background(), ref)
+			if err := c.store.DeleteImage(context.Background(), ref); err != nil {
+				// The entry is gone from the history either way: what stays
+				// behind is a file nobody will look at again, so this is a
+				// warning rather than a failure.
+				slog.Warn("a picture of a dropped entry could not be deleted", "error", err)
+			}
 		}
 	}()
 }
@@ -828,7 +843,13 @@ func (c *Clipboard) persist() {
 			entries := append([]domain.ClipboardEntry(nil), c.history...)
 			c.dirty = false
 			c.mu.Unlock()
-			_ = c.store.SaveEntries(context.Background(), entries)
+			// The in-memory history is the working copy and this file is
+			// the only one that survives the process: a write that failed
+			// is the reason this run's copies are gone at the next launch,
+			// and nothing else would say so.
+			if err := c.store.SaveEntries(context.Background(), entries); err != nil {
+				slog.Warn("the clipboard history could not be written", "error", err)
+			}
 		}
 	}()
 }
@@ -852,7 +873,11 @@ func (c *Clipboard) flush() {
 	if store == nil {
 		return
 	}
-	_ = store.SaveEntries(context.Background(), entries)
+	// This is the last write of the run, so a failure here is the one the
+	// user is most likely to notice and the least likely to be told about.
+	if err := store.SaveEntries(context.Background(), entries); err != nil {
+		slog.Warn("the clipboard history could not be written as the application quit", "error", err)
+	}
 }
 
 // Record is the one reading the service keeps and draws: what the clipboard

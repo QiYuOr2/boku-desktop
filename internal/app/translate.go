@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"math"
 	"strings"
 	"time"
@@ -152,6 +153,8 @@ func (s *State) startTranslation(at mygo.Point) {
 	// just selected.
 	settings, err := s.translate.Settings()
 	if err != nil {
+		// The card can only say "看不出来"; the log says which read failed.
+		slog.Warn("the translation settings could not be read", "error", err)
 		s.showTranslation(at, translationState{status: translateFailed, failure: friendlyError(err)})
 		return
 	}
@@ -189,6 +192,9 @@ func (s *State) startTranslation(at mygo.Point) {
 					copiedAt: s.translation.copiedAt,
 				}
 			default:
+				// The card shows the user a shortened reason; the error
+				// itself is the one that says which way it failed.
+				slog.Warn("the translation failed", "error", err)
 				s.translation = translationState{
 					status:  translationFailureStatus(err),
 					result:  usecase.Result{},
@@ -716,6 +722,9 @@ func (s *State) requestAnnotation() {
 					failure:  result.Note,
 				}
 			default:
+				// The readings are a second request, and it can fail on its
+				// own after the translation itself worked.
+				slog.Warn("the readings could not be fetched", "error", err)
 				s.translation.annotation = annotationState{
 					status:  annotationFailed,
 					failure: friendlyError(err),
@@ -912,7 +921,12 @@ func (s *State) copyTranslation(which string) {
 	// The write runs off the main thread, and the mark is taken back when
 	// it is done with: a copy is a platform call, and the frame the click
 	// was in must not wait for it.
-	s.clipboard.CopyAsync(entry, func(error) {
+	s.clipboard.CopyAsync(entry, func(err error) {
+		if err != nil {
+			// A copy the platform refused is invisible in the card: the
+			// mark goes back and nothing is said.
+			slog.Warn("the translation could not be copied to the clipboard", "error", err)
+		}
 		if window == nil {
 			return
 		}

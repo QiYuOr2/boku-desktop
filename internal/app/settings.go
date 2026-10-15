@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"log/slog"
 	"runtime"
 	"strconv"
 	"strings"
@@ -1538,10 +1539,15 @@ func (s *State) testCredential(card translateCard) {
 		// the translator reads its address from the settings: testing what
 		// was typed has to make what was typed the address.
 		if card.id == customTranslatorID {
-			_ = service.SetCustomTranslator(ctx, domain.CustomTranslatorSettings{
+			// The test below reads the address from the settings, so a save
+			// that failed turns into a connection failure somewhere else;
+			// naming it here is what keeps that from being a mystery.
+			if err := service.SetCustomTranslator(ctx, domain.CustomTranslatorSettings{
 				BaseURL:     address,
 				DisplayName: name,
-			})
+			}); err != nil {
+				slog.Warn("the address of the user's own service could not be saved", "error", err)
+			}
 		}
 		err := service.TestTranslator(ctx, card.id, override)
 		window.Update(func() {

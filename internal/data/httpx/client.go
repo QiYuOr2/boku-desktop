@@ -8,7 +8,9 @@
 // that asks only the environment reaches nothing on a machine whose proxy is
 // set in Windows, which is how the Codex quota panel first failed.
 //
-// Providers use it; nothing else in the application does.
+// Providers use it for every request the application makes, and the logger
+// uses the same redaction on its way to disk; nothing else here reaches the
+// network.
 package httpx
 
 import (
@@ -290,4 +292,21 @@ var secretField = regexp.MustCompile(`(?i)("?(?:key|api_key|apikey|api-key|acces
 func RedactText(text string) string {
 	redacted := secretAssignment.ReplaceAllString(text, "$1=redacted")
 	return secretField.ReplaceAllString(redacted, "$1\"redacted\"")
+}
+
+// RedactField removes a credential from a value written under a name, which
+// is how a log record prints an attribute (`apiKey=…`): the value on its own
+// may be a bare credential with nothing in it to recognize, and the name it
+// is logged under is what says what it is.
+//
+// A value under any other name is still scrubbed as text, because a value can
+// carry a `key=…` pair of its own.
+func RedactField(name, value string) string {
+	if value == "" {
+		return value
+	}
+	if sensitiveQueryKey(strings.TrimSpace(name)) {
+		return "redacted"
+	}
+	return RedactText(value)
 }

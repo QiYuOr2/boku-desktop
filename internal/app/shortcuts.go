@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"log/slog"
 	"runtime"
 	"strings"
 
@@ -219,8 +220,12 @@ func (s *State) applyShortcut(accelerator string) {
 	if s.translate != nil {
 		// The binding is remembered, so that the next launch registers the
 		// same one. Failing to write it does not take the working binding
-		// away: what is bound is bound.
-		_ = s.translate.SetAccelerator(backgroundContext(), accelerator)
+		// away: what is bound is bound — but the next launch will come back
+		// with the old one, which is worth saying.
+		if err := s.translate.SetAccelerator(backgroundContext(), accelerator); err != nil {
+			slog.Warn("the shortcut could not be remembered for the next launch",
+				"accelerator", accelerator, "error", err)
+		}
 	}
 	s.Refresh()
 }
