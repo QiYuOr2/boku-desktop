@@ -24,6 +24,11 @@
 
 设置窗口用来配置每个面板与工具的凭据和行为。
 
+<p align="center">
+  <img src="./docs/images/flyout.png" width="300" alt="悬浮窗：DeepSeek 余额与剪贴板">
+  <img src="./docs/images/settings.png" width="560" alt="设置窗口：API Key、划词翻译、剪贴板">
+</p>
+
 ## 状态
 
 v0.1.0，早期开发中，接口和数据结构都可能变。
