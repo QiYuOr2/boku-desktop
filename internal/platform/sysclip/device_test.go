@@ -13,6 +13,7 @@ import (
 	"github.com/egoist/mygo/transfer"
 
 	"boku/internal/domain"
+	"boku/internal/kit"
 )
 
 // The platform half of this package cannot be exercised without a session,
@@ -172,6 +173,96 @@ func TestHasFormat(t *testing.T) {
 	}
 	if hasFormat(offered, transfer.PNG) {
 		t.Error("a bitmap that was not offered was reported")
+	}
+}
+
+// A picture this device read is handed out again while it is still fresh, so
+// that a screenshot sitting on the clipboard is not decoded and encoded on
+// every poll.
+func TestAPictureIsHandedOutAgainWhileItIsFresh(t *testing.T) {
+	now := time.Now()
+	device := New(nil)
+	device.now = func() time.Time { return now }
+
+	if device.pictureStillThere() {
+		t.Fatal("a device that has read nothing claims to hold a picture")
+	}
+
+	device.rememberPicture([]byte("89504e470d0a1a0a"), now)
+	if !device.pictureStillThere() {
+		t.Fatal("a picture that was just read is not handed out again")
+	}
+	if device.pictureRef == "" {
+		t.Error("the picture that was remembered has no name")
+	}
+
+	// Past the window it is read again rather than handed out forever.
+	now = now.Add(pictureFresh)
+	if device.pictureStillThere() {
+		t.Error("a picture older than the window is still handed out")
+	}
+}
+
+// Two runs of the same bytes are the same picture: the name a reading carries
+// has to be the one the loop already knows, or every poll records a new copy.
+func TestARememberedPictureKeepsItsName(t *testing.T) {
+	png := []byte("89504e470d0a1a0a")
+	now := time.Now()
+	device := New(nil)
+	device.now = func() time.Time { return now }
+	device.rememberPicture(png, now)
+
+	if got, want := device.pictureRef, kit.ClipImageRef(png); got != want {
+		t.Errorf("pictureRef = %q, want %q", got, want)
+	}
+	// Remembering the same bytes again is the same name.
+	device.rememberPicture(png, now)
+	if got, want := device.pictureRef, kit.ClipImageRef(png); got != want {
+		t.Errorf("pictureRef changed to %q, want %q", got, want)
+	}
+}
+
+// A reading that found no picture, or could not read one, leaves nothing to
+// hand out: a picture kept from earlier would have the next reading claim to
+// hold a picture that is not there.
+func TestForgettingAPicture(t *testing.T) {
+	now := time.Now()
+	device := New(nil)
+	device.now = func() time.Time { return now }
+	device.rememberPicture([]byte("89504e470d0a1a0a"), now)
+
+	device.forgetPicture()
+	if device.pictureStillThere() {
+		t.Error("a forgotten picture is still handed out")
+	}
+	if device.picture != nil || device.pictureRef != "" || !device.pictureStamp.IsZero() {
+		t.Errorf("forgetting left something behind: %v %q %v",
+			device.picture, device.pictureRef, device.pictureStamp)
+	}
+}
+
+// A reading that was handed a picture it did not read still has to name it:
+// the loop identifies the reading by that name, and a reading that carried
+// none would look like a different picture and be recorded a second time.
+func TestAReusedPictureKeepsItsNameInTheReading(t *testing.T) {
+	const ref = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	content := Convert(platformFacts{
+		formats:  []transfer.Format{"System.Drawing.Bitmap", transfer.PNG},
+		hasImage: true,
+		image:    []byte("89504e470d0a1a0a"),
+		imageRef: ref,
+	})
+	if content.ImageRef != ref {
+		t.Errorf("imageRef = %q, want the name the device gave it", content.ImageRef)
+	}
+	if content.Kind != domain.ClipKindImage {
+		t.Errorf("kind = %q, want an image", content.Kind)
+	}
+	if content.ImageBytes != len("89504e470d0a1a0a") {
+		t.Errorf("imageBytes = %d, want the size of the picture", content.ImageBytes)
+	}
+	if content.Observation != "" {
+		t.Errorf("a picture that was read was noted: %q", content.Observation)
 	}
 }
 

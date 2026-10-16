@@ -23,6 +23,7 @@ import (
 	"github.com/egoist/mygo/transfer"
 
 	"boku/internal/domain"
+	"boku/internal/kit"
 )
 
 // DefaultTimeout bounds one round trip to the main thread. A clipboard read
@@ -34,17 +35,52 @@ import (
 // reading dropped for being slow is an image recorded with no bytes in it.
 const DefaultTimeout = 2 * time.Second
 
+// pictureFresh is how long a picture this device read is handed out again
+// rather than read once more.
+//
+// A clipboard holds one value at a time and a picture does not change while it
+// sits there, so a picture that is still offered a moment after it was read is
+// the picture that was read. The window is what bounds how long that is
+// assumed: it covers several poll intervals, so a screenshot left on the
+// clipboard is read once rather than on every poll, and it is short enough
+// that a picture the user copied in the meantime is never handed out as the
+// old one for long.
+const pictureFresh = 5 * time.Second
+
 // Dispatcher runs fn on the thread the platform requires and waits for it,
 // returning false when there is no such thread any more (the application is
 // quitting). It is what makes a poll off the main thread safe.
 type Dispatcher func(fn func()) bool
 
 // Device is the platform clipboard.
+//
+// It is used by one reader at a time, which is what the poll loop is.
 type Device struct {
 	dispatch Dispatcher
 	timeout  time.Duration
 	// now stamps a reading. It is a field so that a test can pin it.
 	now func() time.Time
+
+	// pictureStamp is when the picture below was read, and picture is that
+	// picture as the platform handed it over.
+	//
+	// Together they keep the poll from re-reading a picture that is still
+	// there. Looking at a picture is the one expensive thing this device does:
+	// the platform offers a bitmap as the device independent bitmap, and MyGo
+	// hands it over as a PNG by decoding every pixel and encoding the whole
+	// image — well over a hundred milliseconds for a screen's worth of pixels,
+	// with the clipboard held shut for all of it, so that another
+	// application's copy fails outright while it runs. Polling every 700ms
+	// would pay that, and hold the clipboard, for as long as a screenshot sat
+	// on the clipboard.
+	//
+	// It is kept rather than measured because a click on a picture in the
+	// history puts it back, and this is the only moment it can be read — and
+	// because the next poll can hand it out again instead of reading it once
+	// more.
+	picture      []byte
+	pictureRef   string
+	pictureStamp time.Time
 }
 
 // New returns a device reading through dispatch. A nil dispatcher runs the
@@ -170,13 +206,16 @@ func (d *Device) call(ctx context.Context, fn func()) bool {
 // that owns the clipboard.
 //
 // It reads what the clipboard advertises, once, and works from that answer.
-// A bitmap is measured, not kept: what the application records about a
-// picture is that there was one and how large it was.
+//
+// A picture is the one expensive flavour, and a picture that is still the one
+// this device read a moment ago is handed out again rather than read once
+// more; see pictureFresh. Everything else is read as it always was.
 func (d *Device) snapshot() (domain.ClipContent, error) {
 	formats := mygo.Clipboard.Formats()
 	if len(formats) == 0 {
 		// An empty clipboard, or a call the application's shutdown
 		// dropped: either way there is nothing to show.
+		d.forgetPicture()
 		return domain.ClipContent{}, domain.ErrUnsupportedClipboardFormat
 	}
 	facts := platformFacts{
@@ -185,8 +224,26 @@ func (d *Device) snapshot() (domain.ClipContent, error) {
 		imageErr: domain.ErrUnsupportedClipboardFormat,
 	}
 	if facts.hasImage {
-		png, err := mygo.Clipboard.ReadFormat(transfer.PNG)
-		facts.image, facts.imageErr = png, err
+		switch {
+		case d.pictureStillThere():
+			// The same picture is still on the clipboard: it is what was read
+			// before, so it is what this reading found, and reading it again
+			// would spend a screen's worth of decoding to learn nothing.
+			facts.image = d.picture
+			facts.imageRef = d.pictureRef
+		default:
+			png, err := mygo.Clipboard.ReadFormat(transfer.PNG)
+			facts.image, facts.imageErr = png, err
+			if err == nil && len(png) > 0 {
+				d.rememberPicture(png, d.now())
+			} else {
+				// Nothing was read, so there is no picture to hand out again:
+				// the next poll has to try afresh.
+				d.forgetPicture()
+			}
+		}
+	} else {
+		d.forgetPicture()
 	}
 	// The text and the file list are read one flavour at a time, and a
 	// flavour that is not there is not an error: a clipboard with a picture
@@ -209,6 +266,41 @@ func hasFormat(formats []transfer.Format, want transfer.Format) bool {
 	return false
 }
 
+// pictureStillThere reports whether the picture this device read is the one the
+// clipboard is still offering.
+//
+// What makes that safe is that a clipboard holds one value at a time: the
+// picture cannot change without the clipboard changing, and this application
+// reads the clipboard more often than a person copies something. The window
+// bounds the assumption, so a picture that somehow stayed past it is read
+// again rather than handed out forever.
+func (d *Device) pictureStillThere() bool {
+	if len(d.picture) == 0 || d.pictureRef == "" {
+		return false
+	}
+	if d.pictureStamp.IsZero() {
+		return false
+	}
+	return d.now().Sub(d.pictureStamp) < pictureFresh
+}
+
+// rememberPicture keeps the picture that was just read, so that the next poll
+// can hand it out instead of reading and encoding it again.
+func (d *Device) rememberPicture(png []byte, at time.Time) {
+	d.picture = png
+	d.pictureRef = kit.ClipImageRef(png)
+	d.pictureStamp = at
+}
+
+// forgetPicture drops the picture this device was holding.
+//
+// It is what a reading that found no picture, or could not read one, leaves
+// behind: there is nothing to hand out again, and a picture kept from earlier
+// would have the next reading claim to hold a picture that is not there.
+func (d *Device) forgetPicture() {
+	d.picture, d.pictureRef, d.pictureStamp = nil, "", time.Time{}
+}
+
 // platformFacts is what one reading of the platform clipboard found, as
 // plain values: the part of a reading that can be tested without a session.
 type platformFacts struct {
@@ -224,6 +316,11 @@ type platformFacts struct {
 	// clipboard back — and this is the only moment it can be read.
 	image    []byte
 	imageErr error
+	// imageRef is what the picture is called, when it was named by whoever
+	// read it. A reading that carries the picture carries its name with it:
+	// naming it here would hash the bytes a second time, and naming it here
+	// after they were dropped would name it wrongly.
+	imageRef string
 }
 
 // Convert turns one platform reading into what the application records.
@@ -241,6 +338,7 @@ func Convert(facts platformFacts) domain.ClipContent {
 			HasImage:   facts.hasImage,
 			ImageBytes: len(facts.image),
 			Image:      facts.image,
+			ImageRef:   facts.imageRef,
 		}
 		if facts.hasImage && len(facts.image) == 0 && facts.imageErr != nil {
 			content = content.WithObservation(
@@ -253,6 +351,7 @@ func Convert(facts platformFacts) domain.ClipContent {
 			HasImage:   true,
 			ImageBytes: len(facts.image),
 			Image:      facts.image,
+			ImageRef:   facts.imageRef,
 		}
 		if len(facts.image) == 0 {
 			reason := "剪贴板没有给出图片数据"

@@ -104,7 +104,14 @@ func (w *Watcher) poll(ctx context.Context, at time.Time) {
 // decision: the device reads what the platform has, and this is where the
 // application's own names for things are made. It costs one hash per poll while
 // a picture is on the clipboard.
+//
+// A reading that already carries a name keeps it. The device names a picture it
+// hands out again — the same one that is still on the clipboard — and hashing
+// its bytes a second time here would be the same answer for the same work.
 func imageRef(reading domain.ClipContent) string {
+	if reading.ImageRef != "" {
+		return reading.ImageRef
+	}
 	if len(reading.Image) == 0 {
 		return ""
 	}
