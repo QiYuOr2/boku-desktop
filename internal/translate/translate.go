@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -230,12 +229,62 @@ func (t *Translate) SetCloseDelay(ctx context.Context, delay time.Duration) erro
 	return t.SaveSettings(ctx, func(s *Settings) { s.CloseDelay = delay })
 }
 
-// SetCustomTranslator records where the user's own service is and what to
-// call it. The address is cleaned the way this feature cleans it, so that what
-// is stored is what will be asked.
-func (t *Translate) SetCustomTranslator(ctx context.Context, settings CustomSettings) error {
+// AddCustomTranslator records a service of the user's own and returns the id it
+// was stored under, which is the translator id that now asks it.
+//
+// The id is chosen here rather than by the caller, because it is this feature's
+// storage decision: the first service takes "custom", the ones after it are
+// numbered, and a file written before there could be several services keeps
+// reading as the first of them.
+//
+// The address is cleaned the way this feature cleans it, so that what is stored
+// is what will be asked. A service with no address is refused rather than
+// stored: there would be nothing to ask and nothing to show.
+func (t *Translate) AddCustomTranslator(ctx context.Context, settings CustomSettings) (string, error) {
 	settings = settings.Normalize()
-	return t.SaveSettings(ctx, func(s *Settings) { s.Custom = settings })
+	if settings.BaseURL == "" {
+		return "", fmt.Errorf("%w: 自定义服务至少需要一个 Base URL", domain.ErrInvalidArgument)
+	}
+	id := ""
+	err := t.SaveSettings(ctx, func(s *Settings) {
+		if s.Custom == nil {
+			s.Custom = map[string]CustomSettings{}
+		}
+		id = s.NextCustomServiceID()
+		s.Custom[id] = settings
+	})
+	if err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// SetCustomTranslator records where one of the user's own services is and what
+// to call it, leaving the others where they are.
+func (t *Translate) SetCustomTranslator(ctx context.Context, id string, settings CustomSettings) error {
+	settings = settings.Normalize()
+	if !IsCustomService(id) {
+		return fmt.Errorf("%w: %s is not one of the user's own services", domain.ErrInvalidArgument, id)
+	}
+	return t.SaveSettings(ctx, func(s *Settings) {
+		if s.Custom == nil {
+			s.Custom = map[string]CustomSettings{}
+		}
+		s.Custom[id] = settings
+	})
+}
+
+// RemoveCustomTranslator forgets one of the user's own services.
+//
+// The translator setting is left alone: if the service being removed was the
+// one in use, the id it names stops answering, and Translate says so. Moving
+// the user to another service on their behalf would be changing a choice they
+// made — the window asks them what to switch to instead.
+func (t *Translate) RemoveCustomTranslator(ctx context.Context, id string) error {
+	if !IsCustomService(id) {
+		return fmt.Errorf("%w: %s is not one of the user's own services", domain.ErrInvalidArgument, id)
+	}
+	return t.SaveSettings(ctx, func(s *Settings) { delete(s.Custom, id) })
 }
 
 // Providers lists the translators the settings window offers, in the order
@@ -265,23 +314,25 @@ func (t *Translate) Providers(ctx context.Context) ([]TranslatorView, error) {
 			view.CredentialKey = descriptor.CredentialKeys[0]
 		}
 		// A translator the user points at a service of their own is
-		// configured when the address is there; the address lives in the
-		// settings rather than in a credential.
+		// configured when the address of that service is there; the address
+		// lives in the settings rather than in a credential, and it is looked
+		// up by the translator's own id so that each of the user's services
+		// answers for itself.
 		hasAddress := true
 		if descriptor.BaseURLSetting != "" {
-			hasAddress = settings.Custom.BaseURL != ""
+			service, _ := settings.CustomService(descriptor.ID)
+			hasAddress = service.BaseURL != ""
 		}
 		view.Configured = hasAddress && (!view.NeedsCredential || t.credentialStored(ctx, descriptor))
 		views = append(views, view)
 	}
-	// The translator in use comes first: it is the one the section is about.
-	sort.SliceStable(views, func(i, j int) bool {
-		left, right := views[i].ID == settings.ProviderOr(), views[j].ID == settings.ProviderOr()
-		if left != right {
-			return left
-		}
-		return views[i].ID < views[j].ID
-	})
+	// The order is the registry's own — the ids, sorted — and it is the same
+	// order every time, whatever the user picks.
+	//
+	// It used to put the translator in use first, which made the list rearrange
+	// itself under the pointer: clicking a row moved it, and the row that took
+	// its place became the thing under the cursor. A list of choices must stay
+	// where it is while the user is choosing.
 	return views, nil
 }
 
@@ -330,7 +381,8 @@ func (t *Translate) TestTranslator(ctx context.Context, providerID string, overr
 		if err != nil {
 			return err
 		}
-		if strings.TrimSpace(settings.Custom.BaseURL) == "" {
+		service, _ := settings.CustomService(descriptor.ID)
+		if strings.TrimSpace(service.BaseURL) == "" {
 			return fmt.Errorf("%w: 还没有填写自定义服务的地址", domain.ErrTranslateUnavailable)
 		}
 	}
@@ -420,12 +472,17 @@ func (t *Translate) Translate(ctx context.Context, req Request) (Result, error) 
 		return Result{}, err
 	}
 	if !settings.Enabled {
-		return Result{}, fmt.Errorf("%w: 划词翻译已关闭", domain.ErrTranslateUnavailable)
+		return Result{}, fmt.Errorf("%w: 划词翻译已关闭", domain.ErrTranslateDisabled)
 	}
 	providerID := settings.ProviderOr()
 	reply, err := t.translators.Translator(providerID)
 	if err != nil {
-		return Result{}, fmt.Errorf("%w: 还没有配置翻译服务", domain.ErrTranslateUnavailable)
+		// The service the settings name is not registered. That is a settings
+		// file naming a translator this build does not have — a hand-edited
+		// file, or one written by a version that shipped a service this one
+		// does not.
+		return Result{}, fmt.Errorf("%w: 找不到 %s，请在设置里重新选择一个翻译服务",
+			domain.ErrTranslateUnavailable, providerID)
 	}
 	descriptor := reply.Descriptor()
 

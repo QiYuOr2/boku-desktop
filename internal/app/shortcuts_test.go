@@ -321,3 +321,88 @@ func waitForTranslation(t *testing.T, state *State, want translateStatus) {
 	}
 	t.Fatalf("the translation window stayed in state %d", state.translation.status)
 }
+
+// A tool that starts switched off takes no shortcut at launch.
+//
+// A global shortcut is a key this process holds against every other
+// application on the machine. Binding one for a tool the user has turned off
+// denies them the combination for a feature that will not run — so "off" has to
+// mean the key was never taken.
+func TestNoShortcutIsBoundWhileTheToolStartsOff(t *testing.T) {
+	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	if err := state.translate.SetEnabled(t.Context(), false); err != nil {
+		t.Fatalf("SetEnabled failed: %v", err)
+	}
+
+	state.RegisterShortcuts()
+
+	if got := shortcuts.bound(); got != "" {
+		t.Errorf("bound %q for a tool that is off, want nothing", got)
+	}
+	if state.shortcut.registered {
+		t.Error("the window thinks a shortcut is bound")
+	}
+}
+
+// Turning the tool off releases the key, and turning it back on takes it again.
+//
+// It is what makes the switch mean what it says: the two states a user can be
+// in are "off, and the key is free" and "on, and the key opens it".
+func TestTheSwitchTakesAndReleasesTheShortcut(t *testing.T) {
+	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state.RegisterShortcuts()
+	if got := shortcuts.bound(); got != translate.DefaultAccelerator {
+		t.Fatalf("the shortcut did not start bound: %q", got)
+	}
+
+	// Off: the key goes back to the system.
+	state.setTranslationEnabled(false)
+	if got := shortcuts.bound(); got != "" {
+		t.Errorf("the key is still held after the tool was turned off: %q", got)
+	}
+	if state.shortcut.registered {
+		t.Error("the window still thinks the shortcut is bound")
+	}
+	// And pressing it does nothing, because there is nothing bound to press.
+	if fn := shortcuts.callback(); fn != nil {
+		t.Error("a callback survived the release")
+	}
+
+	// On again: the same key, bound to the same action.
+	state.setTranslationEnabled(true)
+	if got := shortcuts.bound(); got != translate.DefaultAccelerator {
+		t.Errorf("the key was not taken again: bound %q", got)
+	}
+	if !state.shortcut.registered {
+		t.Error("the window does not know the shortcut is bound again")
+	}
+	if fn := shortcuts.callback(); fn == nil {
+		t.Error("the key is bound to nothing")
+	}
+}
+
+// A switched-off tool draws the switch and nothing else: a page of controls for
+// a tool that is not running invites the user to configure a thing that will
+// not happen.
+func TestASwitchedOffToolDrawsOnlyItsSwitch(t *testing.T) {
+	state, fixture, _ := translateState(t)
+	if err := fixture.service.SetEnabled(t.Context(), false); err != nil {
+		t.Fatalf("SetEnabled failed: %v", err)
+	}
+	settings := state.translateSettingsOr()
+	if settings.Enabled {
+		t.Fatal("the tool is on, so this test is about the wrong state")
+	}
+	// The rule the section draws by: everything but the switch is behind it.
+	// What it looks like is accepted at runtime; this is the decision.
+	if showsTranslationControls(settings) {
+		t.Error("a switched-off tool still draws the controls that configure it")
+	}
+	// An enabled tool draws them.
+	if err := fixture.service.SetEnabled(t.Context(), true); err != nil {
+		t.Fatalf("SetEnabled failed: %v", err)
+	}
+	if !showsTranslationControls(state.translateSettingsOr()) {
+		t.Error("a switched-on tool draws none of its controls")
+	}
+}

@@ -89,28 +89,67 @@ func NormalizeBaseURL(raw string) string {
 		return ""
 	}
 	lower := strings.ToLower(value)
-	scheme := "https"
+	scheme := ""
 	if index := strings.Index(lower, "://"); index >= 0 {
 		scheme, value = lower[:index], value[index+3:]
 	} else if index := strings.IndexAny(lower, ":/?#"); index >= 0 {
 		// Something before the first slash that is not the host is a scheme,
 		// however it is punctuated: "javascript:alert(1)" names a scheme and
-		// a payload, not a host and a path. A port ("localhost:8080/v1")
-		// names the host itself, which is the one colon that is allowed to
-		// stand alone.
+		// a payload, not a host and a path. Two things are hosts rather than
+		// schemes and are let through: a port ("localhost:8080/v1") and an
+		// IPv6 literal in brackets ("[::1]:8080/v1"), whose colons are part of
+		// the address itself.
 		head := lower[:index]
-		if lower[index] == ':' && !strings.ContainsAny(head, "./") && !isPort(head, lower[index+1:]) {
+		bracketed := strings.Contains(head, "[")
+		if lower[index] == ':' && !bracketed && !strings.ContainsAny(head, "./") && !isPort(head, lower[index+1:]) {
 			return ""
 		}
 	}
-	if scheme != "http" && scheme != "https" {
+	if scheme != "" && scheme != "http" && scheme != "https" {
 		return ""
 	}
 	host := strings.TrimLeft(value, "/")
 	if host == "" {
 		return ""
 	}
+	if scheme == "" {
+		scheme = defaultScheme(host)
+	}
 	return scheme + "://" + strings.TrimRight(host, "/")
+}
+
+// defaultScheme is the scheme a typed address without one is given.
+//
+// It is https, which is what a hosted service is, with one exception: an
+// address on the machine itself is http. A service the user runs — Ollama, LM
+// Studio, LibreTranslate, the mock in tools/ — listens on plain http, and a
+// bare "127.0.0.1:11434/v1" turned into "https://127.0.0.1:11434/v1" is a
+// request to a port that speaks no TLS. The user typed the address they copied
+// out of that service's own documentation, and the application should not make
+// it wrong.
+//
+// "localhost" counts as the machine; a hostname that merely contains the word
+// does not.
+func defaultScheme(host string) string {
+	name := host
+	if index := strings.IndexAny(name, "/?#"); index >= 0 {
+		name = name[:index]
+	}
+	// An IPv6 literal is bracketed, and its colons are part of the address:
+	// the port, if there is one, is the colon after the closing bracket.
+	if strings.HasPrefix(name, "[") {
+		if end := strings.IndexByte(name, ']'); end >= 0 {
+			name = name[1:end]
+		}
+	} else if index := strings.IndexByte(name, ':'); index >= 0 {
+		name = name[:index]
+	}
+	name = strings.ToLower(strings.TrimSpace(name))
+	switch name {
+	case "localhost", "127.0.0.1", "::1", "0.0.0.0":
+		return "http"
+	}
+	return "https"
 }
 
 // isPort reports whether what follows a colon is a port number rather than the

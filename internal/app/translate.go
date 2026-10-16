@@ -231,11 +231,19 @@ func (s *State) onMain(update func()) {
 // including the clipboard read.
 const translationTimeout = 20 * time.Second
 
-// translationFailureStatus maps an error to what the card shows. The three
-// answers the tool has are different things to the user: the switch is off,
+// translationFailureStatus maps an error to what the card shows. The four
+// answers the tool has are different things to the user, and each one is a
+// different sentence: the switch is off, there is nowhere to send the text,
 // there is nothing to translate, and something went wrong.
+//
+// The switch is checked first and on its own error, because it is the one
+// answer that is not a problem: a user who turned the tool off asked for
+// exactly what they got, and telling them a service is down would send them
+// looking for a fault that is not there.
 func translationFailureStatus(err error) translateStatus {
 	switch {
+	case errors.Is(err, domain.ErrTranslateDisabled):
+		return translateOff
 	case errors.Is(err, domain.ErrTranslateUnavailable):
 		return translateUnconfigured
 	case errors.Is(err, domain.ErrCredentialMissing):

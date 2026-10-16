@@ -34,8 +34,16 @@ import (
 )
 
 const (
-	appName    = "Boku"
-	toolTip    = "Boku — 我的面板"
+	appName = "Boku"
+	// toolTip is what the system shows when the pointer rests on the tray
+	// icon: the application's name, and nothing after it.
+	//
+	// It used to add "— 我的面板". The tray is a five-millimetre square, and
+	// the line that appears over it is read while the pointer is already
+	// there to click it: the extra words were a sentence nobody was reading.
+	// The name is what tells the user whose icon this is, which is the only
+	// question the tooltip has to answer.
+	toolTip    = appName
 	panelWidth = 320
 	// panelHeight leaves room for the page's margin, the panel's section, the
 	// clipboard line under it and the footer. A section with more in it
@@ -60,6 +68,11 @@ type Deps struct {
 	// Translate is the selection-translation tool. A State without one
 	// draws no translation window and binds no shortcut for it.
 	Translate *translate.Translate
+	// RegisterOwnServices registers a translator for every service the user
+	// runs themselves. The window calls it after the user adds one: a service
+	// the settings hold but the registry does not know is a row that cannot
+	// answer. It is nil in a test that never adds a service.
+	RegisterOwnServices func() error
 	// Shortcuts binds the global shortcuts. A State without one still runs:
 	// a shortcut that cannot be bound is a tray application with one way in
 	// fewer, not a failure to start.
@@ -150,6 +163,12 @@ type State struct {
 	// translateNotice is the last thing the translation switches said,
 	// shown under them.
 	translateNotice string
+	// ownServices registers a translator for every service the user runs
+	// themselves, so that one they just added from this window is one the
+	// translation tool can ask. It is nil in a build with no assembly behind
+	// it, and a window that has nothing to register says so rather than
+	// panicking.
+	ownServices func() error
 	// panelStatus is the last thing a panel switch said, shown under the
 	// switches in the general section.
 	panelStatus string
@@ -329,6 +348,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		secretService:   deps.Secrets,
 		clipboard:       deps.Clipboard,
 		translate:       deps.Translate,
+		ownServices:     deps.RegisterOwnServices,
 		shortcuts:       deps.Shortcuts,
 		version:         deps.Version,
 		quit:            deps.Quit,

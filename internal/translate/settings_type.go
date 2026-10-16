@@ -13,9 +13,22 @@
 package translate
 
 import (
+	"sort"
+	"strconv"
 	"strings"
 	"time"
+
+	contract "boku/internal/contract/freetranslate"
+	"boku/internal/translate/openai"
 )
+
+// customServicePrefix is the id every one of the user's own services is stored
+// under, numbered after the first: "custom", "custom-2", "custom-3" …
+//
+// It is spelled here, and in section.go as customID, because the two are the
+// same decision seen from two sides: what the settings file calls a service,
+// and what the tool calls the translator that asks it.
+const customServicePrefix = "custom"
 
 // Settings is what the selection-translation tool was told to do.
 //
@@ -48,28 +61,90 @@ type Settings struct {
 	// loses the keyboard. It is bounded by the constants below, and a stored
 	// value outside them is brought back inside rather than kept.
 	CloseDelay time.Duration
-	// Custom is the address of the OpenAI-compatible service the "custom"
-	// translator asks. It is not sensitive: a credential never goes in here.
-	Custom CustomSettings
+	// Custom is the OpenAI-compatible services the user runs themselves, keyed
+	// by the id each one is stored under ("custom", "custom-2", …).
+	//
+	// It is a map rather than one service because the settings window offers
+	// adding another: a user may have a model on their own machine and a
+	// gateway somewhere else, and both are theirs to keep. An entry's id is
+	// what the provider setting names, so a file that remembers "custom-2"
+	// still points at the service it did.
+	//
+	// It is not sensitive: a credential never goes in here. The addresses and
+	// the names are in the clear, in the settings file, which is where §8 of
+	// the storage design says they live.
+	Custom map[string]CustomSettings
 }
 
-// CustomSettings is the user's own translation service: where it is, and what
-// to call it.
+// CustomSettings is one of the user's own translation services: where it is,
+// and what to call it.
 type CustomSettings struct {
 	// BaseURL is the service's address, such as "https://api.example.com/v1".
-	// Empty means the translator is not configured, and the window says so.
+	// Empty means the service is not configured, and the window says so.
 	BaseURL string
 	// DisplayName is what the user calls the service. Empty means the
 	// interface uses its own word for it.
 	DisplayName string
 }
 
+// CustomServiceIDs returns the ids of the user's own services, sorted, which is
+// the order the settings window draws them in.
+func (s Settings) CustomServiceIDs() []string {
+	ids := make([]string, 0, len(s.Custom))
+	for id := range s.Custom {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// CustomService returns one of the user's own services, by id.
+func (s Settings) CustomService(id string) (CustomSettings, bool) {
+	service, ok := s.Custom[id]
+	return service, ok
+}
+
+// NextCustomServiceID is the id a service being added is stored under: the
+// first of "custom", "custom-2", "custom-3" … that is not taken.
+//
+// The bare "custom" is kept as the first id because a file written before there
+// could be several services holds that name, and reading it as the first of
+// them is what makes this change need no migration.
+func (s Settings) NextCustomServiceID() string {
+	if _, taken := s.Custom[customServicePrefix]; !taken {
+		return customServicePrefix
+	}
+	for n := 2; ; n++ {
+		id := customServicePrefix + "-" + strconv.Itoa(n)
+		if _, taken := s.Custom[id]; !taken {
+			return id
+		}
+	}
+}
+
+// IsCustomService reports whether an id names one of the user's own services
+// rather than a built-in translator.
+//
+// The test is the prefix, not a fixed id: the ids are generated so that several
+// services fit side by side, and every one of them is the same kind of thing to
+// the window and to the backend that asks it.
+func IsCustomService(id string) bool {
+	return id == customServicePrefix || strings.HasPrefix(id, customServicePrefix+"-")
+}
+
 // Bounds on the translation window's own behavior.
 const (
-	// DefaultProvider is the translator a fresh installation uses. It is the
-	// one whose credential the application already has a place for: the
-	// panel's own key.
-	DefaultProvider = "deepseek"
+	// DefaultProvider is the translator a fresh installation uses: the
+	// Microsoft Edge engine, which needs no key, no account and no
+	// configuration.
+	//
+	// It is one of the free engines rather than a tier that picks between
+	// them, because the settings page offers the engines as separate choices.
+	// A user who configured a service of their own picks it, and the choice is
+	// theirs from then on — a stored provider is never rewritten, which is
+	// what keeps "I configured a key, why did the answer change" from being a
+	// question nobody can answer (§4.5 of the free-translation design).
+	DefaultProvider = contract.MicrosoftEdge
 	// DefaultAccelerator is the shortcut that starts a translation: the one
 	// the design's settings page shows, written the way the platform's own
 	// parser reads it. "Ctrl" rather than "CmdOrCtrl" because the design
@@ -120,7 +195,21 @@ func (s Settings) Normalize() Settings {
 	case s.CloseDelay > MaxCloseDelay:
 		s.CloseDelay = MaxCloseDelay
 	}
-	s.Custom = s.Custom.Normalize()
+	s.Custom = normalizeCustomServices(s.Custom)
+	// A provider that names one of the user's own services has to still name
+	// one. Removing a service leaves the setting pointing at an id that is no
+	// longer there, and a tool whose provider does not exist cannot translate:
+	// it falls back to the default rather than failing every press.
+	//
+	// Only the user's own services are checked here. Whether a built-in id is
+	// one this build knows is the registry's question, and the registry is not
+	// reachable from a value type — there the lookup fails and the window says
+	// so, which is the right answer for a hand-edited file.
+	if IsCustomService(s.Provider) {
+		if _, exists := s.Custom[s.Provider]; !exists {
+			s.Provider = DefaultProvider
+		}
+	}
 	return s
 }
 
@@ -134,6 +223,27 @@ func (c CustomSettings) Normalize() CustomSettings {
 		c.DisplayName = strings.TrimSpace(string(runes[:MaxNameChars]))
 	}
 	return c
+}
+
+// normalizeCustomServices cleans up every one of the user's own services.
+//
+// A service whose address does not survive the cleaning is dropped: an entry
+// with nowhere to send anything is not a service, and keeping it would leave a
+// row in the window that can never answer. A nil map becomes an empty one, so
+// that a caller may add to it without checking.
+func normalizeCustomServices(services map[string]CustomSettings) map[string]CustomSettings {
+	cleaned := make(map[string]CustomSettings, len(services))
+	for id, service := range services {
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
+		normalized := service.Normalize()
+		if normalized.BaseURL == "" {
+			continue
+		}
+		cleaned[id] = normalized
+	}
+	return cleaned
 }
 
 // CloseDelayOr is the wait before the window closes itself, inside its bounds
@@ -169,58 +279,10 @@ func (s Settings) AcceleratorOr() string {
 // NormalizeBaseURL turns what a user typed into an address the application
 // will ask, or into nothing.
 //
-// It accepts what people write — "api.example.com/v1", or a full URL — and
-// refuses anything that is not plain HTTP: a credential is about to be sent
-// there, and a scheme the transport does not speak is a mistake worth dropping
-// rather than passing on. A protocol-relative address ("//host/v1") is dropped
-// too: it is how a web page means "the same scheme as this page", which a
-// desktop application has no answer for.
-func NormalizeBaseURL(raw string) string {
-	value := strings.TrimSpace(raw)
-	if value == "" || strings.HasPrefix(value, "//") {
-		return ""
-	}
-	lower := strings.ToLower(value)
-	scheme := "https"
-	if index := strings.Index(lower, "://"); index >= 0 {
-		scheme, value = lower[:index], value[index+3:]
-	} else if index := strings.IndexAny(lower, ":/?#"); index >= 0 {
-		// Something before the first slash that is not the host is a scheme,
-		// however it is punctuated: "javascript:alert(1)" names a scheme and
-		// a payload, not a host and a path. A port ("localhost:8080/v1")
-		// names the host itself, which is the one colon that is allowed to
-		// stand alone.
-		head := lower[:index]
-		if lower[index] == ':' && !strings.ContainsAny(head, "./") && !isPort(head, lower[index+1:]) {
-			return ""
-		}
-	}
-	if scheme != "http" && scheme != "https" {
-		return ""
-	}
-	host := strings.TrimLeft(value, "/")
-	if host == "" {
-		return ""
-	}
-	return scheme + "://" + strings.TrimRight(host, "/")
-}
-
-// isPort reports whether what follows a colon is a port number rather than the
-// payload of a scheme: "8080/v1" is, "alert(1)" is not.
-func isPort(head, rest string) bool {
-	digits := rest
-	if index := strings.IndexAny(rest, "/?#"); index >= 0 {
-		digits = rest[:index]
-	}
-	if digits == "" {
-		return false
-	}
-	for _, r := range digits {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	// A port is a number, and the host it belongs to is a host: no scheme is
-	// spelled with digits before it.
-	return head != ""
-}
+// It is the protocol package's own cleaning, re-exported rather than written
+// again: the backend asks the address the settings stored, and two cleanings of
+// the same string is two chances for them to differ — a stored "127.0.0.1:11434/v1"
+// that the backend read as https would be a request to a port that speaks no
+// TLS. The rule for what an address is lives with the protocol that speaks it;
+// this feature only decides that it keeps one.
+func NormalizeBaseURL(raw string) string { return openai.NormalizeBaseURL(raw) }

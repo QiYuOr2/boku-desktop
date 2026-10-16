@@ -23,9 +23,16 @@ import (
 )
 
 const (
-	// ProviderID is the translator's id, and the name its settings are
-	// stored under.
+	// ProviderID is the first of the translator ids a user's own services are
+	// registered under: the bare "custom", which is what a file written before
+	// there could be several services holds. The ones after it are numbered
+	// ("custom-2", "custom-3" …), and which id a service has is the
+	// translation feature's decision, not this package's.
 	ProviderID = "custom"
+	// DefaultDisplayName is what a service the user has not named is called.
+	// It is this feature's own word, and it is only used until the user gives
+	// the service a name of their own.
+	DefaultDisplayName = "自定义"
 	// DefaultModel is the model asked for when the user named none. Every
 	// compatible service has a different catalogue, so this is a guess that
 	// the window shows: a user whose service does not know it changes it in
@@ -39,9 +46,18 @@ const (
 	docsURL = "https://platform.openai.com/api-keys"
 )
 
-// Translator asks the user's own service to translate.
+// Translator asks one of the user's own services to translate.
+//
+// It is built per service rather than once for the feature: the user may keep
+// several — a model on their own machine, a gateway somewhere else — and each
+// one has its own id, its own address and its own name. What they share is this
+// type and the protocol behind it.
 type Translator struct {
 	client *httpc.Client
+	// id is the translator id this one is registered under: "custom",
+	// "custom-2", … It is also the key its settings are stored under, so the
+	// address and the name it reads are its own.
+	id string
 	// settings is what the application was configured with. The settings
 	// window reads it to show the address and the name; a translation uses
 	// whatever is stored at the moment the request is made.
@@ -50,12 +66,13 @@ type Translator struct {
 	now      func() time.Time
 }
 
-// New returns the translator. Settings is a function rather than a value
-// because the user may change the address while the application runs, and
-// the next translation should use the new one.
-func New(client *httpc.Client, settings func() openai.CustomService) *Translator {
+// New returns the translator for one of the user's own services. Settings is a
+// function rather than a value because the user may change the address while
+// the application runs, and the next translation should use the new one.
+func New(client *httpc.Client, id string, settings func() openai.CustomService) *Translator {
 	return &Translator{
 		client:   client,
+		id:       id,
 		settings: settings,
 		model:    DefaultModel,
 		now:      func() time.Time { return time.Now().UTC() },
@@ -65,27 +82,42 @@ func New(client *httpc.Client, settings func() openai.CustomService) *Translator
 // NewWithBaseURL returns a translator with an address of its own, whatever
 // the settings say. Tests use it to point at an httptest server.
 func NewWithBaseURL(client *httpc.Client, baseURL string) *Translator {
-	return New(client, func() openai.CustomService {
+	return New(client, ProviderID, func() openai.CustomService {
 		return openai.CustomService{BaseURL: baseURL}
 	})
 }
 
-// ID returns the translator's id.
-func (t *Translator) ID() string { return ProviderID }
+// ID returns the translator's id: the one it was built for, not a constant.
+func (t *Translator) ID() string { return t.id }
 
-// Descriptor says what the translator is called and what it needs. An
-// address nobody typed yet leaves the endpoint empty: the interface shows
+// Descriptor says what the service is called and what it needs.
+//
+// The name is the user's own when they gave one, and this feature's word for it
+// when they did not: the window draws it wherever the service is named, so a
+// service the user called "本地 Ollama" is called that and not "自定义".
+//
+// An address nobody typed yet leaves the endpoint empty: the interface shows
 // that there is nowhere to send anything, rather than an address it made up.
 func (t *Translator) Descriptor() domain.TranslatorDescriptor {
+	current := t.current()
 	return domain.TranslatorDescriptor{
-		ID:                   ProviderID,
-		DisplayName:          "自定义",
+		ID:                   t.id,
+		DisplayName:          displayNameOf(current),
 		CredentialKeys:       []string{APIKeyCredential},
 		DocsURL:              docsURL,
-		Endpoint:             openai.EndpointOf(t.current().BaseURL),
+		Endpoint:             openai.EndpointOf(current.BaseURL),
 		BaseURLSetting:       "custom.baseURL",
 		AllowEmptyCredential: true,
 	}
+}
+
+// displayNameOf is what a service is called: the name the user gave it, or this
+// feature's own word for a service they have not named.
+func displayNameOf(service openai.CustomService) string {
+	if name := strings.TrimSpace(service.DisplayName); name != "" {
+		return name
+	}
+	return DefaultDisplayName
 }
 
 // current is what the user configured, as the settings hold it now.
@@ -117,8 +149,8 @@ func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, re
 	settings := t.current()
 	if settings.BaseURL == "" {
 		return domain.TranslationResult{}, &domain.BadResponseError{
-			ProviderID: ProviderID,
-			Reason:     "自定义翻译服务的地址还没有填写",
+			ProviderID: t.id,
+			Reason:     "这个自定义翻译服务还没有填写地址",
 		}
 	}
 	// The key is optional, and absent means absent: no Authorization header
@@ -126,7 +158,6 @@ func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, re
 	// needs a key answers 401, which the window translates into "check the
 	// key".
 	key := strings.TrimSpace(creds.Secrets[APIKeyCredential])
-
 	text, cut := openai.Truncate(req.Text, openai.DefaultMaxChars)
 	source := req.SourceLang
 	if source == domain.LangUnknown {
@@ -150,7 +181,7 @@ func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, re
 		SourceText: text,
 		SourceLang: source,
 		TargetLang: req.TargetLang,
-		ProviderID: ProviderID,
+		ProviderID: t.id,
 		CreatedAt:  t.now(),
 	}
 	if options.Wants() {

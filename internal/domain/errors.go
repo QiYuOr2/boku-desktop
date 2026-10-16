@@ -38,6 +38,13 @@ var (
 	ErrInvalidMagnetURI           = errors.New("invalid magnet uri")
 	ErrUnsupportedClipboardFormat = errors.New("unsupported clipboard format")
 	ErrTranslateUnavailable       = errors.New("translation unavailable")
+	// ErrTranslateDisabled is the tool switched off, which is not the same
+	// thing as the tool having nowhere to send a text. They are separate
+	// errors because they are separate sentences to the user: "you turned this
+	// off, here is how to turn it back on" and "there is no service to ask".
+	// One error for both made the card tell a user whose tool was off that
+	// every free service was down.
+	ErrTranslateDisabled = errors.New("translation disabled")
 
 	// Credentials that belong to another tool: the login Boku reads is the
 	// tool's, so the tool is what has to be logged in, and it may not be

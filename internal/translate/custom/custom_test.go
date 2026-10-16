@@ -20,7 +20,7 @@ import (
 // application made up.
 func TestDescriptorFollowsTheSettings(t *testing.T) {
 	settings := openai.CustomService{}
-	reply := New(httpc.New(httpc.Options{}), func() openai.CustomService { return settings })
+	reply := New(httpc.New(httpc.Options{}), "custom", func() openai.CustomService { return settings })
 	if got := reply.Descriptor().Endpoint; got != "" {
 		t.Errorf("endpoint = %q, want nothing before an address is configured", got)
 	}
@@ -51,7 +51,7 @@ func TestTranslateWithoutAnAddress(t *testing.T) {
 		asked = true
 	}))
 	defer server.Close()
-	reply := New(httpc.New(httpc.Options{}), func() openai.CustomService {
+	reply := New(httpc.New(httpc.Options{}), "custom", func() openai.CustomService {
 		return openai.CustomService{}
 	})
 	_, err := reply.Translate(context.Background(), domain.Credentials{}, domain.TranslationRequest{
@@ -143,7 +143,7 @@ func TestTranslateNormalizesTheAddress(t *testing.T) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"你好"}}]}`))
 	}))
 	defer server.Close()
-	reply := New(httpc.New(httpc.Options{HTTPClient: server.Client()}), func() openai.CustomService {
+	reply := New(httpc.New(httpc.Options{HTTPClient: server.Client()}), "custom", func() openai.CustomService {
 		// A trailing slash is what a person pastes; the request must not
 		// end up with two.
 		return openai.CustomService{BaseURL: server.URL + "/v1/"}

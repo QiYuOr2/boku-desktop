@@ -34,9 +34,8 @@ import (
 	clipboarddevice "boku/internal/platform/sysclip"
 	"boku/internal/settings"
 	"boku/internal/translate"
-	customtranslator "boku/internal/translate/custom"
 	deepseektranslator "boku/internal/translate/deepseek"
-	"boku/internal/translate/openai"
+	freetranslator "boku/internal/translate/free"
 )
 
 // Name the application before Run: MyGo reads the name it registers with
@@ -80,7 +79,7 @@ func main() {
 		defer recordPanics()
 	}
 
-	panels, secrets, clipboard, translate, err := services(userData, version)
+	panels, secrets, clipboard, translate, own, err := services(userData, version)
 	if err != nil {
 		log.Fatalf("boku: %v", err)
 	}
@@ -102,9 +101,13 @@ func main() {
 		Secrets:   secrets,
 		Clipboard: clipboard,
 		Translate: translate,
-		Shortcuts: app.MyGoShortcuts(),
-		Version:   version,
-		Quit:      mygo.App.Quit,
+		// What the settings window calls after the user adds a service of
+		// their own: the translator for it has to exist before the next
+		// translation asks one.
+		RegisterOwnServices: own.registerAll,
+		Shortcuts:           app.MyGoShortcuts(),
+		Version:             version,
+		Quit:                mygo.App.Quit,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -158,7 +161,7 @@ func main() {
 // mismatched provider and adapter, or a panel that breaks its provider's
 // contract, is a startup error and worth catching without a graphical
 // session.
-func services(userData, version string) (*panel.Panels, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, error) {
+func services(userData, version string) (*panel.Panels, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, *ownServices, error) {
 	// Credentials: a file of their own, never the database. The store is
 	// named here and nowhere else.
 	//
@@ -171,11 +174,11 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 	// in a log or an error, and a window that says plainly what the file is.
 	secretStore, err := credential.Open(filepath.Join(userData, credential.FileName))
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
 	}
 	secrets, err := credential.NewSecrets(secretStore)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("prepare the credential store: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("prepare the credential store: %w", err)
 	}
 
 	// The application's own settings and the clipboard history, next to the
@@ -196,16 +199,16 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 		panelSettings,
 	)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
 	}
 	// The file is read once, here: a frame must not read it, and neither
 	// must a service that already has its settings in memory.
 	if err := prefs.Load(context.Background()); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("read the settings: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("read the settings: %w", err)
 	}
 	history, err := clipboard.NewHistory(filepath.Join(userData, "clipboard_history.json"))
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("open the clipboard history: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("open the clipboard history: %w", err)
 	}
 
 	client := httpc.New(httpc.Options{UserAgent: "Boku/" + applicationVersion(version)})
@@ -217,16 +220,16 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 		deepseekpanel.New(client),
 		deepseekpanel.NewAdapter(),
 	); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
 	}
 	if err := registry.Register(
 		codexpanel.New(client),
 		codexpanel.NewAdapter(),
 	); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("register the codex provider: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("register the codex provider: %w", err)
 	}
 	if err := registry.Validate(); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
 	}
 
 	// The Codex quota's credential is not one of Boku's: it is the ChatGPT
@@ -253,11 +256,11 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 		},
 	}, codexLogin)
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
 	}
 	// The switches are read once, here: a frame must not read a file.
 	if err := panels.LoadChoices(context.Background()); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("read the panel switches: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("read the panel switches: %w", err)
 	}
 
 	// The clipboard reads and writes on the thread the platform owns, so
@@ -285,7 +288,7 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 		Clock:    domain.SystemClock{},
 	})
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
 	}
 
 	// The translators the tool may ask. Like the panels, adding one means
@@ -294,20 +297,27 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 	// pair it with.
 	translators := translate.NewRegistry()
 	if err := translators.Register(deepseektranslator.New(client)); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("register the deepseek translator: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek translator: %w", err)
 	}
-	if err := translators.Register(customtranslator.New(client, func() openai.CustomService {
-		// The address is read from the section each time it is asked for:
-		// the user may change it while the application runs, and the next
-		// translation should use the new one. It is in memory, so asking
-		// costs no file read.
-		custom := translateSettings.Current().Custom
-		return openai.CustomService{
-			BaseURL:     custom.BaseURL,
-			DisplayName: custom.DisplayName,
-		}
-	})); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("register the custom translator: %w", err)
+	// The free engines: no key, no account, and the reason a fresh
+	// installation can press the shortcut and get an answer instead of a page
+	// explaining where to buy one. They are two translators rather than one,
+	// because the settings window offers them as two choices — the user picks
+	// the engine, and that engine is the one asked.
+	if err := translators.Register(freetranslator.NewMicrosoft(client)); err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("register the free microsoft translator: %w", err)
+	}
+	if err := translators.Register(freetranslator.NewBilibili(client)); err != nil {
+		return nil, nil, nil, nil, nil, fmt.Errorf("register the free bilibili translator: %w", err)
+	}
+	// The services the user runs themselves: one translator per stored service,
+	// because each has its own id, its own address and its own name. Which ones
+	// exist is the settings file's answer, and the user adds one from the
+	// settings window — so the registry is given a way to catch up with what
+	// they added, rather than a set written down here.
+	own := newOwnServices(client, translators, translateSettings)
+	if err := own.registerAll(); err != nil {
+		return nil, nil, nil, nil, nil, err
 	}
 	translation, err := translate.NewTranslate(translate.TranslateOptions{
 		Translators: translators,
@@ -328,9 +338,9 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 		Clock:     domain.SystemClock{},
 	})
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("prepare the translation tool: %w", err)
+		return nil, nil, nil, nil, nil, fmt.Errorf("prepare the translation tool: %w", err)
 	}
-	return panels, secrets, clip, translation, nil
+	return panels, secrets, clip, translation, own, nil
 }
 
 // applicationVersion is the version to send as a user agent: a plain `go

@@ -279,9 +279,12 @@ func testStateWith(t testing.TB, provider *testProvider, store *testStore, versi
 		Secrets:   secrets,
 		Clipboard: testClipboard(t, nil, nil),
 		Translate: translation.service,
-		Shortcuts: shortcuts,
-		Version:   version,
-		Quit:      func() {},
+		// The assembly's own job: a translator has to exist for a service the
+		// user just added, or the row cannot answer.
+		RegisterOwnServices: translation.registerOwn,
+		Shortcuts:           shortcuts,
+		Version:             version,
+		Quit:                func() {},
 	})
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
@@ -294,10 +297,21 @@ func testStateWith(t testing.TB, provider *testProvider, store *testStore, versi
 type testTranslateFixture struct {
 	service   *translate.Translate
 	deepseek  *testTranslator
-	custom    *testTranslator
-	tools     *testToolStore
-	device    *testDevice
-	selection *testSelection
+	microsoft *testTranslator
+	bilibili  *testTranslator
+	// own is the registry, as the assembly holds it: a test adds a service the
+	// way the assembly does, through own.addOwnService.
+	own *ownRegistry
+	// registerOwn is what the window calls after the user adds a service: the
+	// assembly's own "put a translator in the registry for every service the
+	// settings hold", over the fake registry above.
+	registerOwn func() error
+	// addService adds one of the user's own services the whole way — settings
+	// and registry — which is what the window's 添加 does in production.
+	addService func(translate.CustomSettings) string
+	tools      *testToolStore
+	device     *testDevice
+	selection  *testSelection
 	// timeline is what happened, in the order it happened. The selection
 	// device, the card and the translator all write to it, which is how a
 	// test says that the text to translate was read before the card took
@@ -368,17 +382,48 @@ func testTranslate(t testing.TB, store *testStore, device *testDevice) *testTran
 	reply := &testTranslator{id: "deepseek", name: "DeepSeek", timeline: timeline, descriptor: domain.TranslatorDescriptor{
 		Endpoint: "https://api.deepseek.com/chat/completions",
 	}}
-	custom := &testTranslator{id: "custom", name: "自定义", descriptor: domain.TranslatorDescriptor{
-		BaseURLSetting:       "custom.baseURL",
-		AllowEmptyCredential: true,
-	}}
 	// The sections start as a fresh installation has them: the file store
 	// fills the defaults in when the file has no such key, so the fake stands
 	// in for a store that has already been read once.
 	tools := newTestToolStore()
+	own := translatorRegistry(tools.translation)
+	// Registering the user's own services is what the window calls after the
+	// user adds one. The assembly is what really does it, through the registry
+	// it built; a test does the same thing through the fake registry.
+	// registerOwn is what the window calls after the user adds a service or
+	// removes one: the assembly's own "make the registry match the settings",
+	// over the fake registry. Both directions, because they are one job.
+	registerOwn := func() error {
+		present := map[string]bool{}
+		for _, id := range tools.translation.Current().CustomServiceIDs() {
+			present[id] = true
+			if !own.Has(id) {
+				own.addOwnService(id)
+			}
+		}
+		for _, id := range own.TranslatorIDs() {
+			if present[id] || !translate.IsCustomService(id) {
+				continue
+			}
+			own.Remove(id)
+		}
+		return nil
+	}
+	// The free engines: two translators, not one. They are what a fresh
+	// installation starts on and what the picker draws in its own group, so a
+	// window test that never saw them would be testing a build nobody ships.
+	microsoft := &testTranslator{id: freeMicrosoftID, name: "微软 Edge 翻译", descriptor: domain.TranslatorDescriptor{
+		AllowEmptyCredential: true,
+		Endpoint:             "edge.microsoft.com/translate/translatetext",
+	}}
+	bilibili := &testTranslator{id: freeBilibiliID, name: "B站 Index-Translate", descriptor: domain.TranslatorDescriptor{
+		AllowEmptyCredential: true,
+		Endpoint:             "index-translate.bilibili.com/v1/chat/completions",
+	}}
+	own.add(microsoft, bilibili, reply)
 	selection := &testSelection{timeline: timeline}
 	service, err := translate.NewTranslate(translate.TranslateOptions{
-		Translators: testTranslators{reply, custom},
+		Translators: own,
 		Secrets:     store,
 		Section:     tools.translation,
 		Settings:    tools,
@@ -391,14 +436,33 @@ func testTranslate(t testing.TB, store *testStore, device *testDevice) *testTran
 	if err != nil {
 		t.Fatalf("NewTranslate failed: %v", err)
 	}
+	// addService is one of the user's own services added the whole way: the
+	// settings hold it, and a translator for it is in the registry.
+	//
+	// It is what the window does when 添加 is pressed, for the tests that are
+	// about what the window draws afterwards rather than about the button. The
+	// two steps are in the order production takes them, because that order is
+	// the reason it works: the settings first, so the translator has an
+	// address to read, and the registry second, so there is one to read it.
+	addService := func(settings translate.CustomSettings) string {
+		id, err := service.AddCustomTranslator(context.Background(), settings)
+		if err != nil {
+			t.Fatalf("AddCustomTranslator failed: %v", err)
+		}
+		if err := registerOwn(); err != nil {
+			t.Fatalf("registering the service failed: %v", err)
+		}
+		return id
+	}
 	return &testTranslateFixture{
-		service:   service,
-		deepseek:  reply,
-		custom:    custom,
-		tools:     tools,
-		device:    device,
-		selection: selection,
-		timeline:  timeline,
+		service:     service,
+		own:         own,
+		registerOwn: registerOwn,
+		addService:  addService,
+		tools:       tools,
+		device:      device,
+		selection:   selection,
+		timeline:    timeline,
 	}
 }
 
@@ -413,6 +477,10 @@ type testTranslator struct {
 	id         string
 	name       string
 	descriptor domain.TranslatorDescriptor
+	// baseURL, when set, is where a translator whose address is a setting
+	// reads that address from: the fake's stand-in for the real backend's
+	// closure over the settings.
+	baseURL func() string
 
 	mu      sync.Mutex
 	result  domain.TranslationResult
@@ -426,6 +494,15 @@ type testTranslator struct {
 	// requests is every request the translator was given, in order, so a
 	// test can say what was asked and how often.
 	requests []domain.TranslationRequest
+	// keepProviderID makes the translator answer with the result's own
+	// provider id rather than its registered one. It is how a test stands in
+	// for the free tier, whose answer names the engine that served it
+	// ("免费（微软）") rather than the tier.
+	keepProviderID bool
+	// nameFromService, when set, is what a translator of the user's own is
+	// called: their name for the service, read from the settings, rather than
+	// a name written down in a test.
+	nameFromService func() string
 	// timeline, when a test sets one, records that the request went out —
 	// which is what says whether the card had the keyboard before it did.
 	timeline *timeline
@@ -439,12 +516,28 @@ func (t *testTranslator) Descriptor() domain.TranslatorDescriptor {
 	// What a translator says about itself is written down, the way the real
 	// ones write it: a fake that filled its own fields in on the way out
 	// would agree with code that had forgotten to.
-	descriptor.DisplayName = t.name
+	// A translator of the user's own is called what the user called the
+	// service: the settings are where that name lives, and reading it here is
+	// what makes the window show it.
+	name := t.name
+	if t.nameFromService != nil {
+		name = t.nameFromService()
+	}
+	descriptor.DisplayName = name
 	if len(descriptor.CredentialKeys) == 0 {
 		descriptor.CredentialKeys = []string{"apiKey"}
 	}
 	if descriptor.DocsURL == "" {
 		descriptor.DocsURL = "https://example.com/keys"
+	}
+	// A translator whose address is a setting computes it from that setting,
+	// the way the real custom backend does. It is what makes the endpoint the
+	// window shows the address the user saved rather than one written down in
+	// a test.
+	if descriptor.BaseURLSetting != "" && t.baseURL != nil {
+		if base := strings.TrimRight(t.baseURL(), "/"); base != "" {
+			descriptor.Endpoint = base + "/chat/completions"
+		}
 	}
 	return descriptor
 }
@@ -467,7 +560,9 @@ func (t *testTranslator) Translate(_ context.Context, _ domain.Credentials, req 
 	result.SourceText = req.Text
 	result.SourceLang = req.SourceLang
 	result.TargetLang = req.TargetLang
-	result.ProviderID = t.id
+	if !t.keepProviderID {
+		result.ProviderID = t.id
+	}
 	if result.TranslatedText == "" && len(result.Segments) == 0 {
 		result.TranslatedText = "译文"
 	}
@@ -513,26 +608,115 @@ func (t *testTranslator) lastRequest() domain.TranslationRequest {
 	return t.requests[len(t.requests)-1]
 }
 
-// testTranslators is a domain.TranslatorRegistry over the fakes.
-type testTranslators []*testTranslator
-
-func (r testTranslators) Translator(id string) (domain.Translator, error) {
-	for _, reply := range r {
-		if reply.id == id {
-			return reply, nil
-		}
-	}
-	return nil, fmt.Errorf("%w: translator %s", domain.ErrProviderNotFound, id)
+// ownRegistry is a domain.TranslatorRegistry that can grow: it stands in for the
+// registry the assembly builds, over which a translator is registered for every
+// service the settings hold.
+//
+// It is a registry a test can add to because that is what production does: the
+// settings window adds a service and the assembly registers the translator that
+// asks it, in that order. A test whose registry could not grow could never see
+// a service the user added.
+type ownRegistry struct {
+	mu       sync.Mutex
+	entries  map[string]*testTranslator
+	services *translate.Section
 }
 
-func (r testTranslators) TranslatorIDs() []string {
-	ids := make([]string, 0, len(r))
-	for _, reply := range r {
-		ids = append(ids, reply.id)
+// translatorRegistry returns an empty registry whose translators of the user's
+// own resolve their addresses from a section.
+func translatorRegistry(services *translate.Section) *ownRegistry {
+	return &ownRegistry{entries: map[string]*testTranslator{}, services: services}
+}
+
+// add puts translators in the registry, as the assembly does at startup.
+func (r *ownRegistry) add(replies ...*testTranslator) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, reply := range replies {
+		r.entries[reply.id] = reply
+	}
+}
+
+// addOwnService registers the translator for one of the user's own services,
+// reading its address and its name from the settings the way the real one does.
+func (r *ownRegistry) addOwnService(id string) {
+	services := r.services
+	reply := &testTranslator{
+		id:   id,
+		name: translate.CustomSettings{}.DisplayName,
+		descriptor: domain.TranslatorDescriptor{
+			BaseURLSetting:       "custom.baseURL",
+			AllowEmptyCredential: true,
+		},
+	}
+	reply.baseURL = func() string {
+		service, _ := services.Current().CustomService(id)
+		return service.BaseURL
+	}
+	reply.nameFromService = func() string {
+		service, ok := services.Current().CustomService(id)
+		if !ok || strings.TrimSpace(service.DisplayName) == "" {
+			return "自定义"
+		}
+		return service.DisplayName
+	}
+	r.add(reply)
+}
+
+func (r *ownRegistry) Translator(id string) (domain.Translator, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	reply, ok := r.entries[id]
+	if !ok {
+		return nil, fmt.Errorf("%w: translator %s", domain.ErrProviderNotFound, id)
+	}
+	return reply, nil
+}
+
+func (r *ownRegistry) TranslatorIDs() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ids := make([]string, 0, len(r.entries))
+	for id := range r.entries {
+		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	return ids
 }
+
+// Has reports whether a translator is registered, which is what the assembly
+// asks before registering one the user just added.
+func (r *ownRegistry) Has(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	_, ok := r.entries[id]
+	return ok
+}
+
+// Remove takes a translator out, which is what the assembly does when the user
+// removes one of their own services.
+func (r *ownRegistry) Remove(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.entries, id)
+}
+
+// translator is one of the registered translators, by id. It is how a test
+// reaches a fake it did not build itself — one the registry holds because the
+// assembly put it there.
+func (f *testTranslateFixture) translator(t *testing.T, id string) *testTranslator {
+	t.Helper()
+	f.own.mu.Lock()
+	defer f.own.mu.Unlock()
+	reply, ok := f.own.entries[id]
+	if !ok {
+		t.Fatalf("no translator is registered under %s", id)
+	}
+	return reply
+}
+
+// ensure the registry is what the tool asks for.
+var _ domain.TranslatorRegistry = (*ownRegistry)(nil)
 
 // testShortcuts is a ShortcutRegistrar the test drives: it records what was
 // registered, so that the rules around a global shortcut — bind it, show a
@@ -605,6 +789,13 @@ func (s *testShortcuts) bound() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.accelerator
+}
+
+// callback is what the bound key runs, or nil when nothing is bound.
+func (s *testShortcuts) callback() func() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.fn
 }
 
 func (s *testShortcuts) counts() (registrations, releases int) {

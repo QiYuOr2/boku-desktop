@@ -39,6 +39,12 @@ const sectionName = "translate"
 // named here, and not imported from the package that implements it, because the
 // file's field names are a storage decision: this package must keep reading a
 // file whose translator moved.
+//
+// It is the *prefix* of the ids a user's own services are stored under, not an
+// id of its own: the user may keep several services, and each one is a separate
+// entry ("custom", "custom-2", …) so that its name and its address are its own.
+// A file written before there could be more than one holds the bare "custom",
+// and it is read as the first of them.
 const customID = "custom"
 
 // StoreSettings is the part of the settings store this feature needs.
@@ -115,9 +121,18 @@ func (s *Section) Decode(values map[string]json.RawMessage) error {
 	if err := into(values, keyCustomServices, &custom); err != nil {
 		return err
 	}
-	if own, present := custom[customID]; present {
-		settings.Custom = CustomSettings{BaseURL: own.BaseURL, DisplayName: own.DisplayName}
+	// Every entry is kept, under the id it was stored as. An entry with no
+	// address is dropped rather than kept as a nameless service: there is
+	// nothing to ask, and a row the user cannot use is a row in the way.
+	services := make(map[string]CustomSettings, len(custom))
+	for id, own := range custom {
+		cleaned := CustomSettings{BaseURL: own.BaseURL, DisplayName: own.DisplayName}.Normalize()
+		if cleaned.BaseURL == "" {
+			continue
+		}
+		services[id] = cleaned
 	}
+	settings.Custom = services
 	s.current = settings.Normalize()
 	return nil
 }
@@ -126,6 +141,13 @@ func (s *Section) Decode(values map[string]json.RawMessage) error {
 // merge into the file.
 func (s *Section) Encode() (map[string]any, error) {
 	settings := s.current.Normalize()
+	services := make(map[string]customDocument, len(settings.Custom))
+	for id, service := range settings.Custom {
+		services[id] = customDocument{
+			BaseURL:     service.BaseURL,
+			DisplayName: service.DisplayName,
+		}
+	}
 	return map[string]any{
 		keyEnabled:       settings.Enabled,
 		keyAccelerator:   settings.AcceleratorOr(),
@@ -138,12 +160,7 @@ func (s *Section) Encode() (map[string]any, error) {
 		// presence is what tells a reader that this build wrote the file, and
 		// therefore that an absent key inside it is a choice rather than a
 		// version's gap.
-		keyCustomServices: map[string]customDocument{
-			customID: {
-				BaseURL:     settings.Custom.BaseURL,
-				DisplayName: settings.Custom.DisplayName,
-			},
-		},
+		keyCustomServices: services,
 	}, nil
 }
 

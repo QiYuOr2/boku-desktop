@@ -70,6 +70,33 @@ func (r *Registry) Translator(id string) (domain.Translator, error) {
 	return reply, nil
 }
 
+// Has reports whether a translator is registered under an id.
+//
+// It is what a caller asks before registering one that may already be there:
+// the user's own services are registered as they are added, and registering the
+// same one twice is not a mistake worth failing on.
+func (r *Registry) Has(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.byIDs[strings.TrimSpace(id)]
+	return ok
+}
+
+// Remove takes a translator out of the registry.
+//
+// It exists for the services the user runs themselves, which come and go while
+// the application runs: removing one has to take its translator with it, or the
+// window keeps a row for a service that is no longer in the settings — a card
+// with no address, offering to connect to nothing.
+//
+// Removing an id nobody registered is not a mistake: the caller is saying "this
+// one is not here any more", and it already is not.
+func (r *Registry) Remove(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.byIDs, strings.TrimSpace(id))
+}
+
 // TranslatorIDs returns the registered ids, sorted, which is the order the
 // settings window offers them in.
 func (r *Registry) TranslatorIDs() []string {

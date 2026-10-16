@@ -2,6 +2,7 @@ package app
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 
@@ -279,8 +280,11 @@ func (s *State) translateNoticeBlock(c *ui.Context) {
 					notice(c, notePlain, "划词翻译已关闭，快捷键不再响应。")
 					notice(c, notePlain, "在设置的「划词翻译」一节里打开它。")
 				case translateUnconfigured:
+					// The service the settings name is not one this build has,
+					// or it needs a key that is not there. Either way the fix
+					// is in the settings, and the card says which service.
 					notice(c, noteWarning, s.translation.failure)
-					notice(c, notePlain, "在设置里选择一个翻译服务，并填入它的 API Key。")
+					notice(c, notePlain, "在设置的「划词翻译」里重新选一个翻译服务。")
 				case translateNoText:
 					notice(c, noteWarning, "剪贴板里没有可翻译的文本。")
 					notice(c, notePlain, "选中文本并复制，再按一次快捷键。")
@@ -348,17 +352,22 @@ func (s *State) translateFoot(c *ui.Context) {
 
 // translationOrigin is what the foot says about where the translation came
 // from: the service, and nothing more when there is none to name.
+//
+// The free tier is one entry in the settings and several endpoints behind it,
+// so what it answers with is which engine actually served this translation —
+// "免费（微软）" — and not the id of the tier. A footer that said only "free"
+// would leave the user unable to tell where their text went, which §12 of the
+// product design does not allow.
 func (s *State) translationOrigin() string {
 	switch s.translation.status {
 	case translateReady:
-		name := s.translation.result.ProviderName
-		if name == "" {
-			name = s.translation.result.ProviderID
+		if name := strings.TrimSpace(s.translation.result.ProviderName); name != "" {
+			return "AI 翻译 · " + name
 		}
-		if name == "" {
-			return "AI 翻译"
+		if id := strings.TrimSpace(s.translation.result.ProviderID); id != "" {
+			return "AI 翻译 · " + id
 		}
-		return "AI 翻译 · " + name
+		return "AI 翻译"
 	case translateLoading:
 		return "AI 翻译 · 正在请求"
 	default:

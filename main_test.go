@@ -23,7 +23,7 @@ import (
 // its provider, can be paired wrongly. That is a startup error, and it can
 // be checked without a window.
 func TestServicesAssembleThePanels(t *testing.T) {
-	panels, secrets, clip, translation, err := services(t.TempDir(), "0.1.0")
+	panels, secrets, clip, translation, _, err := services(t.TempDir(), "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestRecordPanicsWritesItDownAndRaisesItAgain(t *testing.T) {
 // a translator without a settings store, or one whose settings it cannot
 // read, is a startup mistake worth catching here.
 func TestServicesAssembleTheTranslators(t *testing.T) {
-	_, _, _, translation, err := services(t.TempDir(), "0.1.0")
+	_, _, _, translation, own, err := services(t.TempDir(), "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}
@@ -240,8 +240,11 @@ func TestServicesAssembleTheTranslators(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Providers failed: %v", err)
 	}
-	if len(views) != 2 {
-		t.Fatalf("the application has %d translators, want 2: %+v", len(views), views)
+	// The three the application ships with. The user's own services are not
+	// among them: there are none until the user adds one, and a translator for
+	// a service nobody configured would be a row that cannot answer.
+	if len(views) != 3 {
+		t.Fatalf("the application has %d translators, want 3: %+v", len(views), views)
 	}
 	byID := map[string]bool{}
 	for _, view := range views {
@@ -250,14 +253,81 @@ func TestServicesAssembleTheTranslators(t *testing.T) {
 			t.Errorf("translator %s is missing its name or its documentation link: %+v", view.ID, view)
 		}
 	}
-	for _, want := range []string{"deepseek", "custom"} {
+	for _, want := range []string{"free.microsoft", "free.bilibili", "deepseek"} {
 		if !byID[want] {
 			t.Errorf("translator %s is not registered: %+v", want, views)
 		}
 	}
-	// The tool starts with the built-in translator and no credential: it
-	// says where to configure one rather than reaching for the network.
-	if _, err := translation.Translate(context.Background(), translate.Request{Text: "hello"}); !errors.Is(err, domain.ErrCredentialMissing) {
-		t.Errorf("Translate error = %v, want ErrCredentialMissing before anything is stored", err)
+	// The free engines are the two choices a fresh installation has, and each
+	// is usable with nothing configured at all: that is the whole point of
+	// them.
+	seen := 0
+	for _, view := range views {
+		if !strings.HasPrefix(view.ID, "free.") {
+			continue
+		}
+		seen++
+		if !view.Configured || view.NeedsCredential {
+			t.Errorf("the free engine %s is not usable out of the box: %+v", view.ID, view)
+		}
 	}
+	if seen != 2 {
+		t.Errorf("the application has %d free engines, want two", seen)
+	}
+	if settings := translationSettingsOf(t, translation); settings.ProviderOr() != "free.microsoft" {
+		t.Errorf("a fresh installation translates with %q, want the Microsoft engine", settings.ProviderOr())
+	}
+
+	// A service of the user's own is added the whole way: stored, registered,
+	// and then a translator the tool can actually ask.
+	id, err := translation.AddCustomTranslator(context.Background(), translate.CustomSettings{
+		BaseURL:     "http://127.0.0.1:11434/v1",
+		DisplayName: "本地测试服务",
+	})
+	if err != nil {
+		t.Fatalf("AddCustomTranslator failed: %v", err)
+	}
+	if err := own.registerAll(); err != nil {
+		t.Fatalf("registering the user's own services failed: %v", err)
+	}
+	views, err = translation.Providers(context.Background())
+	if err != nil {
+		t.Fatalf("Providers failed: %v", err)
+	}
+	found := false
+	for _, view := range views {
+		if view.ID != id {
+			continue
+		}
+		found = true
+		if view.DisplayName != "本地测试服务" {
+			t.Errorf("the service is called %q, want the name the user gave it", view.DisplayName)
+		}
+		if view.Endpoint != "http://127.0.0.1:11434/v1/chat/completions" {
+			t.Errorf("endpoint = %q", view.Endpoint)
+		}
+		if !view.Configured {
+			t.Error("the service the user just added is not configured")
+		}
+	}
+	if !found {
+		t.Errorf("the added service has no translator: %+v", views)
+	}
+	// The first service takes the bare id, which is what a file written before
+	// there could be several services holds.
+	if id != "custom" {
+		t.Errorf("the first service was stored as %q, want custom", id)
+	}
+}
+
+// translationSettingsOf reads the tool's configuration, failing the test when
+// it cannot be read: an assembly that cannot be read back is a mistake of its
+// own.
+func translationSettingsOf(t *testing.T, translation *translate.Translate) translate.Settings {
+	t.Helper()
+	settings, err := translation.Settings()
+	if err != nil {
+		t.Fatalf("Settings failed: %v", err)
+	}
+	return settings
 }

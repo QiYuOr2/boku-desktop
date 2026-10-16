@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"runtime"
 	"strconv"
@@ -12,6 +13,8 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"boku/internal/clipboard"
+	contractfree "boku/internal/contract/freetranslate"
+	"boku/internal/credential"
 	"boku/internal/domain"
 	"boku/internal/kit"
 	"boku/internal/panel"
@@ -89,6 +92,22 @@ func (s *State) settingsPages() []*settingsPage {
 // and a name.
 const customTranslatorID = "custom"
 
+// freeTranslatorIDs are the free engines: no key, nothing to configure, and
+// what a fresh installation starts on. They are named here for the reason the
+// storage package names them — the settings file holds the same strings, and
+// one copy of a value that must match is one chance to get it wrong.
+const (
+	freeMicrosoftID = contractfree.MicrosoftEdge
+	freeBilibiliID  = contractfree.Bilibili
+)
+
+// isFreeTranslator reports whether a translator is one of the free engines,
+// which is what tells the picker to draw it in the free group and the API Key
+// section to leave it out.
+func isFreeTranslator(id string) bool {
+	return id == freeMicrosoftID || id == freeBilibiliID
+}
+
 // The connect form's answers.
 const (
 	statusNone = iota
@@ -117,10 +136,12 @@ type connectForm struct {
 	keys map[string]string
 	// hasCredential is whether each provider has one.
 	hasCredential map[string]bool
-	// customName and customURL are the user's own service, as typed. They
-	// are not credentials: they live in the settings file, in the clear.
-	customName string
-	customURL  string
+	// newName and newURL are the service being added, as typed into the
+	// blank card at the foot of the section. They are not credentials: they
+	// live in the settings file, in the clear, and they are cleared once the
+	// service is added.
+	newName string
+	newURL  string
 	// busy is the card that is being tested or saved, or empty.
 	busy string
 	// busyNote says what that card is busy with, as the line under it reads.
@@ -463,21 +484,52 @@ func (s *State) apiKeySection(c *ui.Context, head *ui.Handle) {
 		stacked(c, float32(16), func() {
 			sectionHeadSmall(c, head, s.keyMark, colorStoneInk, "API Key", "配置各 AI 服务密钥")
 
-			// noticePanel(c, "凭据以明文保存在 "+s.credentialFile()+
-			// 	"，仅靠文件权限保护。请勿存放他人 Key。")
-
-			cards := s.translateCards()
-			if len(cards) == 0 {
-				notice(c, notePlain, "这个版本没有可配置的翻译服务。")
-				return
-			}
+			// Only the services that have a key: this section is a key form,
+			// and a card here is a field to fill in. The services that need
+			// nothing are chosen in the translation section instead, where the
+			// user is deciding what to translate with rather than what to
+			// type.
+			cards := keyedTranslateCards(s.translateCards())
 			stacked(c, float32(12), func() {
 				for _, card := range cards {
 					s.apiKeyCard(c, card)
 				}
+				// The blank card is always the last one, and it is always
+				// there: adding a second service is how a user who already
+				// has one gets another, and a section whose only way to add is
+				// to email the author is not one.
+				s.newCustomServiceCard(c)
 			})
 		})
 	})
+}
+
+// keyedTranslateCards is the services the API Key section draws: the ones that
+// have a key to store, in the order they came in, with the user's own services
+// last.
+//
+// The user's own services belong to this section even though their keys are
+// optional: a card is where an address and a name are typed, and those are
+// configuration rather than a credential. What is left out is the free engines,
+// which have nothing to type.
+//
+// They are drawn last because they are a different kind of thing from the rest:
+// the named services are a fixed catalogue the application knows, and these are
+// the user's own entries, added by them. Reading a list is easier when what is
+// fixed comes first and what was added comes after it.
+func keyedTranslateCards(cards []translateCard) []translateCard {
+	keyed := make([]translateCard, 0, len(cards))
+	own := make([]translateCard, 0, len(cards))
+	for _, card := range cards {
+		if translate.IsCustomService(card.id) {
+			own = append(own, card)
+			continue
+		}
+		if card.needsCredential {
+			keyed = append(keyed, card)
+		}
+	}
+	return append(keyed, own...)
 }
 
 // apiKeyCard is one service: its name and its state on the first line, the
@@ -496,19 +548,6 @@ func (s *State) apiKeyCard(c *ui.Context, card translateCard) {
 		Children(func() {
 			stacked(c, float32(6), func() {
 				s.apiKeyCardHead(c, card)
-
-				// The user's own service needs a name and an address before
-				// it has anything to send to: they are the two fields that
-				// make it a service rather than a word. They say what they
-				// are where they are written, since the card keeps no room
-				// for a label over each of them.
-				if card.id == customTranslatorID {
-					stacked(c, float32(6), func() {
-						s.customNameField(c)
-						s.customURLField(c)
-					})
-				}
-
 				s.credentialRow(c, card)
 				s.cardStatusLine(c, card)
 				s.apiKeyCardNote(c, card)
@@ -519,6 +558,21 @@ func (s *State) apiKeyCard(c *ui.Context, card translateCard) {
 // apiKeyCardHead is the card's first line: what the service is called, whether
 // it can be used, and — once a credential is stored — the way to take that
 // credential away again.
+//
+// Every card wears the state badge, the user's own included: a service of
+// theirs is configured when it has an address, which is a fact the badge can
+// state without saying anything untrue. What a card does NOT wear is a badge
+// for a credential it does not need — see credentialHint.
+//
+// 删除 is on every card the user can take something away from, which is two
+// kinds of card and not one:
+//
+//   - a built-in service, where what goes is the key it holds — so a card with
+//     nothing stored has nothing for the word to do;
+//   - one of the user's own services, where what goes is the service itself —
+//     and there is always something to remove, whether or not it has a key.
+//     A local service needs no key at all, and gating the word on one left the
+//     user with a card they had added and could not get rid of.
 func (s *State) apiKeyCardHead(c *ui.Context, card translateCard) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
 		ui.Text(c, card.displayName).
@@ -528,14 +582,65 @@ func (s *State) apiKeyCardHead(c *ui.Context, card translateCard) {
 			SingleLine()
 		configuredBadge(c, card.configured)
 		ui.Spacer(c)
-		// The card that holds something is the card that can lose it: a
-		// service with nothing stored has nothing for a 删除 to do.
-		if !s.form.hasCredential[card.id] {
+		if !cardCanBeRemoved(card, s.form.hasCredential[card.id]) {
 			return
 		}
 		s.deleteActions(c, card)
 	})
 }
+
+// cardCanBeRemoved reports whether 删除 does anything on a card.
+//
+// The two kinds of card answer it differently and for the same reason — the
+// word is drawn when there is something for it to take away: a service of the
+// user's own is always removable, and a built-in one only once it holds a key.
+func cardCanBeRemoved(card translateCard, hasCredential bool) bool {
+	return translate.IsCustomService(card.id) || hasCredential
+}
+
+// newCustomServiceCard is the blank card at the foot of the section: where the
+// user adds a service of their own.
+//
+// It is a card rather than a button because adding one is the same shape of
+// work as configuring one — a name, an address, a key — and the user has just
+// read three cards that look like this. A dialog would be a second place to
+// learn the same form.
+//
+// It is drawn even when services exist: a user who already has one is exactly
+// the user who wants a second.
+func (s *State) newCustomServiceCard(c *ui.Context) {
+	ui.Column(c).FillWidth().
+		Background(colorSurface).
+		Border(1, colorBorder).
+		Radius(radiusField).
+		Padding(float32(10), float32(12)).
+		Children(func() {
+			stacked(c, float32(6), func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
+					ui.Text(c, customServiceCardTitle).
+						FontSize(sizeCardName).
+						FontWeight(600).
+						TextColor(colorTextSoft).
+						SingleLine()
+					kindBadge(c, colorStoneTile, colorStoneInk, "OpenAI 兼容")
+				})
+				stacked(c, float32(6), func() {
+					s.newServiceNameField(c)
+					s.newServiceURLField(c)
+				})
+				s.newServiceRow(c)
+				s.cardStatusLine(c, translateCard{id: newCustomServiceID})
+			})
+		})
+}
+
+// customServiceCardTitle is what the blank card is called.
+const customServiceCardTitle = "自定义"
+
+// newCustomServiceID is the id the blank card's status is filed under. It is
+// not a translator id — the service gets one when it is added — and it is
+// spelled so that it cannot collide with one.
+const newCustomServiceID = "custom-new"
 
 // deleteActions is what can be done with a stored credential, and it asks
 // twice: the first press turns the word into a question, and only the second
@@ -581,14 +686,15 @@ func (s *State) credentialRow(c *ui.Context, card translateCard) {
 	})
 }
 
-// apiKeyCardNote is the smallest line under a card: where the key comes from.
-// The user's own service has no page to point at, and its card has said where
-// it asks in the field above.
+// apiKeyCardNote is the smallest line under a card.
+//
+// It is empty for every card: the line that used to be here said where a
+// service's balance shows, and it was removed rather than rewritten — the
+// balance is not what an API key form is about, and the address it repeated is
+// already in the field above it. The call is kept so that a card that does owe
+// the user a line has somewhere to put it.
 func (s *State) apiKeyCardNote(c *ui.Context, card translateCard) {
-	if card.id == customTranslatorID || strings.TrimSpace(card.docsURL) == "" {
-		return
-	}
-	cardHint(c, "余额见悬浮窗 · "+docsAddress(card.docsURL))
+	_ = card
 }
 
 // configuredBadge says whether a service is configured, in the color that
@@ -648,34 +754,62 @@ func (s *State) showCardInput(id string) {
 func (s *State) keyValue(id string) string { return s.cardInput(id) }
 
 // clearCardInput forgets what was typed into a card, once it has been saved.
+//
+// It clears the card's filed value whether or not that card is the one the
+// single field is currently bound to: a save can happen in the frame after the
+// user moved to another card, and leaving the value filed would put it back in
+// the field the next time the frame drew it — a saved key reappearing in the
+// box it was typed into.
 func (s *State) clearCardInput(id string) {
 	if s.form.keys != nil {
-		s.clearCardInput(id)
+		delete(s.form.keys, id)
 	}
 	if s.form.inputCard == id {
 		s.form.input = ""
 	}
 }
 
-// customNameField and customURLField are the two fields of the user's own
-// service. They are not credentials: they are on the window's own face, not
-// masked, and they are stored in the settings file.
+// newServiceNameField and newServiceURLField are the two fields of the card
+// that adds a service. They are not credentials: they are on the window's own
+// face, not masked, and they are stored in the settings file once the service
+// is added.
 //
 // They are named by their own hint rather than by a label above them — the
 // design's compact card keeps its labels where the value goes — so each
 // carries its name for assistive technology as well.
-func (s *State) customNameField(c *ui.Context) {
-	field := ui.TextInput(c, &s.form.customName)
+func (s *State) newServiceNameField(c *ui.Context) {
+	field := ui.TextInput(c, &s.form.newName)
 	field.Placeholder("名称，如本地 Ollama").Label("名称").SingleLine()
 	field.Disabled(s.form.busy != "")
 	fieldFrame(c, field).FillWidth()
 }
 
-func (s *State) customURLField(c *ui.Context) {
-	field := ui.TextInput(c, &s.form.customURL)
+func (s *State) newServiceURLField(c *ui.Context) {
+	field := ui.TextInput(c, &s.form.newURL)
 	field.Placeholder("Base URL  https://api.example.com/v1").Label("Base URL").SingleLine()
 	field.Disabled(s.form.busy != "")
 	fieldFrame(c, field).FillWidth().Font("monospace")
+}
+
+// newServiceRow is the blank card's second line: the optional key and the one
+// action that puts the service into the list above.
+//
+// It is not the same row as a configured card's: that one saves a change to a
+// service that exists, and this one creates one. Two words, because they are
+// two different things — 保存 would say the service is already there.
+func (s *State) newServiceRow(c *ui.Context) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(6)).Children(func() {
+		field := ui.TextInput(c, &s.form.input)
+		s.showCardInput(newCustomServiceID)
+		field.Password().Placeholder("API Key（可选）").SingleLine()
+		field.Label("自定义服务 API Key")
+		field.Disabled(s.form.busy != "")
+		fieldFrame(c, field).Grow(1).Font("monospace")
+
+		if button := cardButton(c, "添加", buttonPrimary); button.Clicked() {
+			s.addCustomService()
+		}
+	})
 }
 
 // cardStatusLine reports what one card's last attempt said, under that card.
@@ -721,27 +855,60 @@ func (s *State) cancelDelete() {
 	s.Refresh()
 }
 
-// deleteCredential removes the credential a card holds. The write runs off
-// the main thread like every other write in this file; the answer comes back
-// through Window.Update, which is the only way a goroutine may touch this
-// state.
+// deleteCredential removes the credential a card holds — and, for a card that
+// is one of the user's own services, the service itself.
 //
-// Nothing else about the card is touched: the name and the address of a
-// service the user configured are settings, not credentials, and they stay
-// where they are. What the card loses is the value the 测试 and 保存 buttons
-// act on, which is what the confirmation is about.
+// The two are different things and the confirmation means different things with
+// them: a service of the user's own is an entry they added, and 删除 on it
+// takes the entry away, name and address and key together. A built-in
+// service's name and address are not the user's to remove, so its 删除 takes
+// the key alone and the card stays where it is.
+//
+// The write runs off the main thread like every other write in this file; the
+// answer comes back through Window.Update, which is the only way a goroutine
+// may touch this state.
 func (s *State) deleteCredential(card translateCard) {
-	if s.form.busy != "" || s.secretService == nil {
+	if s.form.busy != "" || s.translate == nil {
+		return
+	}
+	ownService := translate.IsCustomService(card.id)
+	if !ownService && s.secretService == nil {
 		return
 	}
 	secrets, window := s.secretService, s.settingsWindow
+	service := s.translate
 	id, key := card.id, card.credentialKey
 	s.form.busy, s.form.deleteArmed = card.id, ""
-	s.form.busyNote = "正在删除 " + credentialLabel(key) + "…"
+	if ownService {
+		s.form.busyNote = "正在删除这个服务…"
+	} else {
+		s.form.busyNote = "正在删除 " + credentialLabel(key) + "…"
+	}
 	s.setCardStatus(id, statusNone, "")
 
 	go func() {
-		err := secrets.Delete(backgroundContext(), id, key)
+		ctx := backgroundContext()
+		var err error
+		if ownService {
+			// The order is the reverse of adding one: the service is
+			// forgotten first, so that nothing asks an address that is about
+			// to be gone, and its key is dropped after.
+			err = service.RemoveCustomTranslator(ctx, id)
+			if err == nil {
+				err = forgetCredential(ctx, secrets, id, key, s.form.hasCredential[id])
+			}
+			if err == nil {
+				// And its translator goes with it. The cards are drawn from
+				// the registry, so a service taken out of the settings but
+				// left in the registry is a card that stays on the page with
+				// no address and nothing to ask.
+				if syncErr := s.unregisterOwnServices(); syncErr != nil {
+					slog.Warn("the registry could not be brought in step", "error", syncErr)
+				}
+			}
+		} else {
+			err = secrets.Delete(ctx, id, key)
+		}
 		if window == nil {
 			// No window: this state exists only while a test builds the
 			// view, and there is nothing to hand the answer to.
@@ -749,6 +916,25 @@ func (s *State) deleteCredential(card translateCard) {
 		}
 		window.Update(func() { s.credentialForgotten(id, err) })
 	}()
+}
+
+// forgetCredential drops a service's key, when it has one.
+//
+// A service the user runs themselves may have been added with no key at all —
+// a model on their own machine needs none — and asking the store to delete
+// something that was never there answers ErrSecretNotFound. That is not a
+// failure of the removal: the service is gone, which is what the user asked
+// for, and reporting "not found" over it would tell them the deletion did not
+// work when it did.
+func forgetCredential(ctx context.Context, secrets *credential.Secrets, id, key string, stored bool) error {
+	if secrets == nil || !stored {
+		return nil
+	}
+	err := secrets.Delete(ctx, id, key)
+	if errors.Is(err, domain.ErrSecretNotFound) {
+		return nil
+	}
+	return err
 }
 
 // credentialForgotten is what a card says once its credential is gone: what is
@@ -767,6 +953,13 @@ func (s *State) credentialForgotten(id string, err error) {
 // translateSection is the translation tool's own settings: whether it runs,
 // what it asks, how much it annotates, what its window does, and which key
 // opens it.
+//
+// Everything but the switch is drawn only while the tool is on. The rest of the
+// section configures a tool that is not running — which service to ask, how to
+// annotate, which key opens it — and a page full of controls for something the
+// user has just turned off is a page that invites them to configure a thing
+// that will not happen. The switch stays, because it is how they turn it back
+// on.
 func (s *State) translateSection(c *ui.Context, head *ui.Handle) {
 	if s.translate == nil {
 		return
@@ -774,7 +967,7 @@ func (s *State) translateSection(c *ui.Context, head *ui.Handle) {
 	settings := s.translateSettingsOr()
 	inset(c, func() {
 		stacked(c, float32(16), func() {
-			sectionHead(c, head, s.translationMark, colorStoneInk, "划词翻译", "任意语言 → 中文 · AI 翻译")
+			sectionHead(c, head, s.translationMark, colorStoneInk, "划词翻译", "任意语言 → 中文 · 免费基础 + AI 翻译")
 
 			stacked(c, float32(12), func() {
 				enabled := settings.Enabled
@@ -782,33 +975,124 @@ func (s *State) translateSection(c *ui.Context, head *ui.Handle) {
 					FontSize(sizeBody).
 					OnClick(func() { s.setTranslationEnabled(enabled) })
 
+				if !showsTranslationControls(settings) {
+					notice(c, notePlain, "划词翻译已关闭，快捷键不再占用。打开后可以在这里选择翻译服务。")
+					s.translateNoticeLine(c)
+					return
+				}
+
 				s.providerPicker(c, settings)
 				s.annotationSwitches(c, settings)
 				s.windowSwitches(c, settings)
 				s.shortcutSwitches(c)
-				if s.translateNotice != "" {
-					notice(c, notePlain, s.translateNotice)
-				}
+				s.translateNoticeLine(c)
 			})
 		})
 	})
 }
 
-// providerPicker is the choice of translator: one row per registered
-// service, with whether it can be used now. A service with no key is shown
-// and cannot be picked, rather than hidden — the user has to know it exists
-// to know what to configure.
+// translateNoticeLine is what the last change to the tool's settings said.
+func (s *State) translateNoticeLine(c *ui.Context) {
+	if s.translateNotice != "" {
+		notice(c, notePlain, s.translateNotice)
+	}
+}
+
+// showsTranslationControls reports whether the translation section draws the
+// settings that configure the tool — the service picker, the annotation
+// switches, the window switches and the shortcut — or only the switch that
+// turns it on.
+//
+// It is the switch itself that decides, because it is the same fact: a tool
+// that is not running has nothing to configure, and the only thing its section
+// owes the user is the way back on.
+func showsTranslationControls(settings translate.Settings) bool {
+	return settings.Enabled
+}
+
+// providerPicker is the choice of translator, in the two groups the design
+// draws: the free services (no key, nothing to configure) above, and the
+// services that need an API key below.
+//
+// The split is not decoration. A user who has just installed Boku has to be
+// able to answer "which of these do I have to do something about" at a glance,
+// and the answer is "none of the first group".
+//
+// Each row is one translator, and picking one picks that translator: the free
+// engines are two choices, not one choice with a pool behind it. A user who
+// picks 微软 Edge 翻译 asks it, and if it fails the card says so rather than
+// quietly handing the text to the other endpoint — the choice is theirs, and
+// the answer is about the one they made.
 func (s *State) providerPicker(c *ui.Context, settings translate.Settings) {
-	cards := s.translateCards()
+	cards := pickerTranslateCards(s.translateCards())
 	stacked(c, float32(8), func() {
-		sectionLabel(c, "使用的 AI")
-		stacked(c, float32(6), func() {
-			for _, card := range cards {
-				s.providerOption(c, card, settings)
-			}
-		})
-		notice(c, notePlain, "仅显示已配置 API Key 的服务可选。")
+		sectionLabel(c, "翻译服务")
+
+		free, keyed := splitTranslateCards(cards)
+		if len(free) > 0 {
+			stacked(c, float32(6), func() {
+				pickerGroupLabel(c, "基础翻译（免费 · 无需配置）")
+				for _, card := range free {
+					s.providerOption(c, card, settings)
+				}
+			})
+		}
+		if len(keyed) > 0 {
+			stacked(c, float32(6), func() {
+				pickerGroupLabel(c, "AI 大模型（需配置 API Key）")
+				for _, card := range keyed {
+					s.providerOption(c, card, settings)
+				}
+			})
+		}
+		notice(c, notePlain, "免费服务无需密钥；AI 服务仅显示已配置 API Key 的可选。")
 	})
+}
+
+// pickerTranslateCards is the rows the picker draws, in the order the registry
+// gave them.
+//
+// The order is never rearranged — not even to put the service in use first —
+// because a list of choices that moves while the user is choosing is a list the
+// user cannot aim at: the row they press must still be the row they pressed.
+//
+// A service the user has to configure is hidden until they have: the user's own
+// service has an address to type before it is anything, and a row that cannot be
+// picked yet is a row that only takes up room. The ones that need a key are
+// still shown unconfigured, because that is how the user learns what they could
+// configure.
+func pickerTranslateCards(cards []translateCard) []translateCard {
+	pickable := make([]translateCard, 0, len(cards))
+	for _, card := range cards {
+		if card.id == customTranslatorID && !card.configured {
+			continue
+		}
+		pickable = append(pickable, card)
+	}
+	return pickable
+}
+
+// splitTranslateCards is the picker's two groups: the free engines, and the
+// services that have something to configure.
+//
+// The user's own service is in the second group even though its key is
+// optional: its card is the one with an address to type, so it belongs under
+// the heading that says something has to be configured.
+func splitTranslateCards(cards []translateCard) (free, keyed []translateCard) {
+	for _, card := range cards {
+		if isFreeTranslator(card.id) {
+			free = append(free, card)
+			continue
+		}
+		keyed = append(keyed, card)
+	}
+	return free, keyed
+}
+
+// pickerGroupLabel is the small line above a group of rows: smaller and
+// quieter than sectionLabel, because it names the group rather than the form.
+func pickerGroupLabel(c *ui.Context, label string) {
+	ui.Text(c, label).FontSize(sizeSmall).FontWeight(500).TextColor(colorTextMuted)
 }
 
 // providerOption is one row of the picker: the service's name, its state, and
@@ -818,6 +1102,16 @@ func (s *State) providerPicker(c *ui.Context, settings translate.Settings) {
 // one choice should answer anywhere on it. A service with nothing configured
 // is drawn but cannot be chosen, which is what tells the user what to
 // configure.
+//
+// The state on the right is the design's own three words: a free engine is
+// 免费 — the reason it can be picked at all — a keyed one with a credential is
+// 已配置, and one without is 未配置. The chip is the sky one the design gives
+// it, because it says "nothing to do here" rather than "you did this right".
+//
+// 免费 is the free engines' own word, and only theirs: the user's own service
+// needs no key either, but it is not one of the free ones — it is a service
+// the user runs, and calling it 免费 would be telling them something about a
+// price Boku does not know.
 func (s *State) providerOption(c *ui.Context, card translateCard, settings translate.Settings) {
 	selected := settings.ProviderOr() == card.id
 	row := ui.ButtonBase(c).Label("使用 "+card.displayName).
@@ -849,9 +1143,12 @@ func (s *State) providerOption(c *ui.Context, card translateCard, settings trans
 				TextColor(chooseTextColor(card.configured)).
 				SingleLine()
 			ui.Spacer(c)
-			if card.configured {
+			switch {
+			case isFreeTranslator(card.id):
+				kindBadge(c, colorSkyTile, colorSkyInk, "免费")
+			case card.configured:
 				statusNote(c, "已配置")
-			} else {
+			default:
 				ui.Text(c, "未配置").FontSize(sizeTiny).TextColor(colorTextMuted).SingleLine()
 			}
 		})
@@ -1325,11 +1622,19 @@ func (s *State) setClipboardHistorySize(size int) {
 // clipboardStatusLine is the last thing the clipboard switches said.
 func (s *State) clipboardStatusLine() string { return s.clipboardStatus }
 
-// setTranslationEnabled turns the tool on or off.
+// setTranslationEnabled turns the tool on or off — and, with it, the global
+// shortcut.
+//
+// The shortcut follows the switch rather than the switch merely being read when
+// the shortcut fires: a key this process holds is a key no other application
+// can use, so a tool that is off must let it go. Turning it back on takes the
+// key again, which is why this is one action rather than two: the two states a
+// user can be in are "off, and the key is free" and "on, and the key opens it".
 func (s *State) setTranslationEnabled(enabled bool) {
 	s.saveTranslationSetting("划词翻译已打开。", func(ctx context.Context) error {
 		return s.translate.SetEnabled(ctx, enabled)
 	})
+	s.bindShortcutForSwitch()
 }
 
 // setTranslationFurigana turns the reading of Japanese kanji on or off.
@@ -1431,6 +1736,19 @@ func (s *State) translateSettingsOr() translate.Settings {
 	return settings
 }
 
+// cardEndpointNote is a translator's endpoint written the way one line can
+// carry it: the addresses themselves, without the parenthetical the
+// descriptor adds for the card's own sake.
+//
+// It is a pure function rather than part of the line, because what an endpoint
+// reads as is the one thing about it a test can decide.
+func cardEndpointNote(endpoint string) string {
+	if index := strings.Index(endpoint, "（"); index >= 0 {
+		return strings.TrimSpace(endpoint[:index])
+	}
+	return strings.TrimSpace(endpoint)
+}
+
 // credentialIsShown reports whether a card is holding a credential the user
 // has not typed over: something is stored and the field is empty, so there is
 // nothing new to save or to test. Typing into the field is what leaves this
@@ -1460,18 +1778,12 @@ func (s *State) cardInput(id string) string {
 // there: its badge, and the 删除 that can take it away. Even the last four
 // characters stay in the store — what the window asks for is a name.
 func (s *State) loadCredentials() {
-	translation := s.translateSettingsOr()
 	s.form = connectForm{
 		keys:          map[string]string{},
 		hasCredential: map[string]bool{},
 		status:        map[string]cardStatus{},
-		customName:    translation.Custom.DisplayName,
-		customURL:     translation.Custom.BaseURL,
 	}
 	for _, card := range s.translateCards() {
-		if !card.needsCredential {
-			continue
-		}
 		names, err := s.secretService.Names(backgroundContext(), card.id)
 		if err != nil {
 			s.form.status[card.id] = cardStatus{status: statusError, text: friendlyError(err)}
@@ -1499,18 +1811,23 @@ func credentialStored(names []string, card translateCard) bool {
 // message that was just set, nor what the user has typed in the other cards.
 func (s *State) reloadCredentialsAfterSave() {
 	status, keys := s.form.status, s.form.keys
-	name, url := s.form.customName, s.form.customURL
+	name, url := s.form.newName, s.form.newURL
 	s.loadCredentials()
 	s.form.status = status
 	if keys != nil {
 		s.form.keys = keys
 	}
-	s.form.customName, s.form.customURL = name, url
+	s.form.newName, s.form.newURL = name, url
 }
 
 // testCredential asks a service whether a key works, without storing it. The
 // request runs off the main thread; the answer comes back through
 // Window.Update, which is the only way a goroutine may touch this state.
+//
+// The address is already stored by the time this runs: a service of the user's
+// own is added first and tested after, because the translator that asks it
+// reads its address from the settings and does not need the window to translate
+// every keystroke into a save.
 func (s *State) testCredential(card translateCard) {
 	if s.form.busy != "" || s.translate == nil {
 		return
@@ -1524,11 +1841,6 @@ func (s *State) testCredential(card translateCard) {
 		s.setCardStatus(card.id, statusError, "请先填入 "+credentialLabel(card.credentialKey)+"。")
 		return
 	}
-	address, name := s.customValues()
-	if card.id == customTranslatorID && address == "" {
-		s.setCardStatus(card.id, statusError, "请先填写 Base URL。")
-		return
-	}
 	window := s.settingsWindow
 	service := s.translate
 	override := map[string]string{}
@@ -1540,22 +1852,7 @@ func (s *State) testCredential(card translateCard) {
 	s.setCardStatus(card.id, statusNone, "")
 
 	go func() {
-		ctx := context.Background()
-		// A test of the user's own service saves the address first, because
-		// the translator reads its address from the settings: testing what
-		// was typed has to make what was typed the address.
-		if card.id == customTranslatorID {
-			// The test below reads the address from the settings, so a save
-			// that failed turns into a connection failure somewhere else;
-			// naming it here is what keeps that from being a mystery.
-			if err := service.SetCustomTranslator(ctx, translate.CustomSettings{
-				BaseURL:     address,
-				DisplayName: name,
-			}); err != nil {
-				slog.Warn("the address of the user's own service could not be saved", "error", err)
-			}
-		}
-		err := service.TestTranslator(ctx, card.id, override)
+		err := service.TestTranslator(context.Background(), card.id, override)
 		window.Update(func() {
 			s.form.busy = ""
 			if err != nil {
@@ -1567,18 +1864,107 @@ func (s *State) testCredential(card translateCard) {
 	}()
 }
 
-// customValues is the user's own service as typed, cleaned the way the
-// translation tool cleans it.
-func (s *State) customValues() (address, name string) {
-	cleaned := translate.CustomSettings{
-		BaseURL:     s.form.customURL,
-		DisplayName: s.form.customName,
-	}.Normalize()
-	return cleaned.BaseURL, cleaned.DisplayName
+// addCustomService is the blank card's action: it stores the service the user
+// described, registers the translator that asks it, and tests it once so that
+// the answer is right there rather than on the next translation.
+//
+// The order matters. The service is written first, because the translator reads
+// its address from the settings; the translator is registered second, because
+// the test reaches it through the registry; and the test runs last, because
+// there is nothing to test until both are done.
+//
+// The card is cleared whether or not the test passed: a service that could not
+// be reached is still a service the user configured, and making them retype the
+// address to try again would be punishing them for their own typo.
+func (s *State) addCustomService() {
+	if s.form.busy != "" || s.translate == nil {
+		return
+	}
+	name := strings.TrimSpace(s.form.newName)
+	address, _ := translate.CustomSettings{BaseURL: s.form.newURL}.Normalize().BaseURL, name
+	if address == "" {
+		s.setCardStatus(newCustomServiceID, statusError, "请先填写 Base URL。")
+		s.Refresh()
+		return
+	}
+	key := strings.TrimSpace(s.cardInput(newCustomServiceID))
+	window := s.settingsWindow
+	service := s.translate
+	secrets := s.secretService
+
+	s.form.busy = newCustomServiceID
+	s.form.busyNote = "正在添加…"
+	s.setCardStatus(newCustomServiceID, statusNone, "")
+
+	go func() {
+		ctx := context.Background()
+		id, err := service.AddCustomTranslator(ctx, translate.CustomSettings{
+			BaseURL:     address,
+			DisplayName: name,
+		})
+		if err == nil && key != "" && secrets != nil {
+			err = secrets.Set(ctx, id, "apiKey", key)
+		}
+		if err == nil {
+			// The new service needs a translator before it can be asked.
+			if err = s.registerOwnServices(); err != nil {
+				slog.Warn("the new service could not be registered", "error", err)
+			}
+		}
+		window.Update(func() {
+			s.form.busy = ""
+			if err != nil {
+				s.setCardStatus(newCustomServiceID, statusError, friendlyError(err))
+				return
+			}
+			s.form.newName, s.form.newURL = "", ""
+			s.clearCardInput(newCustomServiceID)
+			s.reloadCredentialsAfterSave()
+			s.setCardStatus(id, statusOK, "已添加。")
+			s.setCardStatus(newCustomServiceID, statusNone, "")
+			s.testCredential(cardOfID(s, id))
+		})
+	}()
 }
 
-// saveCredential stores the key and, for the user's own service, the address
-// and the name.
+// registerOwnServices puts a translator in the registry for every service the
+// settings hold, and takes out the ones they no longer hold.
+//
+// It is one call for both because it does one thing: make the registry match
+// the settings. The cards the window draws come from the registry, and the
+// services that exist come from the settings, so two directions of change —
+// adding a service and removing one — are the same sync seen from either end.
+//
+// It is a field on the state rather than a call to the assembly so that a test
+// can see what a window does without a registry to reach into.
+func (s *State) registerOwnServices() error {
+	if s.ownServices == nil {
+		return nil
+	}
+	return s.ownServices()
+}
+
+// unregisterOwnServices is the same sync, for the removal path. It is named
+// separately because what it is for is not obvious at the call site: a removed
+// service has to leave the registry, or its card stays on the page.
+func (s *State) unregisterOwnServices() error { return s.registerOwnServices() }
+
+// cardOfID is one card of the window, by id, without failing: the answer is
+// empty when there is no such card, which a caller in a goroutine needs.
+func cardOfID(s *State, id string) translateCard {
+	for _, card := range s.translateCards() {
+		if card.id == id {
+			return card
+		}
+	}
+	return translateCard{id: id}
+}
+
+// customValues is the user's own service as typed, cleaned the way the
+// translation tool cleans it.
+// saveCredential stores the key of a configured card. A card of the user's own
+// service saves its key like any other: its address is set when it is added and
+// does not change here.
 func (s *State) saveCredential(card translateCard) {
 	if s.form.busy != "" || s.translate == nil {
 		return
@@ -1593,30 +1979,22 @@ func (s *State) saveCredential(card translateCard) {
 		s.setCardStatus(card.id, statusError, "请先填入 "+credentialLabel(card.credentialKey)+"。")
 		return
 	}
-	address, name := s.customValues()
-	if card.id == customTranslatorID && address == "" && key == "" {
-		s.setCardStatus(card.id, statusError, "自定义服务至少需要一个 Base URL。")
+	if !card.needsCredential && key == "" {
+		// Nothing to store: an optional key that is not there means the
+		// service needs none, and it is already configured.
+		s.setCardStatus(card.id, statusOK, "这个服务不需要密钥。")
+		s.Refresh()
 		return
 	}
 	window := s.settingsWindow
 	secrets := s.secretService
-	service := s.translate
 	id, credentialKey := card.id, card.credentialKey
 	s.form.busy = card.id
 	s.form.busyNote = "正在保存…"
 	s.setCardStatus(card.id, statusNone, "")
 
 	go func() {
-		var err error
-		if key != "" {
-			err = secrets.Set(context.Background(), id, credentialKey, key)
-		}
-		if err == nil && id == customTranslatorID {
-			err = service.SetCustomTranslator(context.Background(), translate.CustomSettings{
-				BaseURL:     address,
-				DisplayName: name,
-			})
-		}
+		err := secrets.Set(context.Background(), id, credentialKey, key)
 		window.Update(func() {
 			s.form.busy = ""
 			if err != nil {

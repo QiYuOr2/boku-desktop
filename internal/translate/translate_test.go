@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	contractfree "boku/internal/contract/freetranslate"
 	"boku/internal/domain"
 )
 
@@ -142,11 +144,16 @@ func (r *fakeTranslators) Translator(id string) (domain.Translator, error) {
 	return reply, nil
 }
 
+// TranslatorIDs returns the registered ids, sorted, exactly as the real
+// registry does: the settings window draws its rows in this order, and a fake
+// that handed them back in map order would let a test pass while the shipped
+// list rearranged itself between frames.
 func (r *fakeTranslators) TranslatorIDs() []string {
 	ids := make([]string, 0, len(r.byID))
 	for id := range r.byID {
 		ids = append(ids, id)
 	}
+	sort.Strings(ids)
 	return ids
 }
 
@@ -160,6 +167,8 @@ type translateFixture struct {
 	secrets   *memoryStore
 	deepseek  *fakeTranslator
 	custom    *fakeTranslator
+	microsoft *fakeTranslator
+	bilibili  *fakeTranslator
 	clock     *testClock
 }
 
@@ -200,6 +209,17 @@ func newTranslate(t *testing.T) *translateFixture {
 	customReply.descriptor.BaseURLSetting = "custom.baseURL"
 	customReply.descriptor.Endpoint = ""
 	customReply.descriptor.AllowEmptyCredential = true
+	// The free engines: what a fresh installation starts on, and what these
+	// tests therefore have to cover the way the shipped build has it — two
+	// translators that ask for no credential at all.
+	microsoft := newFakeTranslator(contractfree.MicrosoftEdge, "微软 Edge 翻译")
+	microsoft.descriptor.AllowEmptyCredential = true
+	microsoft.descriptor.DocsURL = "https://example.com/free"
+	microsoft.descriptor.Endpoint = "edge.microsoft.com/translate/translatetext"
+	bilibili := newFakeTranslator(contractfree.Bilibili, "B站 Index-Translate")
+	bilibili.descriptor.AllowEmptyCredential = true
+	bilibili.descriptor.DocsURL = "https://example.com/free"
+	bilibili.descriptor.Endpoint = "index-translate.bilibili.com/v1/chat/completions"
 
 	device := &fakeDevice{}
 	// The settings start as a fresh installation has them: the store fills
@@ -207,7 +227,10 @@ func newTranslate(t *testing.T) *translateFixture {
 	// stands in for a store that has already been read once.
 	tools := newFakeTools()
 	// The user's own translator reads its address from those settings.
-	customReply.baseURL = func() string { return tools.section.Current().Custom.BaseURL }
+	customReply.baseURL = func() string {
+		service, _ := tools.section.Current().CustomService(customReply.id)
+		return service.BaseURL
+	}
 	secrets := newMemoryStore()
 	if err := secrets.Put(context.Background(),
 		domain.CredentialKey("deepseek", "apiKey"), []byte("sk-test-0001"), domain.SecretMeta{}); err != nil {
@@ -216,7 +239,7 @@ func newTranslate(t *testing.T) *translateFixture {
 	clock := newTestClock()
 	selection := &fakeSelection{err: domain.ErrSelectionUnavailable}
 	service, err := NewTranslate(TranslateOptions{
-		Translators: newFakeTranslators(deepseek, customReply),
+		Translators: newFakeTranslators(deepseek, customReply, microsoft, bilibili),
 		Secrets:     secrets,
 		Section:     tools.section,
 		Settings:    tools,
@@ -235,7 +258,21 @@ func newTranslate(t *testing.T) *translateFixture {
 		secrets:   secrets,
 		deepseek:  deepseek,
 		custom:    customReply,
+		microsoft: microsoft,
+		bilibili:  bilibili,
 		clock:     clock,
+	}
+}
+
+// useDeepSeek picks the paid translator, which is the state a user reaches
+// after configuring their own key. The tests that are about credentials, or
+// about a service that fails, are about that translator and say so: the
+// default is a free engine, and a test that assumed otherwise would be
+// testing the wrong thing.
+func useDeepSeek(t *testing.T, f *translateFixture) {
+	t.Helper()
+	if err := f.translate.SetProvider(context.Background(), "deepseek"); err != nil {
+		t.Fatalf("SetProvider failed: %v", err)
 	}
 }
 
@@ -252,6 +289,7 @@ func source(t *testing.T, f *translateFixture) string {
 
 func TestTranslateNormal(t *testing.T) {
 	f := newTranslate(t)
+	useDeepSeek(t, f)
 	f.device.set(textReading("A compiler converts source code."))
 	result, err := f.translate.Translate(context.Background(), Request{Text: source(t, f)})
 	if err != nil {
@@ -354,6 +392,7 @@ func TestSourceReportsAClipboardThatCannotBeRead(t *testing.T) {
 // caller has is the text to translate.
 func TestTranslateDoesNotAskForASelectionWithItsOwnText(t *testing.T) {
 	f := newTranslate(t)
+	useDeepSeek(t, f)
 	if _, err := f.translate.Translate(context.Background(), Request{Text: "hello"}); err != nil {
 		t.Fatalf("Translate failed: %v", err)
 	}
@@ -369,6 +408,7 @@ func TestTranslateDoesNotAskForASelectionWithItsOwnText(t *testing.T) {
 // end, and the language is decided from the text itself.
 func TestTranslatePicksTheTargetFromTheSource(t *testing.T) {
 	f := newTranslate(t)
+	useDeepSeek(t, f)
 	result, err := f.translate.Translate(context.Background(), Request{Text: "编译器把源代码转换成机器语言。"})
 	if err != nil {
 		t.Fatalf("Translate failed: %v", err)
@@ -390,6 +430,7 @@ func TestTranslatePicksTheTargetFromTheSource(t *testing.T) {
 func TestTheAnnotationIsItsOwnRequest(t *testing.T) {
 	f := newTranslate(t)
 	f.tools.section.Set(Defaults())
+	useDeepSeek(t, f)
 
 	// A translation asks for no annotation, whatever the switches say.
 	if err := f.translate.SetFurigana(context.Background(), true); err != nil {
@@ -427,6 +468,7 @@ func TestTheAnnotationIsItsOwnRequest(t *testing.T) {
 // and neither a carriage return nor a lost line is something to translate.
 func TestTheCopiedLineBreaksSurvive(t *testing.T) {
 	f := newTranslate(t)
+	useDeepSeek(t, f)
 	text := "一行目\r\n二行目\r三行目\n\n四行目"
 	if _, err := f.translate.Translate(context.Background(), Request{Text: text}); err != nil {
 		t.Fatalf("Translate failed: %v", err)
@@ -439,14 +481,24 @@ func TestTheCopiedLineBreaksSurvive(t *testing.T) {
 
 // A tool that is switched off says so, and does not read the clipboard or
 // ask a service.
+//
+// It is its own error rather than "translation unavailable": the two are
+// different sentences to the user, and the window draws them differently. A
+// switched-off tool is not a fault — the user asked for it — while a tool with
+// nowhere to send a text is one they have to fix.
 func TestTranslateWhenTheToolIsOff(t *testing.T) {
 	f := newTranslate(t)
 	if err := f.translate.SetEnabled(context.Background(), false); err != nil {
 		t.Fatalf("SetEnabled failed: %v", err)
 	}
 	_, err := f.translate.Translate(context.Background(), Request{Text: "hello"})
-	if !errors.Is(err, domain.ErrTranslateUnavailable) {
-		t.Fatalf("error = %v, want ErrTranslateUnavailable", err)
+	if !errors.Is(err, domain.ErrTranslateDisabled) {
+		t.Fatalf("error = %v, want ErrTranslateDisabled", err)
+	}
+	// The two are distinct: a caller that only handles the configured case
+	// must not catch this one.
+	if errors.Is(err, domain.ErrTranslateUnavailable) {
+		t.Error("a switched-off tool is reported as an unconfigured one")
 	}
 	if !strings.Contains(err.Error(), "已关闭") {
 		t.Errorf("the error does not say the tool is off: %v", err)
@@ -456,8 +508,8 @@ func TestTranslateWhenTheToolIsOff(t *testing.T) {
 	}
 }
 
-// A tool with nothing configured says where to go, and does not fail: the
-// window shows "去配置" rather than an error.
+// A tool whose settings name a translator this build does not have says which
+// one, so that the user knows what to pick instead.
 func TestTranslateWithNothingConfigured(t *testing.T) {
 	f := newTranslate(t)
 	if err := f.translate.SaveSettings(context.Background(), func(s *Settings) {
@@ -469,8 +521,11 @@ func TestTranslateWithNothingConfigured(t *testing.T) {
 	if !errors.Is(err, domain.ErrTranslateUnavailable) {
 		t.Fatalf("error = %v, want ErrTranslateUnavailable", err)
 	}
-	if !strings.Contains(err.Error(), "还没有配置") {
-		t.Errorf("the error does not offer configuration: %v", err)
+	if !strings.Contains(err.Error(), "nobody") {
+		t.Errorf("the error does not name the translator that is missing: %v", err)
+	}
+	if !strings.Contains(err.Error(), "设置") {
+		t.Errorf("the error does not say where to fix it: %v", err)
 	}
 }
 
@@ -478,6 +533,7 @@ func TestTranslateWithNothingConfigured(t *testing.T) {
 // key that is not there.
 func TestTranslateWithoutACredential(t *testing.T) {
 	f := newTranslate(t)
+	useDeepSeek(t, f)
 	if err := f.secrets.Delete(context.Background(), domain.CredentialKey("deepseek", "apiKey")); err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
@@ -498,6 +554,7 @@ func TestTranslateWithoutACredential(t *testing.T) {
 // its own words: they have to select or copy something first.
 func TestTranslateWithNothingToTranslate(t *testing.T) {
 	f := newTranslate(t)
+	useDeepSeek(t, f)
 	_, err := f.translate.Translate(context.Background(), Request{Text: source(t, f)})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("error = %v, want ErrInvalidArgument", err)
@@ -517,6 +574,7 @@ func TestTranslateWithANonTextClipboard(t *testing.T) {
 		{Kind: domain.ClipKindImage, ImageBytes: 1024},
 	} {
 		f := newTranslate(t)
+		useDeepSeek(t, f)
 		f.device.set(reading)
 		_, err := f.translate.Translate(context.Background(), Request{Text: source(t, f)})
 		if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -544,6 +602,7 @@ func TestTranslateReportsServiceFailures(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newTranslate(t)
+			useDeepSeek(t, f)
 			f.deepseek.fail(tc.err)
 			result, err := f.translate.Translate(context.Background(), Request{Text: "hello"})
 			if !errors.Is(err, tc.err) {
@@ -560,6 +619,7 @@ func TestTranslateReportsServiceFailures(t *testing.T) {
 // not wait out a service.
 func TestTranslateHonoursCancellation(t *testing.T) {
 	f := newTranslate(t)
+	useDeepSeek(t, f)
 	gate := f.deepseek.hold()
 	defer close(gate)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -587,6 +647,15 @@ func TestSettingsRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	f.tools.section.Set(Defaults())
 
+	// The service is stored first, because it has to exist before it can be
+	// the one in use: a provider naming one of the user's own services is
+	// brought back to the default when that service is not there.
+	if err := f.translate.SetCustomTranslator(ctx, "custom", CustomSettings{
+		BaseURL:     "api.example.com/v1/",
+		DisplayName: "  本地 Ollama  ",
+	}); err != nil {
+		t.Fatalf("SetCustomTranslator failed: %v", err)
+	}
 	if err := f.translate.SetProvider(ctx, "custom"); err != nil {
 		t.Fatalf("SetProvider failed: %v", err)
 	}
@@ -595,12 +664,6 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 	if err := f.translate.SetCloseDelay(ctx, 1200*time.Millisecond); err != nil {
 		t.Fatalf("SetCloseDelay failed: %v", err)
-	}
-	if err := f.translate.SetCustomTranslator(ctx, CustomSettings{
-		BaseURL:     "api.example.com/v1/",
-		DisplayName: "  本地 Ollama  ",
-	}); err != nil {
-		t.Fatalf("SetCustomTranslator failed: %v", err)
 	}
 
 	settings, err := f.translate.Settings()
@@ -616,11 +679,15 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if settings.CloseDelayOr() != 1200*time.Millisecond {
 		t.Errorf("close delay = %s", settings.CloseDelayOr())
 	}
-	if settings.Custom.BaseURL != "https://api.example.com/v1" {
-		t.Errorf("custom base URL = %q, want it cleaned", settings.Custom.BaseURL)
+	service, ok := settings.CustomService("custom")
+	if !ok {
+		t.Fatalf("the service that was saved is not in the settings: %+v", settings.Custom)
 	}
-	if settings.Custom.DisplayName != "本地 Ollama" {
-		t.Errorf("custom name = %q, want it trimmed", settings.Custom.DisplayName)
+	if service.BaseURL != "https://api.example.com/v1" {
+		t.Errorf("custom base URL = %q, want it cleaned", service.BaseURL)
+	}
+	if service.DisplayName != "本地 Ollama" {
+		t.Errorf("custom name = %q, want it trimmed", service.DisplayName)
 	}
 	// Reading the translation settings does not disturb them. The two tools
 	// share one file, so what keeps one from losing the other's switches is
@@ -630,7 +697,8 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if _, err := f.translate.Settings(); err != nil {
 		t.Fatalf("Settings failed: %v", err)
 	}
-	if after := f.tools.section.Current(); after != before {
+	after := f.tools.section.Current()
+	if after.Provider != before.Provider || !sameServices(after.Custom, before.Custom) {
 		t.Errorf("reading the translation settings changed them: %+v then %+v", before, after)
 	}
 }
@@ -680,34 +748,42 @@ func TestProvidersDescribeWhatIsUsable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Providers failed: %v", err)
 	}
-	if len(views) != 2 {
-		t.Fatalf("views = %+v, want both translators", views)
+	if len(views) != 4 {
+		t.Fatalf("views = %+v, want every translator", views)
 	}
-	// The one in use comes first.
-	if views[0].ID != "deepseek" {
-		t.Errorf("the first translator is %q, want the one in use", views[0].ID)
+	byID := map[string]TranslatorView{}
+	for _, view := range views {
+		byID[view.ID] = view
 	}
-	if !views[0].Configured {
-		t.Errorf("the configured translator is not reported as configured: %+v", views[0])
+	// A free engine is usable with nothing stored at all, which is the whole
+	// point of it.
+	for _, id := range []string{contractfree.MicrosoftEdge, contractfree.Bilibili} {
+		view := byID[id]
+		if !view.Configured {
+			t.Errorf("%s is not reported as configured: %+v", id, view)
+		}
+		if view.NeedsCredential {
+			t.Errorf("%s is reported as needing a key: %+v", id, view)
+		}
 	}
-	if views[0].CredentialKey != "apiKey" || !views[0].NeedsCredential {
-		t.Errorf("view = %+v", views[0])
+	// A translator whose key is stored is configured, and one whose key is
+	// not is shown but cannot be picked.
+	deepseek := byID["deepseek"]
+	if !deepseek.Configured || !deepseek.NeedsCredential {
+		t.Errorf("deepseek = %+v", deepseek)
 	}
 	// The user's own service is not configured until an address is there.
-	if views[1].ID != "custom" || views[1].Configured {
-		t.Errorf("custom = %+v, want it unconfigured before an address", views[1])
+	if custom := byID["custom"]; custom.Configured || custom.Endpoint != "" {
+		t.Errorf("custom = %+v, want it unconfigured before an address", custom)
 	}
-	if views[1].NeedsCredential {
+	if byID["custom"].NeedsCredential {
 		t.Error("a local service is reported as needing a key")
 	}
-	if views[1].Endpoint != "" {
-		t.Errorf("endpoint = %q, want it empty before an address", views[1].Endpoint)
-	}
 
-	if err := f.translate.SetCustomTranslator(context.Background(), CustomSettings{
+	if _, err := f.translate.AddCustomTranslator(context.Background(), CustomSettings{
 		BaseURL: "https://api.example.com/v1",
 	}); err != nil {
-		t.Fatalf("SetCustomTranslator failed: %v", err)
+		t.Fatalf("AddCustomTranslator failed: %v", err)
 	}
 	views, err = f.translate.Providers(context.Background())
 	if err != nil {
@@ -725,6 +801,224 @@ func TestProvidersDescribeWhatIsUsable(t *testing.T) {
 	if custom.Endpoint != "https://api.example.com/v1/chat/completions" {
 		t.Errorf("endpoint = %q", custom.Endpoint)
 	}
+}
+
+// The user may keep several services of their own, and each one is its own
+// translator: adding one does not disturb the ones already there, and each
+// answers for its own address.
+func TestSeveralOwnServicesLiveSideBySide(t *testing.T) {
+	f := newTranslate(t)
+	ctx := context.Background()
+
+	first, err := f.translate.AddCustomTranslator(ctx, CustomSettings{
+		BaseURL:     "http://127.0.0.1:11434/v1",
+		DisplayName: "本地 Ollama",
+	})
+	if err != nil {
+		t.Fatalf("AddCustomTranslator failed: %v", err)
+	}
+	second, err := f.translate.AddCustomTranslator(ctx, CustomSettings{
+		BaseURL:     "https://api.example.com/v1",
+		DisplayName: "远端网关",
+	})
+	if err != nil {
+		t.Fatalf("AddCustomTranslator failed: %v", err)
+	}
+	if first != "custom" || second != "custom-2" {
+		t.Fatalf("ids = %q / %q, want custom and custom-2", first, second)
+	}
+
+	settings, err := f.translate.Settings()
+	if err != nil {
+		t.Fatalf("Settings failed: %v", err)
+	}
+	if len(settings.Custom) != 2 {
+		t.Fatalf("services = %+v, want both", settings.Custom)
+	}
+	// Each keeps its own address and its own name: the second one did not
+	// overwrite the first.
+	if service, _ := settings.CustomService(first); service.DisplayName != "本地 Ollama" {
+		t.Errorf("the first service is %+v", service)
+	}
+	if service, _ := settings.CustomService(second); service.DisplayName != "远端网关" {
+		t.Errorf("the second service is %+v", service)
+	}
+
+	// Removing one leaves the other exactly where it was.
+	if err := f.translate.RemoveCustomTranslator(ctx, first); err != nil {
+		t.Fatalf("RemoveCustomTranslator failed: %v", err)
+	}
+	settings, err = f.translate.Settings()
+	if err != nil {
+		t.Fatalf("Settings failed: %v", err)
+	}
+	if _, still := settings.CustomService(first); still {
+		t.Error("the removed service is still there")
+	}
+	if service, ok := settings.CustomService(second); !ok || service.DisplayName != "远端网关" {
+		t.Errorf("removing one disturbed the other: %+v", settings.Custom)
+	}
+}
+
+// A service of the user's own is refused an address that is not one, and one
+// with no address at all is refused rather than stored: there would be nothing
+// to ask and nothing to show.
+func TestAddingAnOwnServiceChecksTheAddress(t *testing.T) {
+	f := newTranslate(t)
+	ctx := context.Background()
+
+	if _, err := f.translate.AddCustomTranslator(ctx, CustomSettings{DisplayName: "没地址"}); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("error = %v, want ErrInvalidArgument", err)
+	}
+	if _, err := f.translate.AddCustomTranslator(ctx, CustomSettings{BaseURL: "file:///etc/passwd"}); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("error = %v, want ErrInvalidArgument", err)
+	}
+	settings, err := f.translate.Settings()
+	if err != nil {
+		t.Fatalf("Settings failed: %v", err)
+	}
+	if len(settings.Custom) != 0 {
+		t.Errorf("a refused service was stored anyway: %+v", settings.Custom)
+	}
+}
+
+// An id that is not one of the user's own services is refused by both the
+// setter and the remover: a built-in translator's address is not the user's to
+// rewrite, and removing it would take a service the application knows away.
+func TestOwnServiceActionsRefuseABuiltInID(t *testing.T) {
+	f := newTranslate(t)
+	ctx := context.Background()
+
+	if err := f.translate.SetCustomTranslator(ctx, "deepseek", CustomSettings{BaseURL: "https://x.example.com/v1"}); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("SetCustomTranslator(deepseek) = %v, want ErrInvalidArgument", err)
+	}
+	if err := f.translate.RemoveCustomTranslator(ctx, "deepseek"); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("RemoveCustomTranslator(deepseek) = %v, want ErrInvalidArgument", err)
+	}
+}
+
+// Removing the service that is in use brings the tool back to the default one,
+// rather than leaving it pointing at an id that is gone.
+//
+// It is what the user sees after deleting the service they had selected: the
+// next press has to translate, not report a service that no longer exists.
+func TestRemovingTheServiceInUseFallsBackToTheDefault(t *testing.T) {
+	f := newTranslate(t)
+	ctx := context.Background()
+
+	id, err := f.translate.AddCustomTranslator(ctx, CustomSettings{
+		BaseURL:     "https://api.example.com/v1",
+		DisplayName: "要删掉的服务",
+	})
+	if err != nil {
+		t.Fatalf("AddCustomTranslator failed: %v", err)
+	}
+	if err := f.translate.SetProvider(ctx, id); err != nil {
+		t.Fatalf("SetProvider failed: %v", err)
+	}
+	if got := providerOf(t, f); got != id {
+		t.Fatalf("provider = %q, want the service that was just added", got)
+	}
+
+	if err := f.translate.RemoveCustomTranslator(ctx, id); err != nil {
+		t.Fatalf("RemoveCustomTranslator failed: %v", err)
+	}
+	if got := providerOf(t, f); got != DefaultProvider {
+		t.Errorf("provider = %q after removing the one in use, want %q", got, DefaultProvider)
+	}
+	// And the tool answers rather than reporting a missing service.
+	useDeepSeek(t, f)
+	if _, err := f.translate.Translate(ctx, Request{Text: "hello"}); err != nil {
+		t.Errorf("Translate failed after the removal: %v", err)
+	}
+}
+
+// providerOf is the translator the tool is set to use, as the settings hold it.
+func providerOf(t *testing.T, f *translateFixture) string {
+	t.Helper()
+	settings, err := f.translate.Settings()
+	if err != nil {
+		t.Fatalf("Settings failed: %v", err)
+	}
+	return settings.ProviderOr()
+}
+
+// A provider that names a service which is not there is brought back to the
+// default, whether it went missing by hand or by a removal.
+//
+// A hand-edited file is the other way in, and the rule is the same one: the
+// tool must keep working, and the provider has to name something that answers.
+func TestAProviderWithNoServiceFallsBackToTheDefault(t *testing.T) {
+	f := newTranslate(t)
+	ctx := context.Background()
+
+	// Written straight into the settings, the way a hand-edited file arrives.
+	if err := f.translate.SaveSettings(ctx, func(s *Settings) { s.Provider = "custom-9" }); err != nil {
+		t.Fatalf("SaveSettings failed: %v", err)
+	}
+	if got := providerOf(t, f); got != DefaultProvider {
+		t.Errorf("provider = %q, want the default %q", got, DefaultProvider)
+	}
+
+	// A built-in id is left alone: whether this build knows it is the
+	// registry's question, and the window says so when it does not.
+	if err := f.translate.SaveSettings(ctx, func(s *Settings) { s.Provider = "nobody" }); err != nil {
+		t.Fatalf("SaveSettings failed: %v", err)
+	}
+	if got := providerOf(t, f); got != "nobody" {
+		t.Errorf("provider = %q, want it left as written", got)
+	}
+}
+
+// The list of translators never rearranges itself: the same ids come back in
+// the same order no matter which one is in use.
+//
+// It is what the settings window draws its rows from, and a row that moves
+// when the user picks one is a row the user cannot aim at — the press they made
+// lands on whatever took its place.
+func TestProviderOrderDoesNotDependOnWhatIsInUse(t *testing.T) {
+	f := newTranslate(t)
+	ctx := context.Background()
+	ids := func() []string {
+		t.Helper()
+		views, err := f.translate.Providers(ctx)
+		if err != nil {
+			t.Fatalf("Providers failed: %v", err)
+		}
+		order := make([]string, 0, len(views))
+		for _, view := range views {
+			order = append(order, view.ID)
+		}
+		return order
+	}
+
+	before := ids()
+	if len(before) != 4 {
+		t.Fatalf("the list is %v, want every translator", before)
+	}
+	// Pick each one in turn, and the order is the same every time.
+	for _, pick := range append(append([]string{}, before...), DefaultProvider) {
+		if err := f.translate.SetProvider(ctx, pick); err != nil {
+			t.Fatalf("SetProvider(%s) failed: %v", pick, err)
+		}
+		after := ids()
+		if !sameOrder(before, after) {
+			t.Fatalf("picking %s reordered the list: %v then %v", pick, before, after)
+		}
+	}
+}
+
+// sameOrder reports whether two lists hold the same ids in the same places.
+func sameOrder(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // A credential that is not stored makes the translator unusable, which is
@@ -824,14 +1118,19 @@ func TestTestTranslatorDoesNotStore(t *testing.T) {
 // A registry with nothing in it is a tool that says "go and configure one",
 // which is what a fresh installation with no translator reaches.
 func TestTranslateWithoutAnyTranslator(t *testing.T) {
+	tools := newFakeTools()
 	service, err := NewTranslate(TranslateOptions{
 		Translators: newFakeTranslators(),
 		Secrets:     newMemoryStore(),
-		Section:     newFakeTools().section,
+		Section:     tools.section,
 	})
 	if err != nil {
 		t.Fatalf("NewTranslate failed: %v", err)
 	}
+	// The default provider is one this registry does not have, which is the
+	// same answer as a registry that is empty: the tool says where to
+	// configure a service rather than reaching for a network.
+	tools.section.Set(Defaults())
 	if _, err := service.Translate(context.Background(), Request{Text: "hello"}); !errors.Is(err, domain.ErrTranslateUnavailable) {
 		t.Errorf("error = %v, want ErrTranslateUnavailable", err)
 	}

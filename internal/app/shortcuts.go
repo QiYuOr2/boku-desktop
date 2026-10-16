@@ -89,14 +89,38 @@ type shortcutState struct {
 // registerShortcuts binds the translation shortcut and remembers what
 // happened. It runs once, from WhenReady: a shortcut needs the running
 // application, and a tray application that cannot bind one still starts.
+//
+// A tool that is switched off gets no binding at all. The switch is what the
+// user turned off, and a combination that is still held by this process is a
+// combination every other application is still denied: "off" has to mean the
+// key is free again, not merely that pressing it draws an apology.
 func (s *State) registerShortcuts() {
 	accelerator := s.translateSettingsOr().AcceleratorOr()
 	s.shortcut = shortcutState{accelerator: accelerator}
-	if err := s.bindShortcut(shortcutBinding{accelerator: accelerator, fn: s.onTranslateShortcut}); err != nil {
-		s.shortcut.err = err
+	s.bindShortcutForSwitch()
+}
+
+// bindShortcutForSwitch takes or releases the translation binding, following
+// the tool's switch. It is what the launch and the switch itself both call.
+func (s *State) bindShortcutForSwitch() {
+	if !s.translateSettingsOr().Enabled {
+		s.unregisterShortcuts()
+		s.shortcut.registered = false
+		s.shortcut.err = nil
 		return
 	}
+	accelerator := s.shortcut.accelerator
+	if accelerator == "" {
+		accelerator = s.translateSettingsOr().AcceleratorOr()
+	}
+	if err := s.bindShortcut(shortcutBinding{accelerator: accelerator, fn: s.onTranslateShortcut}); err != nil {
+		s.shortcut.err = err
+		s.shortcut.registered = false
+		return
+	}
+	s.shortcut.accelerator = accelerator
 	s.shortcut.registered = true
+	s.shortcut.err = nil
 }
 
 // bindShortcut takes a binding, releasing what is held first.

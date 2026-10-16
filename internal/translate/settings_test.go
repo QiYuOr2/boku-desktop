@@ -58,21 +58,48 @@ func TestSettingsAreBroughtIntoTheirBounds(t *testing.T) {
 		},
 		{
 			name: "a bare host becomes https",
-			in:   Settings{Custom: CustomSettings{BaseURL: "api.example.com/v1/"}},
-			want: Settings{Custom: CustomSettings{BaseURL: "https://api.example.com/v1"}},
+			in:   Settings{Custom: map[string]CustomSettings{"custom": {BaseURL: "api.example.com/v1/"}}},
+			want: Settings{Custom: map[string]CustomSettings{"custom": {BaseURL: "https://api.example.com/v1"}}},
 		},
 		{
-			name: "another scheme is dropped",
-			in:   Settings{Custom: CustomSettings{BaseURL: "file:///etc/passwd"}},
-			want: Settings{Custom: CustomSettings{BaseURL: ""}},
+			name: "another scheme is dropped, and so is the service",
+			in:   Settings{Custom: map[string]CustomSettings{"custom": {BaseURL: "file:///etc/passwd"}}},
+			want: Settings{Custom: map[string]CustomSettings{}},
 		},
 		{
 			name: "a long name is cut",
-			in: Settings{Custom: CustomSettings{
-				DisplayName: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+			in: Settings{Custom: map[string]CustomSettings{
+				"custom": {
+					BaseURL:     "https://api.example.com/v1",
+					DisplayName: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ",
+				},
 			}},
-			want: Settings{Custom: CustomSettings{
-				DisplayName: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN",
+			want: Settings{Custom: map[string]CustomSettings{
+				"custom": {
+					BaseURL:     "https://api.example.com/v1",
+					DisplayName: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN",
+				},
+			}},
+		},
+		{
+			name: "several services keep their own ids",
+			in: Settings{Custom: map[string]CustomSettings{
+				"custom":   {BaseURL: "http://127.0.0.1:11434/v1", DisplayName: "本地"},
+				"custom-2": {BaseURL: "https://api.example.com/v1", DisplayName: "远端"},
+			}},
+			want: Settings{Custom: map[string]CustomSettings{
+				"custom":   {BaseURL: "http://127.0.0.1:11434/v1", DisplayName: "本地"},
+				"custom-2": {BaseURL: "https://api.example.com/v1", DisplayName: "远端"},
+			}},
+		},
+		{
+			name: "a service with no address is dropped rather than kept nameless",
+			in: Settings{Custom: map[string]CustomSettings{
+				"custom":   {BaseURL: "https://api.example.com/v1"},
+				"custom-2": {DisplayName: "空地址"},
+			}},
+			want: Settings{Custom: map[string]CustomSettings{
+				"custom": {BaseURL: "https://api.example.com/v1"},
 			}},
 		},
 	}
@@ -91,10 +118,72 @@ func TestSettingsAreBroughtIntoTheirBounds(t *testing.T) {
 			if got.CloseDelay != tc.want.CloseDelay {
 				t.Errorf("close delay = %s, want %s", got.CloseDelay, tc.want.CloseDelay)
 			}
-			if got.Custom != tc.want.Custom {
+			if !sameServices(got.Custom, tc.want.Custom) {
 				t.Errorf("custom = %+v, want %+v", got.Custom, tc.want.Custom)
 			}
 		})
+	}
+}
+
+// sameServices compares two sets of the user's services, treating a nil map and
+// an empty one as the same thing: what matters is which services there are, not
+// whether the map was allocated.
+func sameServices(got, want map[string]CustomSettings) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for id, service := range want {
+		if got[id] != service {
+			return false
+		}
+	}
+	return true
+}
+
+// Adding a service takes the first id that is free, and the ids the file
+// already holds are never handed out again.
+func TestNextCustomServiceID(t *testing.T) {
+	cases := []struct {
+		name string
+		have map[string]CustomSettings
+		want string
+	}{
+		{"nothing stored", nil, "custom"},
+		{"the first is taken", map[string]CustomSettings{"custom": {}}, "custom-2"},
+		{"two are taken", map[string]CustomSettings{"custom": {}, "custom-2": {}}, "custom-3"},
+		{"a gap in the middle is not reused past the end",
+			map[string]CustomSettings{"custom": {}, "custom-3": {}}, "custom-2"},
+		{"only a later id is taken", map[string]CustomSettings{"custom-2": {}}, "custom"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			settings := Settings{Custom: tc.have}
+			if got := settings.NextCustomServiceID(); got != tc.want {
+				t.Errorf("NextCustomServiceID() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// The ids a user's own services are stored under are recognised by their
+// prefix, and nothing else is.
+func TestIsCustomService(t *testing.T) {
+	own := []string{"custom", "custom-2", "custom-10"}
+	for _, id := range own {
+		if !IsCustomService(id) {
+			t.Errorf("%q is not recognised as the user's own service", id)
+		}
+	}
+	others := []string{
+		"", "deepseek", "free.microsoft", "free.bilibili",
+		// Not the prefix with a separator: a translator that merely starts
+		// with the word is a different thing.
+		"customary", "customs-2", "Custom-2",
+	}
+	for _, id := range others {
+		if IsCustomService(id) {
+			t.Errorf("%q is treated as the user's own service", id)
+		}
 	}
 }
 
