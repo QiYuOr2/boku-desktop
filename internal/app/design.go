@@ -25,109 +25,361 @@ import (
 // below are expressed — a background chosen from what the frame already
 // knows, never a value kept between frames. Nothing here keeps state, so
 // building a piece twice costs nothing.
+
+// palette is one appearance of the design system: every color the
+// application draws with, chosen together.
+//
+// There are two, and they are the same design rather than two designs. A
+// name means the same thing in both — colorSurface is the window's face in
+// either appearance — and only its value changes. The light palette is the
+// one the design's class names spell; the dark one is that design on a dark
+// page: the same slate/stone relationships, the same brand green, with the
+// surfaces inverted and the inks raised until they read.
+//
+// A third appearance would be a third palette. Nothing in the views knows
+// which one is installed; they ask for a name, and design.go decides what
+// that name is worth in the appearance the user chose.
+type palette struct {
+	// Faces.
+	surface, sidebar, field, muted, hover, active, rowAlt ui.Color
+	border, hairline                                      ui.Color
+
+	// Text.
+	text, textSoft, textBody, textMuted, textFaint, inputValue ui.Color
+
+	// Brand and status. onBrand is the ink on a brand fill; onMark is the
+	// white a provider's drawing is made of inside its own colored tile.
+	brand, brandHover, brandPressed, onBrand, onMark ui.Color
+	// brandTint and brandTintStrong are the brand at the two strengths a
+	// selected row is washed in.
+	brandTint, brandTintStrong ui.Color
+
+	success, warning, danger                                 ui.Color
+	warningFill, warningBorder, warningHover, warningPressed ui.Color
+
+	// The colors a recorded copy is drawn in: a tile and its ink.
+	skyTile, skyInk, blueTile, blueInk           ui.Color
+	violetTile, violetInk, amberTile, amberInk   ui.Color
+	emeraldTile, emeraldInk, stoneTile, stoneInk ui.Color
+
+	readingInk, skeleton ui.Color
+	// tileEdge outlines a provider's own tile when its brand color would
+	// otherwise sit against a surface of the same darkness. It is nothing
+	// in the light appearance.
+	tileEdge ui.Color
+
+	// The translation card's own palette.
+	sourceInk, particle, eyebrow, bodyInk, footerInk ui.Color
+	badgeStoneFill, badgeStoneInk                    ui.Color
+	badgeBlueFill, badgeBlueInk                      ui.Color
+	badgeVioletFill, badgeVioletInk                  ui.Color
+	badgeEmeraldFill, badgeEmeraldInk                ui.Color
+	cardFoot, cardLine, chip, chipInk                ui.Color
+
+	// The quick window's own scale.
+	panelInk, panelNumber, panelFaint, panelBody ui.Color
+	panelLine, panelField, panelBorder           ui.Color
+	panelHover, panelPress                       ui.Color
+}
+
+// lightPalette is the design as its own classes write it: white pages, slate
+// borders, stone inks and the brand green on top.
+var lightPalette = palette{
+	surface: ui.Hex("#FFFFFF"),
+	sidebar: ui.Hex("#FAFAF9"),
+	field:   ui.Hex("#FAFAF9"),
+	muted:   ui.Hex("#F5F5F4"),
+	hover:   ui.Hex("#F5F5F4"),
+	active:  ui.Hex("#E7E5E4"),
+	rowAlt:  ui.Hex("#F8FAFC"),
+
+	border:   ui.Hex("#E2E8F0"),
+	hairline: ui.Hex("#F5F5F4"),
+
+	text:       ui.Hex("#0F172A"),
+	textSoft:   ui.Hex("#1C1917"),
+	textBody:   ui.Hex("#44403C"),
+	textMuted:  ui.Hex("#64748B"),
+	textFaint:  ui.Hex("#78716C"),
+	inputValue: ui.Hex("#57534E"),
+
+	brand:           ui.Hex("#3B693D"),
+	brandHover:      ui.Hex("#2F5631"),
+	brandPressed:    ui.Hex("#294A2B"),
+	onBrand:         ui.Hex("#FFFFFF"),
+	onMark:          ui.Hex("#FFFFFF"),
+	brandTint:       ui.RGBA(59, 105, 61, 0.06),
+	brandTintStrong: ui.RGBA(59, 105, 61, 0.10),
+
+	success:        ui.Hex("#059669"),
+	warning:        ui.Hex("#B45309"),
+	danger:         ui.Hex("#DC2626"),
+	warningFill:    ui.Hex("#FFFBEB"),
+	warningBorder:  ui.Hex("#FDE68A"),
+	warningHover:   ui.Hex("#FEF3C7"),
+	warningPressed: ui.Hex("#FDE68A"),
+
+	skyTile:     ui.Hex("#F0F9FF"),
+	skyInk:      ui.Hex("#0EA5E9"),
+	blueTile:    ui.Hex("#EFF6FF"),
+	blueInk:     ui.Hex("#3B82F6"),
+	violetTile:  ui.Hex("#F5F3FF"),
+	violetInk:   ui.Hex("#8B5CF6"),
+	amberTile:   ui.Hex("#FFFBEB"),
+	amberInk:    ui.Hex("#D97706"),
+	emeraldTile: ui.Hex("#ECFDF5"),
+	emeraldInk:  ui.Hex("#047857"),
+	stoneTile:   ui.Hex("#F5F5F4"),
+	stoneInk:    ui.Hex("#57534E"),
+
+	readingInk: ui.Hex("#78716C"),
+	skeleton:   ui.Hex("#F5F5F4"),
+	tileEdge:   ui.Transparent,
+
+	sourceInk: ui.Hex("#1C1917"),
+	particle:  ui.Hex("#A8A29E"),
+	eyebrow:   ui.Hex("#A8A29E"),
+	bodyInk:   ui.Hex("#292524"),
+	footerInk: ui.Hex("#A8A29E"),
+
+	badgeStoneFill:   ui.Hex("#F5F5F4"),
+	badgeStoneInk:    ui.Hex("#78716C"),
+	badgeBlueFill:    ui.Hex("#EFF6FF"),
+	badgeBlueInk:     ui.Hex("#2563EB"),
+	badgeVioletFill:  ui.Hex("#F5F3FF"),
+	badgeVioletInk:   ui.Hex("#7C3AED"),
+	badgeEmeraldFill: ui.Hex("#ECFDF5"),
+	badgeEmeraldInk:  ui.Hex("#3B693D"),
+
+	cardFoot: ui.Hex("#FCFCFC"),
+	cardLine: ui.Hex("#F5F5F4"),
+	chip:     ui.Hex("#FAFAF9"),
+	chipInk:  ui.Hex("#44403C"),
+
+	panelInk:    ui.Hex("#292524"),
+	panelNumber: ui.Hex("#1C1917"),
+	panelFaint:  ui.Hex("#A8A29E"),
+	panelBody:   ui.Hex("#78716C"),
+	panelLine:   ui.Hex("#F5F5F4"),
+	panelField:  ui.Hex("#FAFAF9"),
+	panelBorder: ui.Hex("#E7E5E4"),
+	panelHover:  ui.Hex("#F5F5F4"),
+	panelPress:  ui.Hex("#E7E5E4"),
+}
+
+// darkPalette is the same design at night. The page is the darkest surface
+// and every other face is a step above it — a field, a tile, a hover — so
+// that the light design's "one surface, lines drawn on it" still reads: the
+// lines are one step lighter than the page, and nothing is a bright band.
+//
+// The brand green is the lighter one the framework's dark accent already
+// used (#6FA776), because #3B693D would sink into a #18181B page; the ink on
+// it turns dark for the same reason. The kind tiles are the light families
+// at their 950 end, and their inks at the 300 end, so a recorded copy keeps
+// the color that says what it is without lighting up the list.
+var darkPalette = palette{
+	surface: ui.Hex("#18181B"),
+	sidebar: ui.Hex("#1E1E22"),
+	field:   ui.Hex("#202024"),
+	muted:   ui.Hex("#27272A"),
+	hover:   ui.Hex("#27272A"),
+	active:  ui.Hex("#303035"),
+	rowAlt:  ui.Hex("#1F1F23"),
+
+	border:   ui.Hex("#34343A"),
+	hairline: ui.Hex("#27272A"),
+
+	text:       ui.Hex("#F4F4F5"),
+	textSoft:   ui.Hex("#FAFAF9"),
+	textBody:   ui.Hex("#D4D4D8"),
+	textMuted:  ui.Hex("#A1A1AA"),
+	textFaint:  ui.Hex("#A8A29E"),
+	inputValue: ui.Hex("#D6D3D1"),
+
+	brand:           ui.Hex("#6FA776"),
+	brandHover:      ui.Hex("#84BA8A"),
+	brandPressed:    ui.Hex("#5C8F63"),
+	onBrand:         ui.Hex("#10240F"),
+	onMark:          ui.Hex("#FFFFFF"),
+	brandTint:       ui.RGBA(111, 167, 118, 0.16),
+	brandTintStrong: ui.RGBA(111, 167, 118, 0.22),
+
+	success:        ui.Hex("#34D399"),
+	warning:        ui.Hex("#FBBF24"),
+	danger:         ui.Hex("#F87171"),
+	warningFill:    ui.Hex("#2A2113"),
+	warningBorder:  ui.Hex("#5C4318"),
+	warningHover:   ui.Hex("#332818"),
+	warningPressed: ui.Hex("#3D301C"),
+
+	skyTile:     ui.Hex("#082F49"),
+	skyInk:      ui.Hex("#38BDF8"),
+	blueTile:    ui.Hex("#172554"),
+	blueInk:     ui.Hex("#93C5FD"),
+	violetTile:  ui.Hex("#2E1065"),
+	violetInk:   ui.Hex("#C4B5FD"),
+	amberTile:   ui.Hex("#451A03"),
+	amberInk:    ui.Hex("#FCD34D"),
+	emeraldTile: ui.Hex("#022C22"),
+	emeraldInk:  ui.Hex("#6EE7B7"),
+	stoneTile:   ui.Hex("#292524"),
+	stoneInk:    ui.Hex("#D6D3D1"),
+
+	readingInk: ui.Hex("#A8A29E"),
+	skeleton:   ui.Hex("#27272A"),
+	tileEdge:   ui.Hex("#3F3F46"),
+
+	sourceInk: ui.Hex("#FAFAF9"),
+	particle:  ui.Hex("#78716C"),
+	eyebrow:   ui.Hex("#A8A29E"),
+	bodyInk:   ui.Hex("#E7E5E4"),
+	footerInk: ui.Hex("#A8A29E"),
+
+	badgeStoneFill:   ui.Hex("#292524"),
+	badgeStoneInk:    ui.Hex("#D6D3D1"),
+	badgeBlueFill:    ui.Hex("#172554"),
+	badgeBlueInk:     ui.Hex("#93C5FD"),
+	badgeVioletFill:  ui.Hex("#2E1065"),
+	badgeVioletInk:   ui.Hex("#C4B5FD"),
+	badgeEmeraldFill: ui.Hex("#022C22"),
+	badgeEmeraldInk:  ui.Hex("#6FA776"),
+
+	cardFoot: ui.Hex("#1F1F23"),
+	cardLine: ui.Hex("#27272A"),
+	chip:     ui.Hex("#202024"),
+	chipInk:  ui.Hex("#D6D3D1"),
+
+	panelInk:    ui.Hex("#E7E5E4"),
+	panelNumber: ui.Hex("#FAFAF9"),
+	panelFaint:  ui.Hex("#A8A29E"),
+	panelBody:   ui.Hex("#A8A29E"),
+	panelLine:   ui.Hex("#292524"),
+	panelField:  ui.Hex("#22201E"),
+	panelBorder: ui.Hex("#3A3735"),
+	panelHover:  ui.Hex("#292524"),
+	panelPress:  ui.Hex("#3A3735"),
+}
+
+// The colors every view asks for, as the current appearance spells them.
+//
+// They are package values rather than parameters because the design system
+// is one namespace that every window draws from, and MyGo builds a window's
+// view as one synchronous pass on the main thread: applyDesign installs the
+// appearance at the top of that pass, and every name below is read after it.
+// A window therefore cannot be half light and half dark, and a background
+// goroutine never reads these — views are the only readers.
 var (
 	// --- Faces -----------------------------------------------------------
 
 	// colorSurface is the window's own face. Every window is drawn on it —
 	// content, header lines and footer alike — so a window reads as one
 	// surface with lines drawn on it rather than as a stack of bands.
-	colorSurface = ui.Hex("#FFFFFF")
+	colorSurface = lightPalette.surface
 	// colorField is the face of an input, and colorMuted the face of a tile
 	// that is not colored by what it stands for.
-	colorField = ui.Hex("#FAFAF9")
-	colorMuted = ui.Hex("#F5F5F4")
+	colorField = lightPalette.field
+	colorMuted = lightPalette.muted
 	// colorHover and colorActive are what a row or a button takes under the
 	// pointer and while it is pressed.
-	colorHover  = ui.Hex("#F5F5F4")
-	colorActive = ui.Hex("#E7E5E4")
-	colorRowAlt = ui.Hex("#F8FAFC")
+	colorHover  = lightPalette.hover
+	colorActive = lightPalette.active
+	colorRowAlt = lightPalette.rowAlt
 	// colorSidebar is the face of the settings window's sidebar, the one
 	// region of a window that is not the window's own white: the design gives
 	// the navigation a face of its own, so that the page beside it reads as
 	// the content and the column as the way around it.
-	colorSidebar = ui.Hex("#FAFAF9")
+	colorSidebar = lightPalette.sidebar
 
-	colorBorder = ui.Hex("#E2E8F0")
+	colorBorder = lightPalette.border
 	// colorHairline is the line between two entries of a list: fainter than
 	// a border, because a list is one thing rather than a row of them.
-	colorHairline = ui.Hex("#F5F5F4")
+	colorHairline = lightPalette.hairline
 
 	// --- Text ------------------------------------------------------------
 
-	colorText       = ui.Hex("#0F172A")
-	colorTextSoft   = ui.Hex("#1C1917")
-	colorTextBody   = ui.Hex("#44403C")
-	colorTextMuted  = ui.Hex("#64748B")
-	colorTextFaint  = ui.Hex("#78716C")
-	colorInputValue = ui.Hex("#57534E")
+	colorText       = lightPalette.text
+	colorTextSoft   = lightPalette.textSoft
+	colorTextBody   = lightPalette.textBody
+	colorTextMuted  = lightPalette.textMuted
+	colorTextFaint  = lightPalette.textFaint
+	colorInputValue = lightPalette.inputValue
 
 	// --- Brand and status ------------------------------------------------
 
 	// colorBrand is the green of the one action a form is for, and of every
 	// other place the application asks for attention. It is the theme's
 	// accent too, so a checked box and a picked segment come along with it.
-	colorBrand        = ui.Hex("#3B693D")
-	colorBrandHover   = ui.Hex("#2F5631")
-	colorBrandPressed = ui.Hex("#294A2B")
-	colorOnBrand      = ui.Hex("#FFFFFF")
+	colorBrand        = lightPalette.brand
+	colorBrandHover   = lightPalette.brandHover
+	colorBrandPressed = lightPalette.brandPressed
+	colorOnBrand      = lightPalette.onBrand
+	// colorOnMark is the white of a provider's own mark inside its tile. It
+	// stays white in both appearances: the tile is the brand's color, and
+	// the drawing on it is not text on the application's green.
+	colorOnMark          = lightPalette.onMark
+	colorBrandTint       = lightPalette.brandTint
+	colorBrandTintStrong = lightPalette.brandTintStrong
 
-	colorSuccess = ui.Hex("#059669")
-	colorWarning = ui.Hex("#B45309")
-	colorDanger  = ui.Hex("#DC2626")
+	colorSuccess = lightPalette.success
+	colorWarning = lightPalette.warning
+	colorDanger  = lightPalette.danger
 
 	// The warning panel: the one note on a page the user should not be able
 	// to miss.
-	colorWarningFill    = ui.Hex("#FFFBEB")
-	colorWarningBorder  = ui.Hex("#FDE68A")
-	colorWarningHover   = ui.Hex("#FEF3C7")
-	colorWarningPressed = ui.Hex("#FDE68A")
+	colorWarningFill    = lightPalette.warningFill
+	colorWarningBorder  = lightPalette.warningBorder
+	colorWarningHover   = lightPalette.warningHover
+	colorWarningPressed = lightPalette.warningPressed
 
 	// --- The colors a recorded copy is drawn in --------------------------
 
 	// Each is a pair: the face of the tile at the head of the row, and the
 	// color the mark and the kind's badge are drawn in.
-	colorSkyTile, colorSkyInk         = ui.Hex("#F0F9FF"), ui.Hex("#0EA5E9")
-	colorBlueTile, colorBlueInk       = ui.Hex("#EFF6FF"), ui.Hex("#3B82F6")
-	colorVioletTile, colorVioletInk   = ui.Hex("#F5F3FF"), ui.Hex("#8B5CF6")
-	colorAmberTile, colorAmberInk     = ui.Hex("#FFFBEB"), ui.Hex("#D97706")
-	colorEmeraldTile, colorEmeraldInk = ui.Hex("#ECFDF5"), ui.Hex("#047857")
-	colorStoneTile, colorStoneInk     = ui.Hex("#F5F5F4"), ui.Hex("#57534E")
+	colorSkyTile, colorSkyInk         = lightPalette.skyTile, lightPalette.skyInk
+	colorBlueTile, colorBlueInk       = lightPalette.blueTile, lightPalette.blueInk
+	colorVioletTile, colorVioletInk   = lightPalette.violetTile, lightPalette.violetInk
+	colorAmberTile, colorAmberInk     = lightPalette.amberTile, lightPalette.amberInk
+	colorEmeraldTile, colorEmeraldInk = lightPalette.emeraldTile, lightPalette.emeraldInk
+	colorStoneTile, colorStoneInk     = lightPalette.stoneTile, lightPalette.stoneInk
 
 	// colorReadingInk is how a reading above a word is written in the
 	// translation window: the design's stone-500.
-	colorReadingInk = ui.Hex("#78716C")
+	colorReadingInk = lightPalette.readingInk
 	// colorSkeleton is the face of a line that has not arrived yet.
-	colorSkeleton = ui.Hex("#F5F5F4")
+	colorSkeleton = lightPalette.skeleton
+	// colorTileEdge outlines a provider's tile where its own color would
+	// otherwise disappear into the page. The light appearance has none.
+	colorTileEdge = lightPalette.tileEdge
 
 	// --- The translation card's own palette ------------------------------
 
 	// The design is a stone scale rather than the slate one the rest of the
 	// application uses, because the card is a piece of the page's own text
 	// rather than a form: every color below is the one its class names.
-	colorSourceInk = ui.Hex("#1C1917") // stone-900, the source text
-	colorParticle  = ui.Hex("#A8A29E") // stone-400, a particle between words
-	colorEyebrow   = ui.Hex("#A8A29E") // stone-400, the "原文" label
-	colorBodyInk   = ui.Hex("#292524") // stone-800, the translation
-	colorFooterInk = ui.Hex("#A8A29E") // stone-400, the line at the foot
-	colorLoanword  = colorBrand        // the brand green, for a loanword
+	colorSourceInk = lightPalette.sourceInk // stone-900, the source text
+	colorParticle  = lightPalette.particle  // stone-400, a particle between words
+	colorEyebrow   = lightPalette.eyebrow   // stone-400, the "原文" label
+	colorBodyInk   = lightPalette.bodyInk   // stone-800, the translation
+	colorFooterInk = lightPalette.footerInk // stone-400, the line at the foot
+	colorLoanword  = lightPalette.brand     // the brand green, for a loanword
 
 	// Each language's badge: the face and the ink the design gives it.
-	badgeStoneFill, badgeStoneInk     = ui.Hex("#F5F5F4"), ui.Hex("#78716C") // 日本語
-	badgeBlueFill, badgeBlueInk       = ui.Hex("#EFF6FF"), ui.Hex("#2563EB") // English
-	badgeVioletFill, badgeVioletInk   = ui.Hex("#F5F3FF"), ui.Hex("#7C3AED") // 한국어
-	badgeEmeraldFill, badgeEmeraldInk = ui.Hex("#ECFDF5"), colorBrand        // 中文
+	badgeStoneFill, badgeStoneInk     = lightPalette.badgeStoneFill, lightPalette.badgeStoneInk     // 日本語
+	badgeBlueFill, badgeBlueInk       = lightPalette.badgeBlueFill, lightPalette.badgeBlueInk       // English
+	badgeVioletFill, badgeVioletInk   = lightPalette.badgeVioletFill, lightPalette.badgeVioletInk   // 한국어
+	badgeEmeraldFill, badgeEmeraldInk = lightPalette.badgeEmeraldFill, lightPalette.badgeEmeraldInk // 中文
 
 	// The foot of the card is the design's stone-50 at half strength over
 	// the card's white, which is what the eye is shown: #FAFAF9 at 50%
 	// over #FFFFFF.
-	colorCardFoot = ui.Hex("#FCFCFC")
+	colorCardFoot = lightPalette.cardFoot
 	// colorCardLine is the hairline the design draws inside the card:
 	// stone-100 between the two blocks, stone-200/80 around it.
-	colorCardLine = ui.Hex("#F5F5F4")
+	colorCardLine = lightPalette.cardLine
 	// The annotation chips: stone-50 on a stone-100 edge, with the word in
 	// stone-700 and its reading — or the loanword's own word — above it.
-	colorChip    = ui.Hex("#FAFAF9") // stone-50
-	colorChipInk = ui.Hex("#44403C") // stone-700
+	colorChip    = lightPalette.chip    // stone-50
+	colorChipInk = lightPalette.chipInk // stone-700
 
 	// --- The quick window's own scale ------------------------------------
 	//
@@ -135,16 +387,92 @@ var (
 	// the design draws it in stone: its chrome is not the slate the settings
 	// window uses. Each name below is the design's own class, and the piece
 	// that reads it is the one the design gives that value to.
-	panelInk    = ui.Hex("#292524") // stone-800, a block's name
-	panelNumber = ui.Hex("#1C1917") // stone-900, the number a block is about
-	panelFaint  = ui.Hex("#A8A29E") // stone-400, times, labels, quiet actions
-	panelBody   = ui.Hex("#78716C") // stone-500, the clipboard line
-	panelLine   = ui.Hex("#F5F5F4") // stone-100, dividers and the footer's edge
-	panelField  = ui.Hex("#FAFAF9") // stone-50, the clipboard row's face
-	panelBorder = ui.Hex("#E7E5E4") // stone-200, its hairline
-	panelHover  = ui.Hex("#F5F5F4") // stone-100, what a quiet action takes
-	panelPress  = ui.Hex("#E7E5E4") // stone-200, and what it takes pressed
+	panelInk    = lightPalette.panelInk    // stone-800, a block's name
+	panelNumber = lightPalette.panelNumber // stone-900, the number a block is about
+	panelFaint  = lightPalette.panelFaint  // stone-400, times, labels, quiet actions
+	panelBody   = lightPalette.panelBody   // stone-500, the clipboard line
+	panelLine   = lightPalette.panelLine   // stone-100, dividers and the footer's edge
+	panelField  = lightPalette.panelField  // stone-50, the clipboard row's face
+	panelBorder = lightPalette.panelBorder // stone-200, its hairline
+	panelHover  = lightPalette.panelHover  // stone-100, what a quiet action takes
+	panelPress  = lightPalette.panelPress  // stone-200, and what it takes pressed
+
 )
+
+// applyDesign installs one appearance for the pass that is about to build a
+// window. It is the only writer of the colors above.
+func applyDesign(dark bool) {
+	p := lightPalette
+	if dark {
+		p = darkPalette
+	}
+	colorSurface = p.surface
+	colorSidebar = p.sidebar
+	colorField = p.field
+	colorMuted = p.muted
+	colorHover = p.hover
+	colorActive = p.active
+	colorRowAlt = p.rowAlt
+	colorBorder = p.border
+	colorHairline = p.hairline
+
+	colorText = p.text
+	colorTextSoft = p.textSoft
+	colorTextBody = p.textBody
+	colorTextMuted = p.textMuted
+	colorTextFaint = p.textFaint
+	colorInputValue = p.inputValue
+
+	colorBrand = p.brand
+	colorBrandHover = p.brandHover
+	colorBrandPressed = p.brandPressed
+	colorOnBrand = p.onBrand
+	colorOnMark = p.onMark
+	colorBrandTint = p.brandTint
+	colorBrandTintStrong = p.brandTintStrong
+	colorSuccess = p.success
+	colorWarning = p.warning
+	colorDanger = p.danger
+	colorWarningFill = p.warningFill
+	colorWarningBorder = p.warningBorder
+	colorWarningHover = p.warningHover
+	colorWarningPressed = p.warningPressed
+
+	colorSkyTile, colorSkyInk = p.skyTile, p.skyInk
+	colorBlueTile, colorBlueInk = p.blueTile, p.blueInk
+	colorVioletTile, colorVioletInk = p.violetTile, p.violetInk
+	colorAmberTile, colorAmberInk = p.amberTile, p.amberInk
+	colorEmeraldTile, colorEmeraldInk = p.emeraldTile, p.emeraldInk
+	colorStoneTile, colorStoneInk = p.stoneTile, p.stoneInk
+	colorReadingInk = p.readingInk
+	colorSkeleton = p.skeleton
+	colorTileEdge = p.tileEdge
+
+	colorSourceInk = p.sourceInk
+	colorParticle = p.particle
+	colorEyebrow = p.eyebrow
+	colorBodyInk = p.bodyInk
+	colorFooterInk = p.footerInk
+	colorLoanword = p.brand
+	badgeStoneFill, badgeStoneInk = p.badgeStoneFill, p.badgeStoneInk
+	badgeBlueFill, badgeBlueInk = p.badgeBlueFill, p.badgeBlueInk
+	badgeVioletFill, badgeVioletInk = p.badgeVioletFill, p.badgeVioletInk
+	badgeEmeraldFill, badgeEmeraldInk = p.badgeEmeraldFill, p.badgeEmeraldInk
+	colorCardFoot = p.cardFoot
+	colorCardLine = p.cardLine
+	colorChip = p.chip
+	colorChipInk = p.chipInk
+
+	panelInk = p.panelInk
+	panelNumber = p.panelNumber
+	panelFaint = p.panelFaint
+	panelBody = p.panelBody
+	panelLine = p.panelLine
+	panelField = p.panelField
+	panelBorder = p.panelBorder
+	panelHover = p.panelHover
+	panelPress = p.panelPress
+}
 
 // The application's metrics, in points, taken from the design: every window
 // keeps a 20-point page edge, a section keeps 12 points between its rows, and
@@ -244,45 +572,57 @@ const (
 // theme colours MyGo's own widgets: its check boxes, inputs, focus rings,
 // scrollbars and dividers take these, so that a widget the framework draws
 // and a piece this file composes read as the same design.
+//
+// It is built from the same palette as the views rather than from the
+// framework's own dark theme: a checked box is drawn by MyGo, and it has to
+// be the brand green on the same surface as the button beside it. The
+// framework's palette is the starting point for the properties Boku does not
+// name (scrollbar, inverse, spacing), not for a second set of colors.
 func theme(dark bool) *ui.Theme {
+	p := lightPalette
+	base := ui.LightTheme()
 	if dark {
-		base := ui.DarkTheme()
-		base.Accent = ui.Hex("#6FA776")
-		base.AccentHover = ui.Hex("#84BA8A")
-		base.AccentPressed = ui.Hex("#5C8F63")
-		base.AccentText = ui.Hex("#10240F")
-		base.Focus = ui.RGBA(111, 167, 118, 0.6)
-		base.Selection = ui.RGBA(111, 167, 118, 0.35)
-		base.Radius = radiusField
-		return base
+		p = darkPalette
+		base = ui.DarkTheme()
 	}
-	t := ui.LightTheme()
-	t.Background = colorSurface
-	t.Surface = colorField
-	t.SurfaceHover = colorHover
-	t.SurfacePressed = colorActive
-	t.Border = colorBorder
-	t.Text = colorText
-	t.TextMuted = colorTextMuted
-	t.Accent = colorBrand
-	t.AccentHover = colorBrandHover
-	t.AccentPressed = colorBrandPressed
-	t.AccentText = colorOnBrand
-	t.Danger = colorDanger
-	t.Warning = colorWarning
-	t.Success = colorSuccess
-	t.Selection = ui.RGBA(59, 105, 61, 0.22)
-	t.Focus = ui.RGBA(59, 105, 61, 0.55)
-	t.Radius = radiusField
-	return t
+	base.Background = p.surface
+	base.Surface = p.field
+	base.SurfaceHover = p.hover
+	base.SurfacePressed = p.active
+	base.Border = p.border
+	base.Text = p.text
+	base.TextMuted = p.textMuted
+	base.Accent = p.brand
+	base.AccentHover = p.brandHover
+	base.AccentPressed = p.brandPressed
+	base.AccentText = p.onBrand
+	base.Danger = p.danger
+	base.Warning = p.warning
+	base.Success = p.success
+	// The light appearance's selection and focus are the ones it always had.
+	base.Selection = p.brand.Alpha(0.22)
+	base.Focus = p.brand.Alpha(0.55)
+	if dark {
+		// A dark page needs the accent's wash a little stronger to be seen.
+		base.Selection = p.brand.Alpha(0.35)
+		base.Focus = p.brand.Alpha(0.60)
+	}
+	base.Radius = radiusField
+	return base
 }
 
-// useDesign points the frame being built at Boku's theme. A view calls it
-// once, before it builds anything: the theme is read while an element is
-// constructed, so a control built before this call keeps the framework's
-// colors.
-func useDesign(c *ui.Context) {
-	c.SetTheme(theme(false))
+// useDesign points the frame being built at one appearance of Boku's design:
+// it installs the palette the helpers below read, and the matching theme for
+// the widgets MyGo draws instead of this file.
+//
+// A view calls it once, before it builds anything: the theme is read while an
+// element is constructed, so a control built before this call keeps the
+// framework's colors. The state owns the appearance because it is a choice
+// the user made in the settings window; a view only says "draw the
+// application as it stands".
+func (s *State) useDesign(c *ui.Context) {
+	applyDesign(s.dark)
+	c.SetTheme(theme(s.dark))
 }
 
 // windowFrame is the column every window is built in: the content area's face
@@ -1002,16 +1342,22 @@ func quickDivider(c *ui.Context) {
 // block whose provider has no drawing gets the tile alone, so that two blocks'
 // names still start at the same place.
 func quickTile(c *ui.Context, mark panelMark) {
-	ui.Box(c).Size(quickTileSize, quickTileSize).Shrink(0).
+	box := ui.Box(c).Size(quickTileSize, quickTileSize).Shrink(0).
 		Radius(radiusTile).
 		Background(mark.tile).
-		Center().
-		Children(func() {
-			if mark.svg == nil {
-				return
-			}
-			ui.Icon(c, mark.svg).Size(quickMarkSize, quickMarkSize).Shrink(0).TextColor(mark.ink)
-		})
+		Center()
+	// A brand whose tile is as dark as the page keeps an edge, so that the
+	// block still starts with a mark rather than with the name beside a hole.
+	// The light appearance has no edge to add.
+	if colorTileEdge.A > 0 {
+		box.Border(1, colorTileEdge)
+	}
+	box.Children(func() {
+		if mark.svg == nil {
+			return
+		}
+		ui.Icon(c, mark.svg).Size(quickMarkSize, quickMarkSize).Shrink(0).TextColor(mark.ink)
+	})
 }
 
 // statusNote is the line that says whether a credential is already stored: a

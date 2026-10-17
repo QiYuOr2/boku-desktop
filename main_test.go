@@ -23,12 +23,27 @@ import (
 // its provider, can be paired wrongly. That is a startup error, and it can
 // be checked without a window.
 func TestServicesAssembleThePanels(t *testing.T) {
-	panels, secrets, clip, translation, _, err := services(t.TempDir(), "0.1.0")
+	userData := t.TempDir()
+	panels, secrets, clip, translation, _, appearance, prefs, err := services(userData, "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}
 	if panels == nil || secrets == nil || clip == nil || translation == nil {
 		t.Fatal("services returned no services")
+	}
+	// The appearance is a section of the same settings file, registered with
+	// the store: a change to it has to be one the store accepts and writes.
+	if appearance.Mode() != "system" {
+		t.Errorf("the appearance starts at %q, want system", appearance.Mode())
+	}
+	if err := prefs.Update(context.Background(), "appearance", func() error {
+		appearance.Set("dark")
+		return nil
+	}); err != nil {
+		t.Fatalf("writing the appearance: %v", err)
+	}
+	if appearance.Mode() != "dark" {
+		t.Errorf("the appearance after a save = %q, want dark", appearance.Mode())
 	}
 	// The clipboard starts off, and nothing here reads the system
 	// clipboard: assembling a service is not using it.
@@ -232,7 +247,7 @@ func TestRecordPanicsWritesItDownAndRaisesItAgain(t *testing.T) {
 // a translator without a settings store, or one whose settings it cannot
 // read, is a startup mistake worth catching here.
 func TestServicesAssembleTheTranslators(t *testing.T) {
-	_, _, _, translation, own, err := services(t.TempDir(), "0.1.0")
+	_, _, _, translation, own, _, _, err := services(t.TempDir(), "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}

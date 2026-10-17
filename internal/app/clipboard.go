@@ -162,7 +162,7 @@ func (s *State) openHistory() {
 //
 // It reads what the tool already holds, and copies nothing while drawing.
 func (s *State) historyView(c *ui.Context) {
-	useDesign(c)
+	s.useDesign(c)
 	windowFrame(c).Children(func() {
 		// What the list is, and what a click does, on its own line above it:
 		// the list scrolls under this, so it stays where it is. The window's
@@ -239,9 +239,17 @@ func (s *State) historyRow(c *ui.Context, entry domain.ClipboardEntry) {
 		AlignItems(ui.Center).
 		Gap(float32(12))
 	justCopied := entry.ID == s.copiedEntry
+	// The kind's own ink washed over the row. Ten percent reads as a tint on
+	// a white page; on a dark one it needs a little more to be seen at all,
+	// and this is the one state the row keeps after the click rather than one
+	// the pointer explains.
+	wash := float32(0.10)
+	if s.dark {
+		wash = 0.20
+	}
 	switch {
 	case justCopied:
-		row.Background(ink.Alpha(0.10))
+		row.Background(ink.Alpha(wash))
 	case row.Pressed():
 		row.Background(colorActive)
 	case row.Hovered() || row.Focused():

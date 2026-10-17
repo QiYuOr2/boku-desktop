@@ -214,7 +214,7 @@ func (s *State) openSettings() {
 // The sidebar is not a second title either: it says where each section is,
 // and what is drawn at the top of the page is the section itself.
 func (s *State) settingsView(c *ui.Context) {
-	useDesign(c)
+	s.useDesign(c)
 	windowFrame(c).Children(func() {
 		ui.Row(c).FillWidth().Grow(1).AlignItems(ui.Stretch).Children(func() {
 			s.settingsSidebar(c)
@@ -1127,7 +1127,7 @@ func (s *State) providerOption(c *ui.Context, card translateCard, settings trans
 		Border(1, colorBorder)
 	switch {
 	case selected:
-		row.Background(colorBrand.Alpha(0.06)).Border(1, colorBrand)
+		row.Background(colorBrandTint).Border(1, colorBrand)
 	case row.Hovered() && card.configured:
 		row.Background(colorHover)
 	}
@@ -1389,7 +1389,7 @@ func (s *State) shortcutButton(c *ui.Context) ui.Element {
 		Cursor(ui.CursorPointer)
 	switch {
 	case s.shortcut.recording:
-		button.Background(colorBrand.Alpha(0.10)).Border(1, colorBrand)
+		button.Background(colorBrandTintStrong).Border(1, colorBrand)
 	case button.Hovered() || button.Focused():
 		button.Background(colorHover)
 	}
@@ -1533,6 +1533,27 @@ func (s *State) generalSection(c *ui.Context, head *ui.Handle) {
 			sectionHead(c, head, s.settingsMark, colorStoneInk, "通用", "启动与外观")
 
 			stacked(c, float32(10), func() {
+				// The appearance is the section's first choice because it is
+				// the one the user sees before reading anything: three words
+				// in the same segmented control the clipboard's record range
+				// uses, so a choice between a few fixed things looks the same
+				// wherever it appears.
+				stacked(c, float32(8), func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+						sectionLabel(c, "主题")
+						ui.Spacer(c)
+						selected := appearanceIndex(s.appearance.Mode())
+						picker := segmented(c, &selected, appearanceLabels...)
+						if picker.Changed() && selected >= 0 && selected < len(appearanceModes) {
+							s.setAppearance(appearanceModes[selected])
+						}
+					})
+					notice(c, notePlain, "自动跟随系统外观；浅色与深色固定使用。")
+					if s.appearanceStatus != "" {
+						notice(c, notePlain, s.appearanceStatus)
+					}
+				})
+
 				alwaysOnTop := s.alwaysOnTop
 				ui.Checkbox(c, &alwaysOnTop, "始终置顶悬浮窗").
 					FontSize(sizeBody).

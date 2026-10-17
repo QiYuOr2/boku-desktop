@@ -82,6 +82,23 @@ type Deps struct {
 	// Quit is how the tray application leaves: it has no main window to
 	// close.
 	Quit func()
+	// Appearance is the theme the user chose. It is the presentation's own
+	// setting, stored beside the features' keys; nil means "follow the
+	// desktop", which is also the default.
+	Appearance *Appearance
+	// AppearanceStore is the settings store the choice is written through.
+	// A state without one still changes the appearance for this run.
+	AppearanceStore AppearanceStore
+	// ApplyAppearance gives the desktop the chosen appearance, so that the
+	// title bars, menus and system-drawn window chrome around Boku's own
+	// drawing match it. It is nil in a test that has no desktop.
+	ApplyAppearance func(AppearanceMode)
+	// PopoverAppearance gives a native popover the dark appearance a forced
+	// dark mode needs. It is nil where the platform has no way to do it, in
+	// which case forced dark uses the application's card. main injects the
+	// platform implementation; replacing it with one backed by MyGo's own
+	// API (or nil) is the only change that future API needs.
+	PopoverAppearance PopoverAppearance
 }
 
 // State is the whole presentation state. It is read and written on the main
@@ -95,6 +112,20 @@ type State struct {
 	shortcuts     ShortcutRegistrar
 	version       string
 	quit          func()
+
+	// appearance is the theme choice, and dark is what it resolves to right
+	// now: the views read the resolved answer rather than asking the desktop
+	// on every frame. systemDark is the desktop's last known answer, which is
+	// what the automatic mode follows.
+	appearance        *Appearance
+	appearanceStore   AppearanceStore
+	applyAppearance   func(AppearanceMode)
+	popoverAppearance PopoverAppearance
+	// appearanceStatus is what the last attempt to save the theme said,
+	// shown under the control in the settings window.
+	appearanceStatus string
+	dark             bool
+	systemDark       bool
 
 	trayIcon []byte
 	// deepseekMark is the DeepSeek whale: the mark its block of the quick
@@ -143,10 +174,16 @@ type State struct {
 	keyMark  *ui.SVG
 	infoMark *ui.SVG
 
-	tray           *mygo.Tray
-	panel          *mygo.Window // the open quick window, or nil when closed
-	settingsWindow *mygo.Window // the open settings window, or nil
-	historyWindow  *mygo.Window // the open clipboard history window, or nil
+	tray *mygo.Tray
+	// panel is the open quick window; panelPopover records whether it was
+	// created as the system popover (自动) or as the application's own card
+	// (a fixed appearance), which is what tells a theme change whether the
+	// open window can be repainted or has to be closed.
+	panel             *mygo.Window
+	panelPopover      bool
+	panelInjectedDark bool
+	settingsWindow    *mygo.Window // the open settings window, or nil
+	historyWindow     *mygo.Window // the open clipboard history window, or nil
 	// translateWindow is the translation card, created the first time the
 	// shortcut is pressed and hidden afterwards.
 	translateWindow cardWindow
@@ -270,6 +307,12 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if deps.Secrets == nil {
 		return nil, fmt.Errorf("app: no secret service")
 	}
+	// A state built by a test that does not care about the theme still has
+	// one: following the desktop is what a user who never chose gets.
+	appearance := deps.Appearance
+	if appearance == nil {
+		appearance = NewAppearanceSection()
+	}
 	trayIcon, err := assets.Icon(trayIconSize)
 	if err != nil {
 		return nil, err
@@ -348,33 +391,38 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		return nil, fmt.Errorf("app: parse the info mark: %w", err)
 	}
 	return &State{
-		app:              app,
-		panelService:     deps.Panels,
-		secretService:    deps.Secrets,
-		clipboard:        deps.Clipboard,
-		translate:        deps.Translate,
-		ownServices:      deps.RegisterOwnServices,
-		shortcuts:        deps.Shortcuts,
-		version:          deps.Version,
-		quit:             deps.Quit,
-		selectionGranted: true,
-		trayIcon:         trayIcon,
-		deepseekMark:     deepseekMark,
-		gaugeMark:        gaugeMark,
-		clipboardMark:    clipMark,
-		refreshMark:      refreshMark,
-		historyText:      historyText,
-		historyImage:     historyImage,
-		historyLink:      historyLink,
-		historyCode:      historyCode,
-		settingsMark:     settingsMark,
-		quitMark:         quitMark,
-		copyMark:         copyMark,
-		pinMark:          pinMark,
-		closeMark:        closeMark,
-		translationMark:  translationMark,
-		keyMark:          keyMark,
-		infoMark:         infoMark,
+		app:               app,
+		panelService:      deps.Panels,
+		secretService:     deps.Secrets,
+		clipboard:         deps.Clipboard,
+		translate:         deps.Translate,
+		ownServices:       deps.RegisterOwnServices,
+		shortcuts:         deps.Shortcuts,
+		version:           deps.Version,
+		quit:              deps.Quit,
+		appearance:        appearance,
+		appearanceStore:   deps.AppearanceStore,
+		applyAppearance:   deps.ApplyAppearance,
+		popoverAppearance: deps.PopoverAppearance,
+		dark:              appearance.Dark(false),
+		selectionGranted:  true,
+		trayIcon:          trayIcon,
+		deepseekMark:      deepseekMark,
+		gaugeMark:         gaugeMark,
+		clipboardMark:     clipMark,
+		refreshMark:       refreshMark,
+		historyText:       historyText,
+		historyImage:      historyImage,
+		historyLink:       historyLink,
+		historyCode:       historyCode,
+		settingsMark:      settingsMark,
+		quitMark:          quitMark,
+		copyMark:          copyMark,
+		pinMark:           pinMark,
+		closeMark:         closeMark,
+		translationMark:   translationMark,
+		keyMark:           keyMark,
+		infoMark:          infoMark,
 	}, nil
 }
 
@@ -513,15 +561,50 @@ func (s *State) Activate() {
 	s.Open()
 }
 
+// quickWindowUsesPopover reports whether the quick window can be the system
+// popover. It can in the automatic appearance, whose material follows the
+// desktop and therefore matches Boku's page. A fixed dark appearance can use
+// it only with the injected dark material; a fixed light one draws the
+// application's own card, because a native popover on a dark desktop would be
+// dark behind a light page.
+func (s *State) quickWindowUsesPopover() bool {
+	switch s.appearance.Mode() {
+	case AppearanceSystem:
+		// The material follows the desktop, and so does the page.
+		return true
+	case AppearanceDark:
+		// The material does not follow a forced appearance; the injected
+		// appearance is what makes the native popover usable here.
+		return s.popoverAppearance != nil
+	default:
+		// A forced light appearance keeps the application's card: the
+		// platform bridge is deliberately only for dark, and a native
+		// popover on a dark desktop would be dark behind a light page.
+		return false
+	}
+}
+
+// quickWindowPlacement is where the quick window goes from the tray icon. A
+// popover centres its arrow on the icon; the application's card centres itself
+// on macOS for the same reason, and keeps the established end alignment where
+// it is the normal shape.
+func quickWindowPlacement(goos string, popover bool) mygo.Placement {
+	if goos == "darwin" && !popover {
+		return mygo.PlacementTop
+	}
+	return mygo.PlacementTopEnd
+}
+
 // Open shows a new quick window next to the tray icon.
 //
 // The window is created again on every open instead of being kept hidden:
 // a flyout is placed against the tray when it is created, so a reused one
 // would stay where it was first shown.
 func (s *State) Open() {
+	popover := s.quickWindowUsesPopover()
 	panel := mygo.NewFlyout(mygo.FlyoutOptions{
 		Tray:      s.tray,
-		Placement: mygo.PlacementTopEnd,
+		Placement: quickWindowPlacement(runtime.GOOS, popover),
 		Gap:       4,
 		Width:     panelWidth,
 		Height:    panelHeight,
@@ -529,15 +612,22 @@ func (s *State) Open() {
 		Focusable: true,
 		Shadow:    true,
 		// Popover: on macOS it is an NSPopover, which draws the material,
-		// the corners and the arrow pointing at the icon. Elsewhere the
-		// view draws its own background.
-		Popover: true,
+		// the corners and the arrow pointing at the icon. It is used in the
+		// automatic appearance and, with the injected dark material, in a
+		// fixed dark one; a fixed light one draws the application's card.
+		// Elsewhere the option is ignored and the view draws its own
+		// background either way.
+		Popover: popover,
 		Content: ui.View(s.View),
 	})
 	s.panel = panel
+	s.panelPopover = popover
+	s.syncPopoverAppearance()
 	panel.OnClosed(func() {
 		if s.panel == panel {
 			s.panel = nil
+			s.panelPopover = false
+			s.panelInjectedDark = false
 		}
 	})
 	// Opening the window is the moment to refresh, and every tray click asks
@@ -557,13 +647,18 @@ func (s *State) Open() {
 // the framework's default theme: the panel reads as the first section of a
 // page, which is what it is.
 func (s *State) View(c *ui.Context) {
-	useDesign(c)
+	s.useDesign(c)
 	c.Root().Background(ui.Transparent)
 	box := ui.Column(c).Fill()
 	switch {
 	case c.Vibrancy(): // over the popover's own material on macOS
 	case runtime.GOOS == "windows": // Windows 11 rounds and outlines the flyout
 		box.Background(colorSurface)
+	case runtime.GOOS == "darwin":
+		// A fixed appearance draws the application's card on macOS: the
+		// system draws the shadow and outlines the card with a hairline, so
+		// it draws the face and its corner and no second border.
+		box.Background(colorSurface).Radius(radiusCard)
 	default:
 		box.Background(colorSurface).Radius(radiusCard).Border(1, colorBorder)
 	}

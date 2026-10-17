@@ -30,6 +30,7 @@ import (
 	codexpanel "boku/internal/panel/codex"
 	deepseekpanel "boku/internal/panel/deepseek"
 	"boku/internal/platform/httpc"
+	"boku/internal/platform/popoverappearance"
 	"boku/internal/platform/selection"
 	clipboarddevice "boku/internal/platform/sysclip"
 	"boku/internal/settings"
@@ -79,9 +80,17 @@ func main() {
 		defer recordPanics()
 	}
 
-	panels, secrets, clipboard, translate, own, err := services(userData, version)
+	panels, secrets, clipboard, translate, own, appearance, prefs, err := services(userData, version)
 	if err != nil {
 		log.Fatalf("boku: %v", err)
+	}
+
+	// The native popover appearance is a temporary macOS bridge for forced
+	// dark mode. It is injected as a small interface so that replacing it
+	// with a MyGo API later touches this assembly and nothing in the views.
+	var popoverAppearance app.PopoverAppearance
+	if popoverappearance.Available() {
+		popoverAppearance = popoverappearance.New()
 	}
 
 	// A clipboard reading happening on the poll's goroutine comes back
@@ -108,6 +117,20 @@ func main() {
 		Shortcuts:           app.MyGoShortcuts(),
 		Version:             version,
 		Quit:                mygo.App.Quit,
+		// The theme is the presentation's own setting: it is stored with the
+		// features' keys, but only this window knows what the modes mean.
+		Appearance:      appearance,
+		AppearanceStore: prefs,
+		ApplyAppearance: func(mode app.AppearanceMode) {
+			mygo.Theme.SetSource(app.ThemeSource(mode))
+			// Forcing an appearance hides the desktop's own from Theme.IsDark,
+			// and lifting the force (自动) uncovers it again. Re-read it now,
+			// while the new source is in force, so that choosing 自动 shows
+			// the desktop's appearance rather than the one it had last been
+			// told about.
+			state.SyncAppearance(mygo.Theme.IsDark())
+		},
+		PopoverAppearance: popoverAppearance,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -140,14 +163,15 @@ func main() {
 	// macOS: the tray icon is the entry point, so keep the app out of the
 	// Dock. Windows and Linux ignore this.
 	mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
-	// The design system is light-only. A macOS NSPopover draws the system's
-	// material behind the quick window, and in a dark appearance that
-	// material is dark while the design's text is not: forcing the light
-	// appearance is what keeps the window readable until there is a dark
-	// palette to draw.
-	if runtime.GOOS == "darwin" {
-		mygo.Theme.SetSource(mygo.ThemeLight)
-	}
+	// The saved appearance goes to the desktop before Run, as MyGo asks: the
+	// title bars, menus and the macOS popover's material are drawn before the
+	// first frame, and a Boku that starts light and switches a moment later
+	// is a window that flashes. In the automatic mode this is the system
+	// source; follows it while the application runs, too.
+	mygo.Theme.SetSource(app.ThemeSource(appearance.Mode()))
+	mygo.Theme.OnUpdated(func() {
+		state.SyncAppearance(mygo.Theme.IsDark())
+	})
 	// The quick window is the only window, and closing it must not quit the
 	// application: MyGo quits on the last window closed unless something
 	// listens.
@@ -164,6 +188,9 @@ func main() {
 		state.Destroy()
 	})
 	mygo.App.WhenReady(func() {
+		// The system's answer is only available once the application is
+		// running; in the automatic mode this is what the first frame uses.
+		state.SyncAppearance(mygo.Theme.IsDark())
 		if err := state.Setup(); err != nil {
 			log.Fatal(err)
 		}
@@ -186,7 +213,7 @@ func main() {
 // mismatched provider and adapter, or a panel that breaks its provider's
 // contract, is a startup error and worth catching without a graphical
 // session.
-func services(userData, version string) (*panel.Panels, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, *ownServices, error) {
+func services(userData, version string) (*panel.Panels, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, *ownServices, *app.Appearance, *settings.Store, error) {
 	// Credentials: a file of their own, never the database. The store is
 	// named here and nowhere else.
 	//
@@ -199,11 +226,11 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 	// in a log or an error, and a window that says plainly what the file is.
 	secretStore, err := credential.Open(filepath.Join(userData, credential.FileName))
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
 	}
 	secrets, err := credential.NewSecrets(secretStore)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("prepare the credential store: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the credential store: %w", err)
 	}
 
 	// The application's own settings and the clipboard history, next to the
@@ -217,23 +244,28 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 	clipboardSettings := clipboard.NewSection()
 	translateSettings := translate.NewSection()
 	panelSettings := panel.NewSection()
+	// The appearance is the presentation's choice rather than a feature's,
+	// but it is stored the same way: a section of its own in the same file,
+	// written through the same store.
+	appearance := app.NewAppearanceSection()
 	prefs, err := settings.New(
 		filepath.Join(userData, "settings.json"),
 		clipboardSettings,
 		translateSettings,
 		panelSettings,
+		appearance,
 	)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
 	}
 	// The file is read once, here: a frame must not read it, and neither
 	// must a service that already has its settings in memory.
 	if err := prefs.Load(context.Background()); err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("read the settings: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the settings: %w", err)
 	}
 	history, err := clipboard.NewHistory(filepath.Join(userData, "clipboard_history.json"))
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("open the clipboard history: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the clipboard history: %w", err)
 	}
 
 	client := httpc.New(httpc.Options{UserAgent: "Boku/" + applicationVersion(version)})
@@ -245,16 +277,16 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 		deepseekpanel.New(client),
 		deepseekpanel.NewAdapter(),
 	); err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
 	}
 	if err := registry.Register(
 		codexpanel.New(client),
 		codexpanel.NewAdapter(),
 	); err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("register the codex provider: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the codex provider: %w", err)
 	}
 	if err := registry.Validate(); err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
 	}
 
 	// The Codex quota's credential is not one of Boku's: it is the ChatGPT
@@ -281,11 +313,11 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 		},
 	}, codexLogin)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
 	}
 	// The switches are read once, here: a frame must not read a file.
 	if err := panels.LoadChoices(context.Background()); err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("read the panel switches: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the panel switches: %w", err)
 	}
 
 	// The clipboard reads and writes on the thread the platform owns, so
@@ -313,7 +345,7 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 		Clock:    domain.SystemClock{},
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
 	}
 
 	// The translators the tool may ask. Like the panels, adding one means
@@ -322,7 +354,7 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 	// pair it with.
 	translators := translate.NewRegistry()
 	if err := translators.Register(deepseektranslator.New(client)); err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek translator: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek translator: %w", err)
 	}
 	// The free engines: no key, no account, and the reason a fresh
 	// installation can press the shortcut and get an answer instead of a page
@@ -330,10 +362,10 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 	// because the settings window offers them as two choices — the user picks
 	// the engine, and that engine is the one asked.
 	if err := translators.Register(freetranslator.NewMicrosoft(client)); err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("register the free microsoft translator: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free microsoft translator: %w", err)
 	}
 	if err := translators.Register(freetranslator.NewBilibili(client)); err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("register the free bilibili translator: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free bilibili translator: %w", err)
 	}
 	// The services the user runs themselves: one translator per stored service,
 	// because each has its own id, its own address and its own name. Which ones
@@ -342,7 +374,7 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 	// they added, rather than a set written down here.
 	own := newOwnServices(client, translators, translateSettings)
 	if err := own.registerAll(); err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 	translation, err := translate.NewTranslate(translate.TranslateOptions{
 		Translators: translators,
@@ -368,9 +400,9 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 		Clock:     domain.SystemClock{},
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("prepare the translation tool: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the translation tool: %w", err)
 	}
-	return panels, secrets, clip, translation, own, nil
+	return panels, secrets, clip, translation, own, appearance, prefs, nil
 }
 
 // applicationVersion is the version to send as a user agent: a plain `go

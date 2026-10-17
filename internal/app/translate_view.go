@@ -20,7 +20,7 @@ import (
 // (stone-100), the line above the foot (also stone-100), and the card's own
 // 1-point outline (stone-200/80).
 func (s *State) translateView(c *ui.Context) {
-	useDesign(c)
+	s.useDesign(c)
 	c.Root().Children(func() {
 		// The card is a rounded sheet — the design's rounded-xl — and what is
 		// inside it is kept inside its shape by the part that touches its

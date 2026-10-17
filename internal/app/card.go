@@ -117,7 +117,11 @@ func (s *State) panelHead(c *ui.Context, view panel.View) {
 // pair below instead, so that a block is never one nobody can tell apart.
 var (
 	deepseekBlue = ui.Hex("#4D6BFE")
-	codexBlack   = ui.Hex("#111111")
+	// deepseekBar is the same brand blue, raised for a bar drawn on a dark
+	// page: the tile keeps the provider's own blue, but a bar and the small
+	// number over it are read against the page rather than inside the tile.
+	deepseekBar = ui.Hex("#7C93FF")
+	codexBlack  = ui.Hex("#111111")
 )
 
 // providerMark is how a block's mark is drawn: the provider's own drawing, the
@@ -133,9 +137,22 @@ var (
 func (s *State) providerMark(providerID string) panelMark {
 	switch providerID {
 	case "deepseek":
-		return panelMark{svg: s.deepseekMark, tile: deepseekBlue, ink: colorOnBrand, bar: deepseekBlue}
+		bar := deepseekBlue
+		if s.dark {
+			bar = deepseekBar
+		}
+		return panelMark{svg: s.deepseekMark, tile: deepseekBlue, ink: colorOnMark, bar: bar}
 	case "codex":
-		return panelMark{svg: s.gaugeMark, tile: codexBlack, ink: colorOnBrand, bar: codexBlack}
+		// The tile stays the provider's black; the bar cannot. A bar is
+		// drawn on the page rather than in the tile, and black on a dark
+		// page is not a bar at all. In the dark appearance it is drawn in
+		// the page's own light ink, which is the same mark the tile makes
+		// when the tile is black.
+		bar := codexBlack
+		if s.dark {
+			bar = colorTextSoft
+		}
+		return panelMark{svg: s.gaugeMark, tile: codexBlack, ink: colorOnMark, bar: bar}
 	default:
 		return panelMark{svg: s.gaugeMark, tile: colorMuted, ink: colorTextMuted, bar: colorTextMuted}
 	}
