@@ -270,7 +270,12 @@ func TestCredentialsRefuseAnUnreadableLogin(t *testing.T) {
 // Starting the login without the CLI installed says so instead of opening
 // nothing.
 func TestStartLoginWithoutTheCommand(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
+	previous := lookupLoginCommand
+	lookupLoginCommand = func(string) (string, error) {
+		return "", errors.New("not found")
+	}
+	t.Cleanup(func() { lookupLoginCommand = previous })
+
 	err := newLogin(t, t.TempDir(), "").StartLogin()
 	if !errors.Is(err, domain.ErrLoginCommandMissing) {
 		t.Errorf("error = %v, want ErrLoginCommandMissing", err)

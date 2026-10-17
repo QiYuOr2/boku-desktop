@@ -77,8 +77,10 @@ var (
 
 	// The warning panel: the one note on a page the user should not be able
 	// to miss.
-	colorWarningFill   = ui.Hex("#FFFBEB")
-	colorWarningBorder = ui.Hex("#FDE68A")
+	colorWarningFill    = ui.Hex("#FFFBEB")
+	colorWarningBorder  = ui.Hex("#FDE68A")
+	colorWarningHover   = ui.Hex("#FEF3C7")
+	colorWarningPressed = ui.Hex("#FDE68A")
 
 	// --- The colors a recorded copy is drawn in --------------------------
 
@@ -435,6 +437,10 @@ const (
 	// buttonSecondary is every other action: the content's own face, a
 	// hairline, and a hover that tints it.
 	buttonSecondary
+	// buttonWarning is an action that changes something back: the warning
+	// face and border, with the warning ink, rather than the ordinary
+	// secondary face.
+	buttonWarning
 )
 
 // buttonSize is how much room a button takes: the height every control on a
@@ -505,6 +511,24 @@ func buttonSized(c *ui.Context, label string, tone buttonTone, size buttonSize) 
 			b = b.Background(colorActive)
 		case b.Hovered() || b.Focused():
 			b = b.Background(colorHover)
+		}
+	case buttonWarning:
+		b = b.
+			Height(size.height).
+			Padding(0, size.pad).
+			Radius(radiusField).
+			Background(colorWarningFill).
+			Border(1, colorWarningBorder).
+			TextColor(colorWarning).
+			FontSize(size.font).
+			FontWeight(500).
+			Justify(ui.Start).
+			Cursor(ui.CursorPointer)
+		switch {
+		case b.Pressed():
+			b = b.Background(colorWarningPressed)
+		case b.Hovered() || b.Focused():
+			b = b.Background(colorWarningHover)
 		}
 	}
 	b.Children(func() { ui.Text(c, label).FontSize(size.font).FontWeight(500).SingleLine() })

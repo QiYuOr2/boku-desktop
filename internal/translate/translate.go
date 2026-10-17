@@ -570,6 +570,35 @@ func (t *Translate) clipboardText(ctx context.Context) (string, error) {
 	return content.Text, nil
 }
 
+// RequestSelectionAccess asks the platform to show its permission prompt, on
+// the platforms that have one. The app calls it from the settings page and
+// before the first read: macOS does not list an application in Accessibility
+// until the application asks.
+func (t *Translate) RequestSelectionAccess() bool {
+	if t.selection == nil {
+		return false
+	}
+	authorizer, ok := t.selection.(domain.SelectionAuthorizer)
+	if !ok {
+		return false
+	}
+	return authorizer.RequestSelectionAccess()
+}
+
+// SelectionAccessGranted reports whether the platform already permits reading
+// the selection. A platform with no permission model answers true, so the
+// settings page only shows the request where there is something to request.
+func (t *Translate) SelectionAccessGranted() bool {
+	if t.selection == nil {
+		return true
+	}
+	state, ok := t.selection.(domain.SelectionAccessState)
+	if !ok {
+		return true
+	}
+	return state.SelectionAccessGranted()
+}
+
 // selectionText asks the platform what is selected, and answers with nothing
 // when it cannot say.
 //

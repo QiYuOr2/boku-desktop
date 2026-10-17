@@ -41,9 +41,9 @@ type Settings struct {
 	// says the tool is off, rather than a window that fails.
 	Enabled bool
 	// Accelerator is the global shortcut that starts a translation, in the
-	// form the platform's own shortcut API takes, such as
-	// "Ctrl+Shift+T". Changing it is a later task; it is stored now so that
-	// the file is where the answer lives.
+	// form the framework's shortcut API takes, such as
+	// "CmdOrCtrl+Shift+T". Changing it is a later task; it is stored now so
+	// that the file is where the answer lives.
 	Accelerator string
 	// Provider names the translator to use, by the id it is registered under.
 	// A name no translator answers to is replaced by the default.
@@ -146,10 +146,12 @@ const (
 	// question nobody can answer (§4.5 of the free-translation design).
 	DefaultProvider = contract.MicrosoftEdge
 	// DefaultAccelerator is the shortcut that starts a translation: the one
-	// the design's settings page shows, written the way the platform's own
-	// parser reads it. "Ctrl" rather than "CmdOrCtrl" because the design
-	// names Ctrl and this build's platforms use it; a Mac build writes Super.
-	DefaultAccelerator = "Ctrl+Shift+T"
+	// the design's settings page shows, written the way the framework's
+	// parser reads it. "CmdOrCtrl" is resolved by the platform parser:
+	// Command on macOS, Ctrl on Windows and Linux. Writing "Ctrl" here would
+	// bind Control+Shift+T on macOS, which is not the combination a Mac user
+	// means.
+	DefaultAccelerator = "CmdOrCtrl+Shift+T"
 	// MinCloseDelay and MaxCloseDelay bound the wait before the window closes
 	// itself. Zero is allowed and means "at once": a user who wants the
 	// window gone when they look away can say so.

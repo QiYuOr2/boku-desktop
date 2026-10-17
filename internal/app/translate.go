@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"math"
+	"runtime"
 	"strings"
 	"time"
 
@@ -377,6 +378,14 @@ func (s *State) newCardWindow(onClosed, onBlur, onFocus func()) cardWindow {
 		Transparent:   true,
 		AlwaysOnTop:   true,
 		SkipTaskbar:   true,
+		// On macOS a Panel is a non-activating NSPanel: it floats on every
+		// Space and over full-screen apps, and taking its keyboard does not
+		// activate Boku, so the application the user was working in stays
+		// active. A regular window would pull the foreground away when the
+		// card takes the keyboard, which is exactly the wrong behaviour for a
+		// card about the user's selection. Windows keeps the regular window:
+		// its ShowInactive/Focus pair already has the wanted meaning there.
+		Panel: runtime.GOOS == "darwin",
 		// The platform's own window shadow, which is what the design's
 		// shadow-xl is the design-system spelling of (`bg-white rounded-xl
 		// border border-stone-200/80 shadow-xl`). It is deliberately not

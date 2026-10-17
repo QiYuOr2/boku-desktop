@@ -36,3 +36,23 @@ type SelectionDevice interface {
 // it has no such API, the application in front does not publish its
 // selection, or nothing is selected.
 var ErrSelectionUnavailable = errors.New("the platform has no selected text to give")
+
+// SelectionAuthorizer is implemented by a selection device that can ask the
+// platform to show its permission prompt. macOS is the platform that needs
+// one: its Accessibility list only learns about an application after that
+// application has asked, and the system — not the application — owns the
+// switch. A platform that needs no permission simply does not implement this.
+type SelectionAuthorizer interface {
+	// RequestSelectionAccess asks the system to show the permission prompt,
+	// and reports whether the permission is already granted. A false answer
+	// after the prompt means the user has not granted it yet, not that the
+	// request failed.
+	RequestSelectionAccess() bool
+}
+
+// SelectionAccessState reports whether the platform's permission for reading
+// the selection is already granted, without asking for it. The settings page
+// uses it to stop showing the request once the switch is on.
+type SelectionAccessState interface {
+	SelectionAccessGranted() bool
+}

@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func TestRegisterShortcutsBindsTheDefault(t *testing.T) {
 	}
 	// What the settings window would draw about it is the line the state
 	// holds, and that is what is checked — the drawing itself is not.
-	if text, kind := state.shortcutLine(); !strings.Contains(text, "Ctrl + Shift + T") {
+	if text, kind := state.shortcutLine(); !strings.Contains(text, friendlyAccelerator(translate.DefaultAccelerator)) {
 		t.Errorf("the window does not say what is bound: %q (kind %d)", text, kind)
 	}
 }
@@ -114,8 +115,11 @@ func TestRebindingReleasesBeforeItRegisters(t *testing.T) {
 	if releases == 0 {
 		t.Error("the old binding was not released")
 	}
-	if state.shortcut.noteOK == false {
-		t.Errorf("the change was not reported as good news: %q", state.shortcut.note)
+	if state.shortcut.note != "" {
+		t.Errorf("an accepted change still has a note: %q", state.shortcut.note)
+	}
+	if note, kind := state.shortcutNote(); note != "" || kind != notePlain {
+		t.Errorf("an accepted change still draws %q (kind %d)", note, kind)
 	}
 	// What was bound is remembered, so that the next launch registers it.
 	settings, err := state.translateSettings()
@@ -150,8 +154,8 @@ func TestRebindingPutsTheOldBindingBackOnFailure(t *testing.T) {
 	if !strings.Contains(state.shortcut.note, "用不了") {
 		t.Errorf("the note is %q, want it to say the combination cannot be used", state.shortcut.note)
 	}
-	if state.shortcut.noteOK {
-		t.Error("a refused combination was reported as good news")
+	if note, kind := state.shortcutNote(); note == "" || kind != noteWarning {
+		t.Errorf("a refused combination draws %q (kind %d), want a warning", note, kind)
 	}
 	if state.shortcut.accelerator != translate.DefaultAccelerator {
 		t.Errorf("the window shows %q, want the binding that was there", state.shortcut.accelerator)
@@ -213,7 +217,11 @@ func TestRecordingBindsACombination(t *testing.T) {
 
 	// A key with no modifier: refused, and still recording.
 	state.captureShortcut(ui.InputEvent{Kind: ui.InputKeyDown, Key: ui.KeyT})
-	if !strings.Contains(state.shortcut.note, "Ctrl") {
+	modifier := "Ctrl"
+	if runtime.GOOS == "darwin" {
+		modifier = "Command"
+	}
+	if !strings.Contains(state.shortcut.note, modifier) {
 		t.Errorf("the note is %q, want it to ask for a modifier", state.shortcut.note)
 	}
 	if !state.shortcut.recording {
@@ -303,6 +311,25 @@ func TestFriendlyAccelerator(t *testing.T) {
 	for in, want := range cases {
 		if got := friendlyAccelerator(in); got != want {
 			t.Errorf("friendlyAccelerator(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// The platform names the modifier it actually has: a Mac user's Command is
+// the framework's Super, and the default is written so that each platform
+// resolves it to its own key.
+func TestFriendlyAcceleratorNamesThePlatformsModifier(t *testing.T) {
+	cases := []struct {
+		in, goos, want string
+	}{
+		{"CmdOrCtrl+Shift+T", "darwin", "Command + Shift + T"},
+		{"CmdOrCtrl+Shift+T", "windows", "Ctrl + Shift + T"},
+		{"Super+Space", "darwin", "Command + Space"},
+		{"Super+Space", "linux", "Super + Space"},
+	}
+	for _, tt := range cases {
+		if got := friendlyAcceleratorFor(tt.in, tt.goos); got != tt.want {
+			t.Errorf("friendlyAcceleratorFor(%q, %s) = %q, want %q", tt.in, tt.goos, got, tt.want)
 		}
 	}
 }

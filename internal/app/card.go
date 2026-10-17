@@ -329,14 +329,29 @@ func (s *State) providerName(providerID string) string {
 // startCredentialLogin starts the login a credential comes from, and says what
 // happened: a tool that is not installed, or a platform with no terminal, is
 // reported where the button is rather than swallowed.
+//
+// The work runs off the main thread. Finding a CLI on macOS means asking the
+// user's login shell, which can take a moment; a click handler must return at
+// once and never wait on another process.
 func (s *State) startCredentialLogin(providerID, name string) {
 	s.loginNotice = ""
-	if err := s.panelService.StartCredentialLogin(providerID); err != nil {
-		s.loginNotice = loginFailure(err, name)
-	} else {
-		s.loginNotice = "已在终端里打开登录；完成后点刷新。"
-	}
 	s.Refresh()
+	panels := s.panelService
+	window := s.panel
+	go func() {
+		err := panels.StartCredentialLogin(providerID)
+		if window == nil {
+			return
+		}
+		window.Update(func() {
+			if err != nil {
+				s.loginNotice = loginFailure(err, name)
+			} else {
+				s.loginNotice = "已在终端里打开登录；完成后点刷新。"
+			}
+			s.Refresh()
+		})
+	}()
 }
 
 // loginFailure says why a login could not be started, in words that name the

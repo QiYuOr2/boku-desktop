@@ -183,6 +183,7 @@ func TestAPictureIsHandedOutAgainWhileItIsFresh(t *testing.T) {
 	now := time.Now()
 	device := New(nil)
 	device.now = func() time.Time { return now }
+	device.changeCount = func() uint32 { return 7 }
 
 	if device.pictureStillThere() {
 		t.Fatal("a device that has read nothing claims to hold a picture")
@@ -203,6 +204,28 @@ func TestAPictureIsHandedOutAgainWhileItIsFresh(t *testing.T) {
 	}
 }
 
+// A copy made while the window is still open is a new picture: the time alone
+// does not say that, the clipboard's own write counter does. Without this, a
+// second screenshot taken within the window would be handed out as the first
+// one and never recorded.
+func TestAClipboardWriteInvalidatesThePicture(t *testing.T) {
+	now := time.Now()
+	count := uint32(7)
+	device := New(nil)
+	device.now = func() time.Time { return now }
+	device.changeCount = func() uint32 { return count }
+
+	device.rememberPicture([]byte("89504e470d0a1a0a"), now)
+	if !device.pictureStillThere() {
+		t.Fatal("a picture that was just read is not handed out again")
+	}
+
+	count++
+	if device.pictureStillThere() {
+		t.Error("a picture from before a clipboard write is still handed out")
+	}
+}
+
 // Two runs of the same bytes are the same picture: the name a reading carries
 // has to be the one the loop already knows, or every poll records a new copy.
 func TestARememberedPictureKeepsItsName(t *testing.T) {
@@ -210,6 +233,7 @@ func TestARememberedPictureKeepsItsName(t *testing.T) {
 	now := time.Now()
 	device := New(nil)
 	device.now = func() time.Time { return now }
+	device.changeCount = func() uint32 { return 7 }
 	device.rememberPicture(png, now)
 
 	if got, want := device.pictureRef, kit.ClipImageRef(png); got != want {
@@ -229,6 +253,7 @@ func TestForgettingAPicture(t *testing.T) {
 	now := time.Now()
 	device := New(nil)
 	device.now = func() time.Time { return now }
+	device.changeCount = func() uint32 { return 7 }
 	device.rememberPicture([]byte("89504e470d0a1a0a"), now)
 
 	device.forgetPicture()

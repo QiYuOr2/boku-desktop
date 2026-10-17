@@ -52,7 +52,11 @@ type comPtr = unsafe.Pointer
 // New returns the device: UI Automation reads what publishes its text, and a
 // synthetic copy is what asks the applications that publish nothing.
 func New(opts Options) domain.SelectionDevice {
-	return Device{clipboard: opts.Clipboard, beforeCopy: opts.BeforeCopy}
+	sequence := opts.Sequence
+	if sequence == nil {
+		sequence = clipboardSequence
+	}
+	return Device{clipboard: opts.Clipboard, beforeCopy: opts.BeforeCopy, sequence: sequence}
 }
 
 // Device reads the selection through Windows' UI Automation, and asks the
@@ -64,6 +68,10 @@ type Device struct {
 	// beforeCopy is called just before the synthetic copy, so that the
 	// clipboard tool can keep the copied value out of the history.
 	beforeCopy func()
+	// sequence is the clipboard's write counter. It is the platform's own
+	// unless the assembly supplied one, which is what lets the same copy
+	// logic run on another platform.
+	sequence func() uint32
 }
 
 // SelectedText asks the system what is selected in the application the user
@@ -93,8 +101,8 @@ func (d Device) SelectedText(ctx context.Context) (string, error) {
 	if text := readUntilAnswered(ctx, readWithin, DefaultAttempts, DefaultRetryGap, deadline); text != "" {
 		return text, nil
 	}
-	if d.clipboard != nil && safeToCopy() {
-		if text := readWithACopy(ctx, d.clipboard, d.beforeCopy, clipboardSequence, pressCopy); text != "" {
+	if d.clipboard != nil && d.sequence != nil && safeToCopy() {
+		if text := readWithACopy(ctx, d.clipboard, d.beforeCopy, d.sequence, pressCopy); text != "" {
 			return text, nil
 		}
 	}

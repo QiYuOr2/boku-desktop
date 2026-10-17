@@ -127,6 +127,7 @@ func (s *State) openHistory() {
 	if s.clipboard == nil {
 		return
 	}
+	s.syncActivationPolicy()
 	if s.historyWindow == nil {
 		window := mygo.NewWindow(mygo.WindowOptions{
 			Title:     "剪贴板历史",
@@ -137,9 +138,11 @@ func (s *State) openHistory() {
 			Content:   ui.View(s.historyView),
 		})
 		s.historyWindow = window
+		s.syncActivationPolicy()
 		window.OnClosed(func() {
 			if s.historyWindow == window {
 				s.historyWindow = nil
+				s.syncActivationPolicy()
 			}
 		})
 	}

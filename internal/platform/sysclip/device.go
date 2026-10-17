@@ -60,9 +60,15 @@ type Device struct {
 	timeout  time.Duration
 	// now stamps a reading. It is a field so that a test can pin it.
 	now func() time.Time
+	// changeCount is the platform's clipboard write counter. It is a field
+	// rather than a direct call so that the cache below can be tested
+	// without a platform, and so that everything about "has the clipboard
+	// changed" is asked in one place.
+	changeCount func() uint32
 
-	// pictureStamp is when the picture below was read, and picture is that
-	// picture as the platform handed it over.
+	// pictureStamp is when the picture below was read, pictureCount is the
+	// clipboard's write counter at that moment, and picture is that picture
+	// as the platform handed it over.
 	//
 	// Together they keep the poll from re-reading a picture that is still
 	// there. Looking at a picture is the one expensive thing this device does:
@@ -74,23 +80,60 @@ type Device struct {
 	// would pay that, and hold the clipboard, for as long as a screenshot sat
 	// on the clipboard.
 	//
+	// The counter is what keeps the cache honest: the time window alone would
+	// hand out a picture that had been replaced a moment ago, because a copy
+	// does not move the clock. On Windows the counter comes from
+	// GetClipboardSequenceNumber and on macOS from NSPasteboard.changeCount;
+	// a platform with no counter reports zero and falls back to the window.
+	//
 	// It is kept rather than measured because a click on a picture in the
 	// history puts it back, and this is the only moment it can be read — and
 	// because the next poll can hand it out again instead of reading it once
 	// more.
-	picture      []byte
-	pictureRef   string
-	pictureStamp time.Time
+	picture       []byte
+	pictureRef    string
+	pictureStamp  time.Time
+	pictureChange uint32
 }
 
 // New returns a device reading through dispatch. A nil dispatcher runs the
 // clipboard calls on the calling goroutine, which is what a test wants.
 func New(dispatch Dispatcher) *Device {
 	return &Device{
-		dispatch: dispatch,
-		timeout:  DefaultTimeout,
-		now:      func() time.Time { return time.Now().UTC() },
+		dispatch:    dispatch,
+		timeout:     DefaultTimeout,
+		now:         func() time.Time { return time.Now().UTC() },
+		changeCount: clipboardChangeCount,
 	}
+}
+
+// ChangeCount is the clipboard's own write counter: the platform raises it
+// every time the clipboard is written to, whoever wrote it. It is what tells
+// a reading that the clipboard changed from a reading that merely happened
+// later, and the selection tool uses it to tell "nothing is selected" from
+// "the same text was copied again".
+//
+// The platform's pasteboard is read on the main thread, as every MyGo
+// clipboard call is; the call runs inline when the caller is already there.
+// A platform with no counter answers zero. Callers must treat zero as "no
+// answer" rather than as a stable value.
+func (d *Device) ChangeCount() uint32 {
+	if d == nil || d.changeCount == nil {
+		return 0
+	}
+	var count uint32
+	mygo.RunOnMain(func() { count = d.changeCount() })
+	return count
+}
+
+// currentChangeCount reads the counter where the caller already is. It is what
+// the device itself uses: snapshot runs on the main thread, and a test runs
+// without an event loop.
+func (d *Device) currentChangeCount() uint32 {
+	if d == nil || d.changeCount == nil {
+		return 0
+	}
+	return d.changeCount()
 }
 
 // Read returns what the clipboard holds now, or
@@ -232,10 +275,15 @@ func (d *Device) snapshot() (domain.ClipContent, error) {
 			facts.image = d.picture
 			facts.imageRef = d.pictureRef
 		default:
+			// The counter is taken before the read: if the clipboard is
+			// written to while the bitmap is being decoded, the remembered
+			// picture belongs to the old counter and the next poll reads
+			// again instead of handing it out.
+			count := d.currentChangeCount()
 			png, err := mygo.Clipboard.ReadFormat(transfer.PNG)
 			facts.image, facts.imageErr = png, err
 			if err == nil && len(png) > 0 {
-				d.rememberPicture(png, d.now())
+				d.rememberPictureAt(png, d.now(), count)
 			} else {
 				// Nothing was read, so there is no picture to hand out again:
 				// the next poll has to try afresh.
@@ -248,7 +296,12 @@ func (d *Device) snapshot() (domain.ClipContent, error) {
 	// The text and the file list are read one flavour at a time, and a
 	// flavour that is not there is not an error: a clipboard with a picture
 	// on it is still a clipboard with nothing else on it.
-	facts.text = mygo.Clipboard.ReadText()
+	//
+	// Text is read by the platform's own helper: Windows and Linux keep the
+	// legacy ReadText, while macOS negotiates the format because some copies
+	// arrive as public.utf16-plain-text. HTML is read separately so that a
+	// malformed HTML flavour cannot take the text down with it.
+	facts.text = readClipboardText()
 	facts.html = mygo.Clipboard.ReadHTML()
 	if paths, err := mygo.Clipboard.ReadFiles(); err == nil {
 		facts.files = paths
@@ -281,15 +334,28 @@ func (d *Device) pictureStillThere() bool {
 	if d.pictureStamp.IsZero() {
 		return false
 	}
+	if d.pictureChange != 0 && d.pictureChange != d.currentChangeCount() {
+		// The clipboard was written to after this picture was read: whatever
+		// is on it now is not what is remembered, even within the window.
+		return false
+	}
 	return d.now().Sub(d.pictureStamp) < pictureFresh
 }
 
 // rememberPicture keeps the picture that was just read, so that the next poll
 // can hand it out instead of reading and encoding it again.
 func (d *Device) rememberPicture(png []byte, at time.Time) {
+	d.rememberPictureAt(png, at, d.currentChangeCount())
+}
+
+// rememberPictureAt is rememberPicture with the clipboard counter the reading
+// started at, which is what keeps a write during the read from being cached
+// as the picture that was read before it.
+func (d *Device) rememberPictureAt(png []byte, at time.Time, count uint32) {
 	d.picture = png
 	d.pictureRef = kit.ClipImageRef(png)
 	d.pictureStamp = at
+	d.pictureChange = count
 }
 
 // forgetPicture drops the picture this device was holding.
@@ -298,7 +364,7 @@ func (d *Device) rememberPicture(png []byte, at time.Time) {
 // behind: there is nothing to hand out again, and a picture kept from earlier
 // would have the next reading claim to hold a picture that is not there.
 func (d *Device) forgetPicture() {
-	d.picture, d.pictureRef, d.pictureStamp = nil, "", time.Time{}
+	d.picture, d.pictureRef, d.pictureStamp, d.pictureChange = nil, "", time.Time{}, 0
 }
 
 // platformFacts is what one reading of the platform clipboard found, as

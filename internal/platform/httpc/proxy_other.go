@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package httpc
 
@@ -6,7 +6,6 @@ package httpc
 // own. The environment is what a program on these platforms is expected to look
 // at, and ProxyFunc asks it first on every platform.
 //
-// macOS and Linux have settings of their own that could be read here — scutil,
-// gsettings — and neither is read yet: nobody has run this application behind
-// one.
+// Linux has a setting of its own — gsettings — that could be read here, and it
+// is not read yet. macOS reads scutil in proxy_darwin.go.
 func platformProxy() (proxySettings, error) { return proxySettings{}, nil }

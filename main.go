@@ -120,9 +120,34 @@ func main() {
 		state.Activate()
 	})
 
+	// macOS: reopening the app (Finder, `open -a Boku`) is an activation
+	// event, not a second process: LaunchServices gives the running instance
+	// applicationShouldHandleReopen, which MyGo reports as OnActivate. The
+	// second-instance path above is the Windows and Linux one.
+	if runtime.GOOS == "darwin" {
+		mygo.App.OnActivate(func(hasVisibleWindows bool) {
+			if !hasVisibleWindows {
+				state.Activate()
+			}
+		})
+		// The user may have just flipped the Accessibility switch in System
+		// Settings; coming back is the moment to stop showing the request.
+		mygo.App.OnDidBecomeActive(func() {
+			state.RefreshSelectionAccess()
+		})
+	}
+
 	// macOS: the tray icon is the entry point, so keep the app out of the
 	// Dock. Windows and Linux ignore this.
 	mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
+	// The design system is light-only. A macOS NSPopover draws the system's
+	// material behind the quick window, and in a dark appearance that
+	// material is dark while the design's text is not: forcing the light
+	// appearance is what keeps the window readable until there is a dark
+	// palette to draw.
+	if runtime.GOOS == "darwin" {
+		mygo.Theme.SetSource(mygo.ThemeLight)
+	}
 	// The quick window is the only window, and closing it must not quit the
 	// application: MyGo quits on the last window closed unless something
 	// listens.
@@ -333,6 +358,11 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 		Selection: selection.New(selection.Options{
 			Clipboard:  device,
 			BeforeCopy: clip.IgnoreTheNextCopy,
+			// The clipboard's write counter is the platform's own, and the
+			// selection tool uses the same one Windows uses. On macOS the
+			// copy fallback cannot tell "nothing selected" from "copied the
+			// same text again" without it.
+			Sequence: device.ChangeCount,
 		}),
 		Clipboard: device,
 		Clock:     domain.SystemClock{},

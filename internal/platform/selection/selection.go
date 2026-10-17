@@ -3,31 +3,33 @@
 // It exists because reading the selection is a better answer than reading the
 // clipboard: the clipboard is what was copied last, and the selection is what
 // the user is looking at. On Windows the first answer comes from UI Automation,
-// which is the same interface a screen reader reads a control with.
+// which is the same interface a screen reader reads a control with; on macOS
+// it comes from the Accessibility API.
 //
-// UI Automation does not cover everything: a browser turns its accessibility on
-// only when it is first asked, an application may not publish its text pattern
-// at all (the Windows 11 Notepad is one), and a chat window may answer nothing
-// however it is asked. So the device has a second answer, which is what other
-// desktop translation tools do and is why they work everywhere: **ask the
-// application to copy**. The copy goes to the clipboard, the text is read from
-// there, and what was on the clipboard before is put back — which is stated
-// here rather than hidden because it is the one thing this package does that
-// the user can notice.
+// Neither covers everything: a browser turns its accessibility on only when it
+// is first asked, an application may not publish its text at all (the Windows
+// 11 Notepad is one), and a chat window may answer nothing however it is
+// asked. So the device has a second answer, which is what other desktop
+// translation tools do and is why they work everywhere: **ask the application
+// to copy**. The copy goes to the clipboard, the text is read from there, and
+// what was on the clipboard before is put back — which is stated here rather
+// than hidden because it is the one thing this package does that the user can
+// notice.
 //
 // What is on the clipboard and cannot be put back — a bitmap whose bytes the
 // platform would not hand over — is never copied over: a translation is not
 // worth losing the user's screenshot. A copy in a console window is not made
-// either: there the copy combination is a signal, not a copy.
+// either: there the copy combination is a signal, not a copy. On macOS the
+// same rule is applied to a secure input field.
 //
 // A system with no such interface at all, an application that answers nothing
 // and a selection of nothing are all ordinary answers: they mean the caller
 // should fall back to the clipboard it already has, and ErrSelectionUnavailable
 // says so rather than describing a failure.
 //
-// The two implementations live in selection_windows.go and selection_other.go:
-// one platform has both answers, and the rest answer with the same "not here"
-// as an application that publishes nothing.
+// The implementations live in selection_windows.go, selection_darwin.go and
+// selection_other.go: the first two have both answers, and the rest answer with
+// the same "not here" as an application that publishes nothing.
 package selection
 
 import (
@@ -81,6 +83,15 @@ type Options struct {
 	// clipboard out of the history: it is not something the user copied, and
 	// the tool is about to put back what was.
 	BeforeCopy func()
+	// Sequence is the clipboard's write counter, when the platform has one.
+	// It is what tells a copy that replaced the clipboard from a copy that
+	// selected nothing: an application with no selection answers the copy
+	// with nothing, and the counter does not move.
+	//
+	// It is a function rather than a platform call so that the copy fallback
+	// is the same logic on every platform that has a counter; a platform
+	// without one leaves it nil and does not use the fallback.
+	Sequence func() uint32
 }
 
 // attempt is one reading of the selection: the text, or "" when the platform

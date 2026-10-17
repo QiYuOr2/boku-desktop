@@ -80,10 +80,10 @@ type shortcutState struct {
 	// a user who is halfway through pressing keys has not asked for
 	// anything yet.
 	recording bool
-	// note is what the last change said — bound to this, or this
-	// combination cannot be used — and noteOK is whether it is good news.
-	note   string
-	noteOK bool
+	// note is why the last change could not be made, or what the recorder
+	// still needs. An accepted change says nothing: the button already shows
+	// the new binding.
+	note string
 }
 
 // registerShortcuts binds the translation shortcut and remembers what
@@ -160,7 +160,6 @@ func (s *State) onTranslateShortcut() {
 func (s *State) beginShortcutCapture() {
 	s.shortcut.recording = true
 	s.shortcut.note = ""
-	s.shortcut.noteOK = false
 	s.Refresh()
 }
 
@@ -195,15 +194,13 @@ func (s *State) captureShortcut(ev ui.InputEvent) bool {
 	if isModifierKey(ev.Key) {
 		if !ev.Repeat {
 			s.shortcut.note = "修饰键要和一个字母或功能键一起按。"
-			s.shortcut.noteOK = false
 			s.Refresh()
 		}
 		return true
 	}
 	accelerator, ok := acceleratorOf(ev)
 	if !ok {
-		s.shortcut.note = "需要一个带 Ctrl / Alt / Super 的组合键。"
-		s.shortcut.noteOK = false
+		s.shortcut.note = modifierHint()
 		s.Refresh()
 		return true
 	}
@@ -238,8 +235,6 @@ func (s *State) applyShortcut(accelerator string) {
 	s.shortcut = shortcutState{
 		accelerator: accelerator,
 		registered:  true,
-		note:        "已改为 " + friendlyAccelerator(accelerator) + "。",
-		noteOK:      true,
 	}
 	if s.translate != nil {
 		// The binding is remembered, so that the next launch registers the
@@ -283,9 +278,6 @@ func (s *State) shortcutLine() (string, noteKind) {
 func (s *State) shortcutNote() (string, noteKind) {
 	if strings.TrimSpace(s.shortcut.note) == "" {
 		return "", notePlain
-	}
-	if s.shortcut.noteOK {
-		return s.shortcut.note, noteSuccess
 	}
 	return s.shortcut.note, noteWarning
 }
@@ -417,17 +409,47 @@ var keyNames = map[ui.Key]string{
 	ui.KeyZ:            "Z",
 }
 
+// modifierHint is what the recorder says when a key press has no modifier:
+// the names are the platform's own, so a Mac user is not told to press Ctrl
+// when the key is Command.
+func modifierHint() string {
+	if runtime.GOOS == "darwin" {
+		return "需要一个带 Command（⌘）或 Control 的组合键。"
+	}
+	return "需要一个带 Ctrl / Alt / Super 的组合键。"
+}
+
 // friendlyAccelerator writes a binding the way a person reads it: the parts
 // separated by spaces around the plus, which is how a shortcut is written
-// down outside a configuration file.
+// down outside a configuration file. The platform names the modifiers it has:
+// Command on macOS, Ctrl on the others, and "CmdOrCtrl" resolves to whichever
+// the platform uses.
 func friendlyAccelerator(accelerator string) string {
+	return friendlyAcceleratorFor(accelerator, runtime.GOOS)
+}
+
+// friendlyAcceleratorFor is friendlyAccelerator with the platform passed in,
+// so that both spellings can be tested on one machine.
+func friendlyAcceleratorFor(accelerator, goos string) string {
 	trimmed := strings.TrimSpace(accelerator)
 	if trimmed == "" {
 		return ""
 	}
 	parts := strings.Split(trimmed, "+")
 	for index, part := range parts {
-		parts[index] = strings.TrimSpace(part)
+		part = strings.TrimSpace(part)
+		switch {
+		case strings.EqualFold(part, "CmdOrCtrl"):
+			part = "Ctrl"
+			if goos == "darwin" {
+				part = "Command"
+			}
+		case strings.EqualFold(part, "Super") && goos == "darwin":
+			// The framework reads Command as Super; a person reads it as
+			// Command, and the symbol is what the menu bar shows.
+			part = "Command"
+		}
+		parts[index] = part
 	}
 	return strings.Join(parts, " + ")
 }
@@ -438,6 +460,17 @@ func friendlyAccelerator(accelerator string) string {
 func shortcutPlatformNote() string {
 	if runtime.GOOS == "linux" {
 		return "Linux / Wayland 下快捷键由桌面门户绑定，可能需要系统确认。"
+	}
+	return ""
+}
+
+// selectionPlatformNote is what the settings window says about reading the
+// selection on this platform. macOS needs a permission for it, and a user who
+// is not told will see the tool fall back to the clipboard without knowing
+// why.
+func selectionPlatformNote() string {
+	if runtime.GOOS == "darwin" {
+		return "macOS 取词需要在「系统设置 > 隐私与安全性 > 辅助功能」中允许 Boku；点下方按钮可让系统列出 Boku 并弹出授权窗口。未授权时会改为读取剪贴板。"
 	}
 	return ""
 }

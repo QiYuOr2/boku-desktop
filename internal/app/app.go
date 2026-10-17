@@ -242,6 +242,11 @@ type State struct {
 	translateCloseTimer *time.Timer
 	// shortcut is what became of the translation shortcut.
 	shortcut shortcutState
+	// selectionGranted says macOS' Accessibility permission is already
+	// granted. The settings page hides the request note and button while it
+	// is true; it is refreshed when the app becomes active, when the settings
+	// window is focused or opened, and after a request.
+	selectionGranted bool
 	// copiedEntry is the row that was last clicked in the history, and
 	// copiedAt is when: the row says so for a moment.
 	copiedEntry string
@@ -343,32 +348,33 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		return nil, fmt.Errorf("app: parse the info mark: %w", err)
 	}
 	return &State{
-		app:             app,
-		panelService:    deps.Panels,
-		secretService:   deps.Secrets,
-		clipboard:       deps.Clipboard,
-		translate:       deps.Translate,
-		ownServices:     deps.RegisterOwnServices,
-		shortcuts:       deps.Shortcuts,
-		version:         deps.Version,
-		quit:            deps.Quit,
-		trayIcon:        trayIcon,
-		deepseekMark:    deepseekMark,
-		gaugeMark:       gaugeMark,
-		clipboardMark:   clipMark,
-		refreshMark:     refreshMark,
-		historyText:     historyText,
-		historyImage:    historyImage,
-		historyLink:     historyLink,
-		historyCode:     historyCode,
-		settingsMark:    settingsMark,
-		quitMark:        quitMark,
-		copyMark:        copyMark,
-		pinMark:         pinMark,
-		closeMark:       closeMark,
-		translationMark: translationMark,
-		keyMark:         keyMark,
-		infoMark:        infoMark,
+		app:              app,
+		panelService:     deps.Panels,
+		secretService:    deps.Secrets,
+		clipboard:        deps.Clipboard,
+		translate:        deps.Translate,
+		ownServices:      deps.RegisterOwnServices,
+		shortcuts:        deps.Shortcuts,
+		version:          deps.Version,
+		quit:             deps.Quit,
+		selectionGranted: true,
+		trayIcon:         trayIcon,
+		deepseekMark:     deepseekMark,
+		gaugeMark:        gaugeMark,
+		clipboardMark:    clipMark,
+		refreshMark:      refreshMark,
+		historyText:      historyText,
+		historyImage:     historyImage,
+		historyLink:      historyLink,
+		historyCode:      historyCode,
+		settingsMark:     settingsMark,
+		quitMark:         quitMark,
+		copyMark:         copyMark,
+		pinMark:          pinMark,
+		closeMark:        closeMark,
+		translationMark:  translationMark,
+		keyMark:          keyMark,
+		infoMark:         infoMark,
 	}, nil
 }
 
@@ -393,6 +399,7 @@ func (s *State) Setup() error {
 	}
 	s.tray = tray
 	s.logTrayBounds()
+	s.RefreshSelectionAccess()
 	if runtime.GOOS == "linux" {
 		// An AppIndicator can only show a menu and reports no clicks, so
 		// the menu is what opens the panel there.

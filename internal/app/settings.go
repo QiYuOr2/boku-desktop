@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -178,6 +179,8 @@ type translateCard struct {
 
 // openSettings shows the settings window, creating it the first time.
 func (s *State) openSettings() {
+	s.syncActivationPolicy()
+	s.RefreshSelectionAccess()
 	if s.settingsWindow != nil {
 		s.settingsWindow.Show()
 		s.settingsWindow.Focus()
@@ -193,9 +196,12 @@ func (s *State) openSettings() {
 		Content:   ui.View(s.settingsView),
 	})
 	s.settingsWindow = window
+	s.syncActivationPolicy()
+	window.OnFocus(func() { s.RefreshSelectionAccess() })
 	window.OnClosed(func() {
 		if s.settingsWindow == window {
 			s.settingsWindow = nil
+			s.syncActivationPolicy()
 		}
 	})
 }
@@ -1289,13 +1295,72 @@ func (s *State) shortcutSwitches(c *ui.Context) {
 		if platform := shortcutPlatformNote(); platform != "" {
 			notice(c, notePlain, platform)
 		}
-		notice(c, notePlain, "点击快捷键可重新录制；与系统或其他软件冲突时请更换。")
-		notice(c, notePlain, "朗读、固定与关闭的组合键尚未实现。")
-
-		if button := designButton(c, "恢复默认快捷键", buttonSecondary); button.Clicked() {
-			s.resetShortcut()
+		if note := selectionPlatformNote(); note != "" && !s.selectionGranted {
+			notice(c, notePlain, note)
+			// One button, named for what the user is trying to get. It asks
+			// the system to put Boku in the Accessibility list; the system
+			// prompt is what shows the switch, and it offers System Settings
+			// itself. Opening the pane for a release build would cover that
+			// prompt; a development build is the exception, below.
+			if button := designButton(c, "获取辅助功能权限", buttonSecondary); button.Clicked() {
+				if !s.requestSelectionAccess() && os.Getenv("MYGO_DEV") != "" {
+					// mygo dev starts the app as a child of the terminal, and
+					// TCC attributes the request to the terminal: the system
+					// suppresses the prompt for a development build. Open the
+					// pane instead, where the developer can add Boku Dev.
+					c.OpenURL(accessibilitySettingsURL)
+				}
+			}
 		}
+		notice(c, notePlain, "点击快捷键可重新录制；与系统或其他软件冲突时请更换。")
+
+		// An inline action at the end of the block, not another full-width
+		// control: resetting is a correction to the binding above it, and a
+		// block button would read as the section's main action.
+		ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+			if button := designButton(c, "恢复默认快捷键", buttonWarning).Shrink(0); button.Clicked() {
+				s.resetShortcut()
+			}
+		})
 	})
+}
+
+// accessibilitySettingsURL is the System Settings page for Accessibility.
+const accessibilitySettingsURL = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+
+// requestSelectionAccess asks macOS to add Boku to its Accessibility list.
+// The system owns the switch: the application can only ask, and the user then
+// turns it on. The note says so rather than pretending the click granted it.
+func (s *State) requestSelectionAccess() bool {
+	granted := s.RequestSelectionAccess()
+	slog.Info("selection access requested", "granted", granted)
+	if granted {
+		s.translateNotice = ""
+	} else {
+		s.translateNotice = "已请求辅助功能权限：请在「系统设置 > 隐私与安全性 > 辅助功能」中打开 Boku 的开关。"
+	}
+	// The request may have been granted before the call returned (an app
+	// that already has the permission), or the system prompt may still be
+	// up; the focus/activation refresh catches the latter.
+	s.RefreshSelectionAccess()
+	return granted
+}
+
+// RequestSelectionAccess asks the platform to show its permission prompt when
+// the translation tool is on. The settings button is the caller: the settings
+// window makes the app regular, which is what macOS needs before it shows the
+// Accessibility prompt. The app does not ask at launch or from the shortcut:
+// those run while it is accessory, and the system records such a request
+// without showing a prompt.
+func (s *State) RequestSelectionAccess() bool {
+	if s.translate == nil {
+		return false
+	}
+	settings, err := s.translate.Settings()
+	if err != nil || !settings.Enabled {
+		return false
+	}
+	return s.translate.RequestSelectionAccess()
 }
 
 // shortcutButton is the recording control: it shows the binding, and pressing

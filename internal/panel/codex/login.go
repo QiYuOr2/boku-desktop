@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -164,12 +163,19 @@ func (l *Login) Credentials(ctx context.Context) (domain.Credentials, error) {
 // is the CLI's, not Boku's: this only saves the user finding a terminal, and
 // the next reading picks the login up.
 func (l *Login) StartLogin() error {
-	command, err := exec.LookPath("codex")
+	command, err := lookupLoginCommand("codex")
 	if err != nil {
 		return fmt.Errorf("%w: %s is not installed: %v", domain.ErrLoginCommandMissing, LoginCommand, err)
 	}
 	return startLogin(command)
 }
+
+// lookupLoginCommand finds the CLI before the terminal is opened. Finding it
+// is platform work: a GUI-launched macOS app does not have the PATH a terminal
+// has, so it asks the user's login shell and the usual install locations as
+// well as looking on PATH. The lookup is a variable only so that a test can
+// stand in for the machine's own tools.
+var lookupLoginCommand = findLoginCommand
 
 // ensure the ports are satisfied where they are defined, not at the call
 // site.

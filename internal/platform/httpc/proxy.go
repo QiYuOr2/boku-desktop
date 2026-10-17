@@ -1,6 +1,7 @@
 package httpc
 
 import (
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -159,8 +160,10 @@ func proxyURL(address, kind string) *url.URL {
 //
 // The list is the system's own: names separated by ";" or ",", each either
 // "<local>" — a name with no dot in it, which is a machine on this network
-// rather than one out on the internet — or a pattern in which "*" stands for
-// any run of characters, as in "127.*" or "*.local".
+// rather than one out on the internet — a CIDR block as macOS writes local
+// networks ("192.168.0.0/16"), a domain with a leading dot for itself and its
+// subdomains (".corp.example"), or a pattern in which "*" stands for any run
+// of characters, as in "127.*" or "*.local".
 func bypassesProxy(host string, bypass []string) bool {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
@@ -172,6 +175,21 @@ func bypassesProxy(host string, bypass []string) bool {
 		case entry == "":
 		case entry == "<local>":
 			if !strings.Contains(host, ".") {
+				return true
+			}
+		case strings.Contains(entry, "/"):
+			// macOS writes local networks as CIDR blocks
+			// (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12), and a
+			// network whose gateway is the proxy should not be sent
+			// through it.
+			if _, network, err := net.ParseCIDR(entry); err == nil {
+				if ip := net.ParseIP(host); ip != nil && network.Contains(ip) {
+					return true
+				}
+			}
+		case strings.HasPrefix(entry, "."):
+			// A leading dot means the domain and everything under it.
+			if host == strings.TrimPrefix(entry, ".") || strings.HasSuffix(host, entry) {
 				return true
 			}
 		case strings.Contains(entry, "*"):

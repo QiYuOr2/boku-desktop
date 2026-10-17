@@ -129,6 +129,15 @@ func TestTheSystemBypassList(t *testing.T) {
 		{"chatgpt.com", []string{""}, false},
 		{"CHATGPT.COM", []string{"chatgpt.com"}, true},
 		{"chatgpt.com", nil, false},
+		// macOS SystemConfiguration writes local networks as CIDR blocks
+		// and domains with a leading dot.
+		{"192.168.1.20", []string{"192.168.0.0/16"}, true},
+		{"10.2.3.4", []string{"10.0.0.0/8"}, true},
+		{"172.20.0.1", []string{"172.16.0.0/12"}, true},
+		{"8.8.8.8", []string{"192.168.0.0/16"}, false},
+		{"printer.corp.example", []string{".corp.example"}, true},
+		{"corp.example", []string{".corp.example"}, true},
+		{"notcorp.example", []string{".corp.example"}, false},
 	}
 	for _, test := range cases {
 		if got := bypassesProxy(test.host, test.bypass); got != test.bypassd {
