@@ -10,10 +10,14 @@ permissions:
 
 jobs:
   verify:
-    # The module has Windows-only files (`*_windows.go`) and the MyGo toolkit
-    # is exercised through `go tool mygo`, so the check runs where the
-    # application is developed.
-    runs-on: windows-latest
+    # Both shipped platforms have their own files (`*_darwin.go`,
+    # `*_windows.go`), and Go only compiles the ones of the target system.
+    # One runner would leave the other platform's code unchecked.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash
