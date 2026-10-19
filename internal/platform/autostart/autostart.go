@@ -2,22 +2,21 @@ package autostart
 
 import (
 	"errors"
-	"io/fs"
 )
 
 // Launcher is one login start: the program it runs, the argument that tells
 // the program the system started it, and the name the start is recorded under.
 type Launcher struct {
-	// Label is the application's identifier: the name of the Windows value
-	// and the name of the launch agent's file. It is what the start is
-	// recorded under, and it does not change when the application is renamed
-	// for people.
+	// Label is the application's identifier. macOS no longer names a login
+	// start after it — the system login item is the application itself — but
+	// it is still the label of the launch agent written by the previous
+	// mechanism, which the manager removes on the first read.
 	Label string
 	// Name is the application's name as a person reads it.
 	Name string
-	// Exe is the program the start runs, as an absolute path. On macOS it is
-	// the executable inside the app bundle, because a login start names a
-	// program rather than a bundle.
+	// Exe is the program the start runs, as an absolute path. Windows names
+	// a program; macOS registers the running application bundle and ignores
+	// the path.
 	Exe string
 	// Arg is appended to the command line: the application's own way of
 	// knowing that nobody asked for this start.
@@ -34,15 +33,11 @@ func (l Launcher) CommandLine() string {
 	return `"` + l.Exe + `" ` + l.Arg
 }
 
-// Document is where a start lives and what is stored there.
+// Document is where a Windows login start lives and what is stored there.
 type Document struct {
-	// Key is where the start lives, in the platform's own terms: the full
-	// name of the Windows registry value, the path of the launch agent's
-	// file. It is what a message about the start calls it, and what the log
-	// records as where the start is.
+	// Key is the full name of the Windows registry value.
 	Key string
-	// Contents is what that place holds: a command line on Windows, a
-	// property list on macOS, a desktop entry on a Linux desktop.
+	// Contents is the command line in it.
 	Contents []byte
 }
 
@@ -61,11 +56,15 @@ type Manager interface {
 	// pressed again.
 	//
 	// An error means the question could not be answered. ErrUnsupported is
-	// the platform having no login start that Boku can register.
+	// the platform having no login start that Boku can register, and
+	// ErrNeedsApproval is a start the system recorded but the user has to
+	// allow in System Settings before it takes effect.
 	Read(Launcher) (bool, error)
-	// Document is what Start writes, or what would have to be removed to
-	// stop it. It is what a message or a test can show without writing.
-	Document(Launcher) (Document, error)
+	// Location is where the start lives, in the platform's own terms: a
+	// registry value, or the system settings page that lists login items. It
+	// is what the settings page shows under the switch, and it is asked
+	// rather than assumed so that the line and the platform cannot disagree.
+	Location(Launcher) (string, error)
 	// Start records the start. Asking again is also how a start the platform
 	// switched off is switched back on — Task Manager's disabled entry on
 	// Windows — and how a start that names an older copy of the application
@@ -88,14 +87,23 @@ var (
 	// replaced. The start would point at a program that is no longer there,
 	// so it is refused rather than written.
 	ErrNotInstalled = errors.New("autostart: the application is not running from a location it will still be in at the next login")
+	// ErrNeedsApproval means the system has the login item, but the user
+	// turned it off in System Settings (or the system still requires them to
+	// allow it). It is not a failure of the write: the page says where to
+	// allow it instead of claiming the switch is off.
+	ErrNeedsApproval = errors.New("autostart: the login item needs approval in System Settings")
 )
 
-// OpenedAtLoginArg is the argument a login start appends to the command line:
-// the application's way of knowing that the system started it and nobody is
-// in front of it. The framework removes it from its own command line before
-// main sees it, and answers WasOpenedAtLogin from it, so Windows, macOS and
-// the framework have to agree on the string exactly — which is why it is
-// written once, here.
+// OpenedAtLoginArg is the argument the Windows login start appends to the
+// command line: the application's way of knowing that the system started it
+// and nobody is in front of it. The framework removes it from its own command
+// line before main sees it, and answers WasOpenedAtLogin from it, so the
+// Windows manager and the framework have to agree on the string exactly —
+// which is why it is written once, here.
+//
+// macOS's login item launches the application bundle without an argument; the
+// application does not open a window on launch, so nothing depends on it
+// there.
 const OpenedAtLoginArg = "--mygo-opened-at-login"
 
 // Available reports whether the manager has a login start at all, which is
@@ -108,7 +116,3 @@ func Available(m Manager, l Launcher) bool {
 	_, err := m.Read(l)
 	return !errors.Is(err, ErrUnsupported)
 }
-
-// notExist reports whether err is "there is no such file", which is how an
-// absent login start reads.
-func notExist(err error) bool { return errors.Is(err, fs.ErrNotExist) }

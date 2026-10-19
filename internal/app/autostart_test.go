@@ -33,8 +33,8 @@ func (a *testAutostart) Read(autostart.Launcher) (bool, error) {
 	return a.on, nil
 }
 
-func (a *testAutostart) Document(l autostart.Launcher) (autostart.Document, error) {
-	return autostart.Document{Key: "test-start/" + l.Label}, nil
+func (a *testAutostart) Location(l autostart.Launcher) (string, error) {
+	return "test-start/" + l.Label, nil
 }
 
 func (a *testAutostart) Start(autostart.Launcher) error {
@@ -148,6 +148,43 @@ func TestAutostartUnsupportedPlatform(t *testing.T) {
 	}
 }
 
+// A login item the user turned off in System Settings is not the same as one
+// that was never registered: the switch is off, but the note says where to
+// allow it instead of pretending the feature is missing or broken.
+func TestAutostartNeedsApproval(t *testing.T) {
+	manager := &testAutostart{onErr: autostart.ErrNeedsApproval}
+	state := autostartState(t, manager)
+	on, enabled, status := state.autostartState()
+	if on || !enabled {
+		t.Errorf("a login item needing approval = on %v, enabled %v; want off and enabled", on, enabled)
+	}
+	if status.text != autostartApprovalNote || status.kind != notePlain {
+		t.Errorf("the status = %q, %v; want the approval note", status.text, status.kind)
+	}
+}
+
+// A start the system recorded but still needs approval for says so after the
+// press too, rather than showing a danger line for a write that happened.
+func TestAutostartStartNeedsApproval(t *testing.T) {
+	manager := &testAutostart{setErr: autostart.ErrNeedsApproval}
+	state := autostartState(t, manager)
+	state.setAutostart(true)
+	if status := state.autostartStatus; status.text != autostartApprovalNote || status.kind != notePlain {
+		t.Errorf("after a start needing approval the status = %q, %v; want the approval note", status.text, status.kind)
+	}
+}
+
+// A build outside an Applications folder cannot be registered: the page says
+// where to put the application instead of showing the system's raw error.
+func TestAutostartStartNotInstalled(t *testing.T) {
+	manager := &testAutostart{setErr: autostart.ErrNotInstalled}
+	state := autostartState(t, manager)
+	state.setAutostart(true)
+	if status := state.autostartStatus; status.text != autostartNotInstalledNote || status.kind != noteDanger {
+		t.Errorf("after a start outside Applications the status = %q, %v; want the install note", status.text, status.kind)
+	}
+}
+
 // A read that fails is not the same as "off": the page says it could not tell,
 // rather than telling the user the start is off when nobody knows.
 func TestAutostartReadFailureIsNotOff(t *testing.T) {
@@ -163,14 +200,15 @@ func TestAutostartReadFailureIsNotOff(t *testing.T) {
 }
 
 // The line under the switch names where the start lives, which the platform
-// decides: a macOS path, a Windows value name. It is asked, not assumed.
-func TestAutostartPathLineComesFromThePlatform(t *testing.T) {
+// decides: a System Settings page, a Windows value name. It is asked, not
+// assumed.
+func TestAutostartLocationLineComesFromThePlatform(t *testing.T) {
 	state := autostartState(t, &testAutostart{})
-	path := state.autostartPathLine()
-	if path == "" {
-		t.Fatal("the section has no path to show under the switch")
+	location := state.autostartLocationLine()
+	if location == "" {
+		t.Fatal("the section has no location to show under the switch")
 	}
-	if got, want := path, "test-start/"+autostartIdentifier; got != want {
-		t.Errorf("the path = %q, want %q", got, want)
+	if got, want := location, "test-start/"+autostartIdentifier; got != want {
+		t.Errorf("the location = %q, want %q", got, want)
 	}
 }

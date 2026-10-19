@@ -12,8 +12,8 @@ type Unsupported struct{}
 // Read reports that there is no login start on this desktop.
 func (Unsupported) Read(Launcher) (bool, error) { return false, ErrUnsupported }
 
-// Document reports that there is nothing to write.
-func (Unsupported) Document(Launcher) (Document, error) { return Document{}, ErrUnsupported }
+// Location reports that there is nowhere to show.
+func (Unsupported) Location(Launcher) (string, error) { return "", ErrUnsupported }
 
 // Start refuses: there is nothing this desktop can start.
 func (Unsupported) Start(Launcher) error { return ErrUnsupported }

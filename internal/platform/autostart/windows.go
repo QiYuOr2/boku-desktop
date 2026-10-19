@@ -83,6 +83,16 @@ func (w *Windows) Document(l Launcher) (Document, error) {
 	}, nil
 }
 
+// Location is the Run value's full name, which is what the settings page
+// shows under the switch.
+func (w *Windows) Location(l Launcher) (string, error) {
+	doc, err := w.Document(l)
+	if err != nil {
+		return "", err
+	}
+	return doc.Key, nil
+}
+
 // Read reports whether the Run value names this program and Task Manager has
 // not turned it off.
 //

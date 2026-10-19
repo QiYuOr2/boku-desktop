@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"log/slog"
 
 	"github.com/egoist/mygo/ui"
@@ -18,9 +19,9 @@ import (
 // Manager, in System Settings, or in any tool that lists their login items.
 // What the section shows is the platform's own answer, read when it is drawn.
 //
-// The read and the write are both local — one registry value, or one small
-// file — so the switch answers in the frame it was pressed in rather than
-// through a background goroutine the way the network-written settings do.
+// The read and the write are both local — one registry value, or one system
+// login item — so the switch answers in the frame it was pressed in rather
+// than through a background goroutine the way the network-written settings do.
 
 // autostartStatus is what the settings page says under the switch: what the
 // last press did, or why there is nothing to press.
@@ -31,10 +32,10 @@ type autostartStatus struct {
 
 // autostartLauncher builds the login start the switch would write.
 //
-// The program is the one BinaryPath answers with — the installer's shortcut
-// on Windows, the executable inside the bundle on macOS — and the argument is
-// the framework's own "started by the system" marker, so that a start nobody
-// asked for does not put a window on screen.
+// Windows names the program and the framework's own "started by the system"
+// marker; macOS registers the running application bundle and ignores both.
+// The label is still passed because it is how the macOS manager finds the
+// launch agent written by the previous mechanism.
 func (s *State) autostartLauncher() (autostart.Launcher, error) {
 	exe, err := autostart.BinaryPath()
 	if err != nil {
@@ -66,6 +67,9 @@ func (s *State) autostartState() (on, enabled bool, status autostartStatus) {
 		return false, false, autostartStatus{text: autostartUnsupportedNote, kind: notePlain}
 	}
 	on, err = s.autostart.Read(launcher)
+	if errors.Is(err, autostart.ErrNeedsApproval) {
+		return false, true, autostartStatus{text: autostartApprovalNote, kind: notePlain}
+	}
 	if err != nil {
 		return false, false, autostartStatus{text: "读不到开机启动的状态：" + friendlyError(err), kind: noteDanger}
 	}
@@ -90,7 +94,14 @@ func (s *State) setAutostart(on bool) {
 	}
 	if err != nil {
 		slog.Warn("the login start could not be changed", "on", on, "error", err)
-		s.autostartStatus = autostartStatus{text: "没能改成开机启动：" + friendlyError(err), kind: noteDanger}
+		switch {
+		case errors.Is(err, autostart.ErrNeedsApproval):
+			s.autostartStatus = autostartStatus{text: autostartApprovalNote, kind: notePlain}
+		case errors.Is(err, autostart.ErrNotInstalled):
+			s.autostartStatus = autostartStatus{text: autostartNotInstalledNote, kind: noteDanger}
+		default:
+			s.autostartStatus = autostartStatus{text: "没能改成开机启动：" + friendlyError(err), kind: noteDanger}
+		}
 		s.Refresh()
 		return
 	}
@@ -99,10 +110,11 @@ func (s *State) setAutostart(on bool) {
 	s.Refresh()
 }
 
-// autostartPathLine names where the start lives — the launch agent's path on
-// macOS, the registry value on Windows. It is asked of the platform rather
-// than written down here, so that the line and the file cannot disagree.
-func (s *State) autostartPathLine() string {
+// autostartLocationLine names where the start lives — the System Settings
+// page on macOS, the registry value on Windows. It is asked of the platform
+// rather than written down here, so that the line and the platform cannot
+// disagree.
+func (s *State) autostartLocationLine() string {
 	if s.autostart == nil {
 		return ""
 	}
@@ -110,17 +122,27 @@ func (s *State) autostartPathLine() string {
 	if err != nil {
 		return ""
 	}
-	doc, err := s.autostart.Document(launcher)
+	location, err := s.autostart.Location(launcher)
 	if err != nil {
 		return ""
 	}
-	return doc.Key
+	return location
 }
 
 // autostartUnsupportedNote is what the section says on a desktop with no
 // login start Boku can register. It is a fact about the platform, not a
 // failure of the user's, so it is drawn quietly.
 const autostartUnsupportedNote = "这个平台没有 Boku 能登记的开机启动方式。"
+
+// autostartApprovalNote is what the section says when the system has the
+// login item but the user has it switched off there. The switch stays off —
+// that is the system's answer — and the line says where to turn it back on.
+const autostartApprovalNote = "系统里的登录项已被关闭；请在「系统设置 > 通用 > 登录项与扩展」中允许 Boku。"
+
+// autostartNotInstalledNote is what the section says when the application is
+// not in an Applications folder: a login item would name a program that is
+// not there at the next login, so it is refused.
+const autostartNotInstalledNote = "请先把 Boku 放进「应用程序」文件夹，再打开开机启动。"
 
 // autostartHelps is the line under a working switch: where the start is
 // unregistered from, which is what a user does when the switch does not tell
@@ -133,12 +155,10 @@ func autostartHelps() string {
 // autostartLabel is what the switch says.
 const autostartLabel = "开机自动启动"
 
-// autostartIdentifier is the name the login start is recorded under where the
-// platform names it rather than reading it back: the launch agent's file on
-// macOS. It is the application's own identifier — com.boku.app, and
-// com.boku.app.dev for the development build — so that the two builds keep
-// two login starts, the way they keep two settings files and two single-
-// instance locks.
+// autostartIdentifier is the application's identifier: the label the previous
+// macOS mechanism wrote its launch agent under. The current manager keeps it
+// only to find and remove that file on the first read, so an upgrade does not
+// leave two login starts behind.
 //
 // Windows does not use it: a Run value is named after the program, which is
 // already Boku or Boku Dev.
@@ -154,11 +174,10 @@ func (s *State) autostartSwitch(c *ui.Context) {
 	if enabled {
 		ui.Checkbox(c, &on, autostartLabel).FontSize(sizeBody).OnClick(func() { s.setAutostart(on) })
 		notice(c, notePlain, autostartHelps())
-		if path := s.autostartPathLine(); path != "" {
-			ui.Text(c, path).
+		if location := s.autostartLocationLine(); location != "" {
+			ui.Text(c, location).
 				FontSize(sizeTiny).
 				TextColor(colorTextMuted).
-				Font("monospace").
 				Wrap()
 		}
 	}

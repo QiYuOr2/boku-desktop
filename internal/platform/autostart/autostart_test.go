@@ -32,8 +32,8 @@ func TestUnsupportedHasNoLoginStart(t *testing.T) {
 	if _, err := manager.Read(launcher); !errors.Is(err, ErrUnsupported) {
 		t.Errorf("Read = %v, want ErrUnsupported", err)
 	}
-	if _, err := manager.Document(launcher); !errors.Is(err, ErrUnsupported) {
-		t.Errorf("Document = %v, want ErrUnsupported", err)
+	if _, err := manager.Location(launcher); !errors.Is(err, ErrUnsupported) {
+		t.Errorf("Location = %v, want ErrUnsupported", err)
 	}
 	if err := manager.Start(launcher); !errors.Is(err, ErrUnsupported) {
 		t.Errorf("Start = %v, want ErrUnsupported", err)
