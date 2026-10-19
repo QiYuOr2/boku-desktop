@@ -98,3 +98,16 @@ func TestRefreshAsyncDoesNotBlockAndOnlyAsksWhenNeeded(t *testing.T) {
 		t.Errorf("a fresh panel was fetched again: %d calls, want 1", got)
 	}
 }
+
+// Window.Update invokes its callback unconditionally. A refresh with no
+// state change must therefore still hand it a callable no-op; otherwise any
+// open settings window panics while navigating its sidebar.
+func TestRefreshCallbackIsAlwaysCallable(t *testing.T) {
+	refreshCallback(nil)()
+
+	calls := 0
+	refreshCallback(func() { calls++ })()
+	if calls != 1 {
+		t.Errorf("the refresh callback ran %d times, want once", calls)
+	}
+}

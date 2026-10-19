@@ -106,6 +106,14 @@ type Deps struct {
 	// main injects internal/platform/autostart's platform implementation; a
 	// test injects its own.
 	Autostart autostart.Manager
+	// Updates is the update check. A State without one draws no update row,
+	// starts no check and adds nothing to the tray menu: a build without an
+	// updater is every test and every assembly that wired none.
+	//
+	// The interface is the presentation's own, so that nothing here imports
+	// internal/update or MyGo's updater. main injects the real service; a
+	// test injects a fake.
+	Updates UpdateService
 }
 
 // State is the whole presentation state. It is read and written on the main
@@ -133,6 +141,17 @@ type State struct {
 	// is the only writer: the system's own record is the one truth about
 	// whether Boku starts at login.
 	autostart autostart.Manager
+	// updates is the update check, or nil in a build without one. The state
+	// it reports is read from it every frame rather than kept here, so that
+	// an answer arriving while no window is open is not lost.
+	updates UpdateService
+	// updateNotifier puts a notice about a ready update on the desktop. It
+	// is nil until an update service is assembled, which is why the row can
+	// be drawn without one.
+	updateNotifier updateNotifier
+	// updateNotified is the version whose notice has already been shown in
+	// this run, so that a state polled once a frame is announced once.
+	updateNotified string
 	// autostartStatus is what the last press of that switch said, shown under
 	// it. The state itself is not kept here, only the answer to the press.
 	autostartStatus autostartStatus
@@ -402,7 +421,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the info mark: %w", err)
 	}
-	return &State{
+	state := &State{
 		app:               app,
 		panelService:      deps.Panels,
 		secretService:     deps.Secrets,
@@ -417,6 +436,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		applyAppearance:   deps.ApplyAppearance,
 		popoverAppearance: deps.PopoverAppearance,
 		autostart:         deps.Autostart,
+		updates:           deps.Updates,
 		dark:              appearance.Dark(false),
 		selectionGranted:  true,
 		trayIcon:          trayIcon,
@@ -436,7 +456,25 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		translationMark:   translationMark,
 		keyMark:           keyMark,
 		infoMark:          infoMark,
-	}, nil
+	}
+	// The update service was built before the state, so its change listener
+	// is installed now, once, before anything can ask it for a check: a
+	// service without one is a row that never redraws.
+	state.prepareUpdates(deps.Updates)
+	return state, nil
+}
+
+// AttachUpdates gives the state its update service, or replaces the one it
+// has. It is what an assembly calls when the service is built after — or on
+// — the state: the service's change listener may fire from another goroutine,
+// and installing it once the state exists means every report reaches a state
+// that can be repainted.
+//
+// A service passed to New installs the same listener there, so an assembly
+// only needs one of the two. A State with neither simply has no updates, and
+// everything about updating is then absent rather than broken.
+func (s *State) AttachUpdates(updates UpdateService) {
+	s.prepareUpdates(updates)
 }
 
 // Setup adds the tray icon and wires its clicks. It must be called on the
@@ -507,29 +545,72 @@ func (s *State) Destroy() {
 // safe to call from another goroutine: Window.Update carries it to the main
 // thread, which is the only thread that may touch this state.
 func (s *State) Refresh() {
+	s.refresh(nil)
+}
+
+// refresh is Refresh with work of the caller's to run on the main thread
+// after the repaint has been asked for: a goroutine that has an answer to
+// hand over gives it here as a closure rather than touching the state itself.
+//
+// The windows are MyGo's own way to the main thread (Window.Update posts to
+// it and returns), so the first window present carries the work and the
+// others get no repaint. With no window open there is nothing to carry it,
+// and dropping it would lose what the caller could not do on its own — a
+// notice about an update that finished while the quick window was closed, for
+// instance. It is posted on a goroutine instead, which is safe because the
+// work does nothing but ask MyGo to show a notice: that request is itself
+// carried to the main thread by the framework, and nothing in it touches the
+// state.
+func (s *State) refresh(after func()) {
 	if s.panel != nil {
-		s.panel.Update(func() {})
+		s.panel.Update(refreshCallback(after))
+		after = nil
 	}
 	if s.settingsWindow != nil {
-		s.settingsWindow.Update(func() {})
+		s.settingsWindow.Update(refreshCallback(after))
+		after = nil
 	}
 	if s.historyWindow != nil {
-		s.historyWindow.Update(func() {})
+		s.historyWindow.Update(refreshCallback(after))
+		after = nil
 	}
 	if s.translateWindow != nil {
-		s.translateWindow.Update(func() {})
+		s.translateWindow.Update(refreshCallback(after))
+		after = nil
 	}
+	if after != nil {
+		go after()
+	}
+}
+
+// refreshCallback turns a repaint-only request into a callable no-op. MyGo's
+// Window.Update always invokes its argument, so nil is not a valid way to ask
+// for just a redraw. The first open window receives after; every later window
+// receives a no-op, preserving the rule that extra work runs exactly once.
+func refreshCallback(after func()) func() {
+	if after != nil {
+		return after
+	}
+	return func() {}
 }
 
 // menu is the tray menu: the only way out of a tray application, which has
 // no main window to close.
 func (s *State) menu() *mygo.Menu {
-	return mygo.NewMenu([]*mygo.MenuItem{
+	items := []*mygo.MenuItem{
 		{Label: "打开 " + appName, Click: func(*mygo.MenuItem, *mygo.Window) { s.Toggle() }},
 		{Label: "设置…", Click: func(*mygo.MenuItem, *mygo.Window) { s.openSettings() }},
+	}
+	// A ready update earns a line here, between the settings and the way
+	// out: the menu is the one place reachable while the application is
+	// behind another window. Every other status earns nothing — an item that
+	// can never do anything is noise in a four-line menu.
+	items = append(items, s.updateMenuItems()...)
+	items = append(items,
 		mygo.Separator(),
-		{Label: "退出 " + appName, Click: func(*mygo.MenuItem, *mygo.Window) { s.quit() }},
-	})
+		&mygo.MenuItem{Label: "退出 " + appName, Click: func(*mygo.MenuItem, *mygo.Window) { s.quit() }},
+	)
+	return mygo.NewMenu(items)
 }
 
 // popUpMenu shows the menu next to the icon for this right click only, as
@@ -662,6 +743,11 @@ func (s *State) Open() {
 func (s *State) View(c *ui.Context) {
 	s.useDesign(c)
 	c.Root().Background(ui.Transparent)
+	// A frame is where a ready update is noticed too, on the same decision
+	// the service's own change reports go through (see refreshReadyUpdate):
+	// the notice is shown once per version, so whichever of the two sees it
+	// first, the other finds nothing left to do.
+	s.refreshReadyUpdate()
 	box := ui.Column(c).Fill()
 	switch {
 	case c.Vibrancy(): // over the popover's own material on macOS

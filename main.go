@@ -38,6 +38,7 @@ import (
 	"boku/internal/translate"
 	deepseektranslator "boku/internal/translate/deepseek"
 	freetranslator "boku/internal/translate/free"
+	"boku/internal/update"
 )
 
 // Name the application before Run: MyGo reads the name it registers with
@@ -84,6 +85,19 @@ func main() {
 	panels, secrets, clipboard, translate, own, appearance, prefs, err := services(userData, version)
 	if err != nil {
 		log.Fatalf("boku: %v", err)
+	}
+
+	// The update feature is assembled before any window, because the interface
+	// reads its state on the first frame, but it is not started until the
+	// application is ready: a check belongs after the tray exists, and its
+	// first look at the feed is a minute away in any case.
+	updates, err := newUpdates(userData, applicationVersion(version))
+	if err != nil {
+		// A build that cannot prepare the update feature is a build without
+		// one, not a build that does not start: the feature is about staying
+		// current, and refusing to run is the worst way of doing that.
+		log.Printf("boku: %v; this run will not check for updates", err)
+		updates = nil
 	}
 
 	// The native popover appearance is a temporary macOS bridge for forced
@@ -140,6 +154,10 @@ func main() {
 		},
 		PopoverAppearance: popoverAppearance,
 		Autostart:         loginStart,
+		// What the about box draws and what the tray menu gains: a State with
+		// no service here is a build that draws no update row at all, which is
+		// what a test and a failed assembly both get.
+		Updates: updateService(updates),
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -185,12 +203,21 @@ func main() {
 	// application: MyGo quits on the last window closed unless something
 	// listens.
 	mygo.App.OnWindowAllClosed(func() {})
+	// The update check is a goroutine of its own, and it ends with the
+	// process: a check still asking its feed while the application goes away
+	// arrives at nothing.
+	quitUpdates := func() {
+		if updates != nil {
+			updates.Stop()
+		}
+	}
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
 		slog.Info("boku is quitting")
 		// The clipboard poll is a goroutine, and it ends before the
 		// process does: a read that arrives while the backend is going
 		// away is a read nobody asked for.
 		clipboard.Stop()
+		quitUpdates()
 		// A shortcut left bound belongs to a process that no longer exists:
 		// the next launch would find it taken by itself.
 		state.UnregisterShortcuts()
@@ -207,6 +234,13 @@ func main() {
 		// only if the user turned it on.
 		state.RegisterShortcuts()
 		clipboard.Start(nil)
+		// The update check starts last: its first look at the feed is a
+		// minute away, and the tray is what a launch is for. A build that
+		// cannot update itself gets no timer from here — the service knows,
+		// and the about box draws no row for it.
+		if updates != nil {
+			updates.Start(context.Background())
+		}
 		slog.Info("boku is ready")
 	})
 	if err := mygo.App.Run(); err != nil {
@@ -415,12 +449,26 @@ func services(userData, version string) (*panel.Panels, *credential.Secrets, *cl
 }
 
 // applicationVersion is the version to send as a user agent: a plain `go
-// run` has none, and an empty "Boku/" would say nothing.
+// run` has none, and an empty "Boku/" would say nothing. It is also the
+// version the update feature compares against, so a build with no version
+// says "dev" there too — and compares as one.
 func applicationVersion(version string) string {
 	if version == "" {
 		return "dev"
 	}
 	return version
+}
+
+// updateService hands the assembled service to the presentation as nil when
+// there is none. It is a function rather than a ternary because a typed nil
+// pointer inside app.UpdateService is not nil to the interface: a build
+// without updates has to pass the interface's zero value, or the about box
+// would draw a row it can never fill.
+func updateService(updates *update.Service) app.UpdateService {
+	if updates == nil {
+		return nil
+	}
+	return updates
 }
 
 // logDirectory is where the daily logs live: a directory of their own under

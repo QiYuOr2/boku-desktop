@@ -5,5 +5,11 @@
   "out": "build",
   "macos": {
     "infoPlist": { "LSUIElement": true }
+  },
+  "updates": {
+    "publicKey": "bHlnIPTFOGR3QpNB43jcW10MXlCD9tQVIlmcX9GfgkU=",
+    "github": "QiYuOr2/boku-desktop",
+    "tagPrefix": "v",
+    "changelog": "CHANGELOG.md"
   }
 }
