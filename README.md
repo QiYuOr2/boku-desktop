@@ -5,63 +5,76 @@
 [![MyGo](https://img.shields.io/badge/MyGo-v0.5.1-00ADD8)](https://github.com/egoist/mygo)
 [![License](https://img.shields.io/github/license/QiYuOr2/boku-desktop)](./LICENSE)
 
-用 Go 与 [MyGo](https://github.com/egoist/mygo) 写的桌面工具，常驻系统托盘。
-点托盘图标弹出一个窗口，里面是两类内容：面板与工具。
-
-**面板**——查看第三方服务的余额与额度：
-
-| 面板 | 说明 |
-| --- | --- |
-| DeepSeek 余额 | 余额、赠金、充值余额 |
-| Codex 额度 | 读本机 Codex CLI 的登录，不用再填一次 key |
-
-**工具**：
-
-| 工具 | 说明 |
-| --- | --- |
-| 划词翻译 | 选中文字后按快捷键翻译；两个免密钥引擎开箱可用，也可填自己的 API Key；日语可逐词注音 |
-| 剪贴板历史 | 记录复制过的文本 / 链接 / JSON / 代码 / 文件 / 图片，点击一条即复制回去 |
-
-设置窗口用来配置每个面板与工具的凭据和行为。
-
 <p align="center">
   <img src="./docs/images/boku-promo-desktop.png" width="960" alt="Boku：个人面板与效率工具，展示余额、划词翻译、剪贴板历史与设置">
 </p>
 
-## 状态
+<p align="center">
+  <strong>你的个人面板与效率工具。</strong><br>
+  常驻托盘，点一下看状态，按一下用工具，然后继续专注。
+</p>
 
-v0.1.0，早期开发中，接口和数据结构都可能变。
+<p align="center">
+  <a href="https://github.com/QiYuOr2/boku-desktop/releases/latest">下载最新版本</a>
+  ·
+  <a href="https://github.com/QiYuOr2/boku-desktop/issues">反馈问题或建议</a>
+</p>
 
-尚未实现：
+## 为什么是 Boku
 
-| 能力 | 说明 |
+每天都会反复打开的网页、命令行和小工具，不应该散在各处。Boku 把它们收进一个轻量的托盘入口：
+
+- **看状态**：在一张悬浮小卡片中查看 API 余额和 Codex 额度。
+- **随手处理**：划词即译，复制过的内容随时找回。
+- **不打断工作**：没有常驻主窗口；左键点托盘图标开合面板，用完即走。
+
+它是个人入口，不是笔记、记账、日历或团队协作软件。
+
+## 已有能力
+
+| 你想做什么 | Boku 如何完成 |
 | --- | --- |
-| 软件订阅 / 读书时长 / 游戏时长 | 计划中的面板 |
-| JSON 格式化 / 磁力链接预览 | 计划中的工具 |
-| 剪贴板历史的搜索、置顶、删除、清空 | 记录范围是唯一的裁剪手段 |
-| 定时刷新 | 面板由手动刷新驱动 |
+| 查看 DeepSeek 余额 | 填入自己的 API Key，查看余额、赠金与充值余额。 |
+| 查看 Codex 额度 | 读取本机已登录的 Codex CLI 状态，无需再次填写 Key。 |
+| 快速翻译选中的文字 | 按 <kbd>Ctrl</kbd>/<kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>T</kbd>，使用免费翻译或已配置的 AI 服务；日文可按需显示注音。 |
+| 找回刚才复制的内容 | 自动保留文本、链接、JSON、代码、文件和图片；点一条即可复制回剪贴板。 |
+| 管理设置与凭据 | 在一个设置窗口中管理 API Key、翻译、剪贴板、外观与应用信息。 |
 
-**自动更新已实现**（0.1.0-beta.6 起）：启动 1 分钟后检查一次，之后每 24 小时一次；
-有新版会后台确认、在「设置 > 关于」里提示重启。更新来自本仓库的 GitHub Release
-（版本更新包是 Ed25519 签名的），不需要项目方服务器。
+## 三步开始
 
-已知限制：
+1. 在 [Releases](https://github.com/QiYuOr2/boku-desktop/releases/latest) 下载适合平台的安装包。Windows 可选择安装包或免安装版；macOS 使用通用 DMG。
+2. 启动 Boku。它会安静地驻留在系统托盘，不会抢占桌面。
+3. 左键点击托盘图标打开个人面板；选中文字后按默认快捷键即可翻译。
 
-- **凭据是明文**：`secrets.json`（权限 0600）。Windows 上这不等于 ACL，
-  所以它**不是安全边界**；这是最终形态，不会有加密版本（[security.md](../../docs/security.md) §1），
-  设置界面里已经如实告诉用户。
-- 快照缓存只在内存：重启后的第一次打开需要联网，之后会显示上一次的结果并标注为旧数据。
-- 面板只在手动刷新时更新（打开悬浮窗、点刷新图标、保存凭据），**没有定时刷新**：
-  一次瞬时失败会留在卡片上，直到你刷新。
-- 只有一个全局快捷键（划词翻译）。开合悬浮窗靠点托盘左键，没有快捷键。
-- macOS 的划词取词需要「系统设置 > 隐私与安全性 > 辅助功能」授权。在设置页点
-  「获取辅助功能权限」会让系统把 Boku 列进该列表并弹出授权窗口；开关仍由用户
-  在系统设置里打开。未授权时回退到读取剪贴板。开发构建是 ad-hoc 签名，重建后
-  系统可能重新询问。
-- 开发构建与安装版都检查同一个 GitHub Release 通道；点「重启并更新」时会再下载一次
-  更新包。只有 MyGo 允许就地替换的安装位置才能实际安装更新。
+首次使用不需要账号。免费翻译引擎可以直接使用；DeepSeek 余额和 AI 翻译只在你主动配置自己的凭据后才会启用。
 
-## 构建
+> macOS 首次打开未公证的 App 时，系统可能显示安全提示。请从本仓库的 Release 下载，并通过 Finder 中的“右键 → 打开”完成首次确认。
+
+## 数据、网络与隐私
+
+- **没有 Boku 项目服务器，也没有账户系统。** 面板请求只发往你选择的数据服务；更新检查只读取 GitHub Release。
+- **凭据保存在本机的明文 `secrets.json` 文件中。** 这是有意的取舍：文件权限 / ACL 是边界，不提供加密、主密码或云端托管。请不要把该文件同步到不可信的位置。
+- **不会把凭据显示在界面、日志或错误信息里。** 本地日志保留最近 30 天。
+- 外部服务失败只影响对应卡片；Boku 不会用 `0` 冒充失败结果，剪贴板等本地功能照常可用。
+
+## 平台与现状
+
+| 平台 | 状态 |
+| --- | --- |
+| Windows | 已发布 |
+| macOS | 已发布 |
+| Linux | 可编译，尚未发布；划词取词不可用 |
+
+Boku 仍处于早期阶段，接口与数据结构可能调整。接下来计划探索的软件订阅、读书 / 游戏时长面板、JSON 格式化与磁力链接预览尚未实现；剪贴板历史的搜索、置顶、删除与清空也还在计划中。
+
+### 使用前知道
+
+- 面板由打开悬浮窗、手动刷新和保存凭据时更新，**暂未提供定时刷新**；重启后首次查看面板需要联网。
+- 划词翻译在 macOS 上需要在“系统设置 → 隐私与安全性 → 辅助功能”中授权；未授权时会回退到读取剪贴板。
+- 自动更新会在启动约一分钟后检查一次，此后每 24 小时检查；只有 MyGo 可原地替换的安装位置才能实际完成“重启并更新”。
+- 全局快捷键目前只有划词翻译；打开个人面板请左键点击托盘图标。
+
+## 从源码构建
 
 需要 **Go 1.27 或更新**。
 
@@ -69,121 +82,48 @@ v0.1.0，早期开发中，接口和数据结构都可能变。
 git clone https://github.com/QiYuOr2/boku-desktop.git
 cd boku-desktop
 
-go tool mygo dev        # 开发：构建 dev 版本、启动，改动 .go 后重建重启
+go tool mygo dev        # 开发：构建并启动；改动 .go 后自动重建重启
 go tool mygo build      # 生产构建与打包，产物在 build/<os>-<arch>/
 go tool mygo doctor     # 检查本机环境
 ```
 
-程序在 `CGO_ENABLED=0` 下编译，没有需要 cgo 的依赖。
-
-依赖从 Go 模块代理下载。如果拉取慢，可以换一个：
+程序可在 `CGO_ENABLED=0` 下编译，不依赖 cgo。若 Go 模块下载较慢，可以设置代理：
 
 ```bash
 go env -w GOPROXY=https://goproxy.cn,direct
 ```
 
-## 开发
-
-提交前跑这四条，CI 跑的是同一套：
+提交前请运行与 CI 相同的检查：
 
 ```bash
 gofmt -l .              # 应无输出
 go vet ./...
-go tool mygo vet .      # 检查把构建期 element 存进状态或 goroutine 的写法
+go tool mygo vet .      # 检查 MyGo 视图与 goroutine 的常见错误
 go test ./...
 ```
 
-改界面时不必开窗口——MyGo 的 `ui.NewTester` 能在内存里渲染并模拟输入：
-
-```go
-tt := ui.NewTester(app.View, 320, 300)
-_ = tt.Click("刷新")
-if !tt.HasText("¥42.10") { /* ... */ }
-```
-
-视图与布局不写像素断言测试，靠运行时验收。
-
 ## 架构
 
-单个 Go 进程，按**功能**分包：每个功能自己拥有它的服务、它的存储与它认识的数据源。
-跨功能共享的只有三样：领域契约、纯函数、外部世界适配。
+Boku 是单个 Go 进程，按功能而不是技术层拆分：
 
 ```text
-internal/domain            实体、值对象、端口接口、错误码、Clock。零依赖
-internal/kit               纯函数（金额、文本、语言、脱敏）。只依赖 domain
-internal/platform          外部世界适配：httpc / sysclip / selection / atomicfile
-internal/contract/<厂商>    厂商身份常量：providerId、凭据 key、申请页
-        ↑
-internal/panel             功能：面板（服务 + 注册表 + 每个厂商一棵子树）
-internal/clipboard         功能：剪贴板历史（服务 + 轮询 + 历史与图片存储）
-internal/translate         功能：划词翻译（openai 协议 + 各后端）
-internal/credential        功能：凭据（服务 + 存储）
-internal/settings          功能：应用设置的存储
-        ↑
-internal/app               Presentation：视图、窗口、托盘、快捷键
-main.go                    唯一装配点
+internal/domain       实体、值对象、错误与端口接口
+internal/kit          无 I/O 的纯函数
+internal/platform     HTTP、剪贴板、取词与原子文件等系统适配
+internal/panel        余额与额度面板
+internal/clipboard    剪贴板历史
+internal/translate    划词翻译
+internal/credential   明文凭据文件
+internal/settings     设置文件
+internal/app          原生视图、窗口、托盘与快捷键
+main.go                唯一装配点
 ```
 
-三条规则：
+功能包不直接互相依赖；它们通过 `internal/domain` 的接口协作，由 `main.go` 装配。Provider 负责 HTTP 与错误翻译，Adapter 只做可离线测试的数据映射。
 
-1. **功能之间不互相 import。** 它们只在 `internal/domain` 的接口上相遇
-   （`SecretStore`、`ClipboardDevice`…），由 `main.go` 注入实现。
-2. **依赖方向单向。** 功能可以依赖 `domain` / `kit` / `platform` / `contract`，
-   反过来一律不许；`domain` 与 `contract/*` 不 import 任何其它 internal 包。
-3. **出网收口。** 只有 `internal/platform/httpc` 与数据源包引入 `net/http`。
+## 贡献
 
-第三方数据结构的差异收口在每个数据源自己的包里，取数与映射成对存在：
-
-```text
-internal/panel/<厂商>/client.go   Fetch(HTTP)  → FetchResult(原始 JSON)
-internal/panel/<厂商>/adapter.go  Normalize    → Snapshot(统一指标)
-```
-
-映射必须是纯函数——不读时钟、不开文件、不发请求——因此可以离线测试，并且
-必须有包含**畸形响应**的用例：断言返回 `ErrProviderBadResponse`，
-而不是把失败当成 `0`。
-
-新增一个数据源的完整流程写在 [`AGENTS.md`](./AGENTS.md)。
-
-## 界面约定
-
-MyGo 的 UI 是即时模式，视图每帧重新构建。几条硬约束：
-
-- 视图函数必须无副作用；查询事件用 `.Clicked()` / `.Changed()` / `.Submitted()`，
-  或用 `.OnClick(...)` 把动作延后到本帧构建结束。
-- 控件值用 `.Bind(&state.Field)` 绑定到状态字段。
-- 需要跨帧身份的控件用 `c.Key(...)`，**必须在构造之前**设到 context 上——
-  元素构建完再调 `.Key()` 会 panic。
-- 构建期的 `ui.Element` 只在一帧内有效，不要存进状态或传给 goroutine。
-- **按钮、菜单、托盘与全局快捷键的回调都在主线程**：只启动 goroutine，
-  绝不等待网络；后台结果用 `Window.Update` 回到主线程后再写状态。
-
-托盘与悬浮窗还有四条容易踩的约束：
-
-1. 默认不挂托盘菜单，否则左键永远点不出悬浮窗（有菜单时左键会弹菜单）。
-2. 每次开合都新建 flyout；复用 `Hidden` 的窗口不会被重新定位到托盘旁。
-3. 必须注册 `App.OnWindowAllClosed`，否则悬浮窗一关进程就退出。
-4. 托盘图标用 `go:embed`，不运行时读盘。
-
-## 数据与凭据
-
-- 数据库与凭据都在系统的用户数据目录下（`mygo.App.Path(mygo.PathUserData)`）。
-- 数据库只保存凭据的引用（`secretRef`），**不保存明文**。
-- 凭据存明文 `secrets.json`（权限 0600），不加密——见上面「已知限制」。
-- 日志写在用户数据目录下的 `logs/`，一天一个文件，保留最近 30 天。
-- 日志与错误信息输出凭据前必须 `redact`：错误里只允许出现 key 名，不允许出现值。
-- 测试只用合成的假值，不使用真实凭据。
-
-## 目录
-
-```text
-main.go        装配：应用名、生命周期监听、托盘、悬浮窗。唯一装配点
-mygo.json      应用名、identifier、版本、产物目录
-resources/     icon.png：应用图标，构建时打进应用包
-internal/      app / domain / kit / platform / contract / panel / clipboard
-               / translate / credential / settings / logging
-testdata/      适配器测试用的原始响应样本
-```
+欢迎提交 Bug 报告与改进建议，请先到 [Issues](https://github.com/QiYuOr2/boku-desktop/issues) 搜索是否已有相关讨论。开发时请遵循仓库中的 [AGENTS.md](./AGENTS.md)；它说明了架构边界、数据与凭据约束，以及验证要求。
 
 ## License
 
