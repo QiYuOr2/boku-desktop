@@ -160,7 +160,13 @@ func launchAgentPlist(l Launcher) []byte {
 		doc.WriteString("\t\t<string>" + escapeXML(arg) + "</string>\n")
 	}
 	doc.WriteString("\t</array>\n")
-	writePlistString(&doc, "RunAtLoad", "true")
+	// RunAtLoad is a boolean in the property list, not the string "true":
+	// launchd reads the value's type and does not start a document whose
+	// RunAtLoad is a string. The document still reads as a start — the file
+	// is there and names the program — so the switch would show on while the
+	// next login did nothing.
+	doc.WriteString("\t<key>RunAtLoad</key>\n")
+	doc.WriteString("\t<true/>\n")
 	// Interactive: the application draws a menu bar item, so launchd is told
 	// it belongs to the user's session rather than to the background.
 	writePlistString(&doc, "ProcessType", "Interactive")

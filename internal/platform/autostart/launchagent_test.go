@@ -73,6 +73,24 @@ func TestLaunchAgentDocument(t *testing.T) {
 	}
 }
 
+// RunAtLoad is a boolean in the document. launchd reads the value's type: a
+// string "true" makes a document that reads back as a start and names the
+// program correctly, while the next login does nothing. The switch cannot
+// see that difference — the file is there — so the test has to.
+func TestLaunchAgentRunAtLoadIsABoolean(t *testing.T) {
+	doc, err := agent(t).Document(launcher())
+	if err != nil {
+		t.Fatalf("Document failed: %v", err)
+	}
+	contents := string(doc.Contents)
+	if want := "<key>RunAtLoad</key>\n\t<true/>"; !strings.Contains(contents, want) {
+		t.Errorf("RunAtLoad is not a boolean in the document:\n%s", contents)
+	}
+	if strings.Contains(contents, "<key>RunAtLoad</key>\n\t<string>") {
+		t.Errorf("RunAtLoad is a string in the document:\n%s", contents)
+	}
+}
+
 // A path is allowed to contain characters that end an XML document early.
 // launchd would refuse the file at the next login — silently.
 func TestLaunchAgentEscapesTheProgram(t *testing.T) {
