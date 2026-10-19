@@ -33,10 +33,10 @@ func TestRegisterShortcutsBindsTheDefault(t *testing.T) {
 	if !state.shortcut.registered {
 		t.Error("the window does not know the shortcut is bound")
 	}
-	// What the settings window would draw about it is the line the state
-	// holds, and that is what is checked — the drawing itself is not.
-	if text, kind := state.shortcutLine(); !strings.Contains(text, friendlyAccelerator(translate.DefaultAccelerator)) {
-		t.Errorf("the window does not say what is bound: %q (kind %d)", text, kind)
+	// The recorder previews the binding itself, so a successful registration
+	// needs no duplicate status line below it.
+	if text, kind := state.shortcutLine(); text != "" || kind != notePlain {
+		t.Errorf("the bound shortcut still draws %q (kind %d)", text, kind)
 	}
 }
 

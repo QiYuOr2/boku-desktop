@@ -265,7 +265,7 @@ func (s *State) shortcutLine() (string, noteKind) {
 	case s.shortcut.recording:
 		return "正在录制：按下新的组合键，Esc 取消。", notePlain
 	case s.shortcut.registered:
-		return "当前是 " + friendlyAccelerator(accelerator) + "。", notePlain
+		return "", notePlain
 	case s.shortcut.err != nil:
 		return "快捷键 " + friendlyAccelerator(accelerator) + " 无法注册：" +
 			friendlyError(s.shortcut.err) + "。请换一个组合键。", noteWarning

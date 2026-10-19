@@ -13,9 +13,9 @@ import (
 	"boku/internal/domain"
 )
 
-// This file is the update check as the presentation knows it: the row under
-// the about box, the one line the tray menu gains while an update is ready,
-// and the notice that says so when the application is not on screen.
+// This file is the update check as the presentation knows it: the check
+// dialog, the one line the tray menu gains while an update is ready, and the
+// notice that says so when the application is not on screen.
 //
 // What the presentation knows about updating is the interface below and
 // nothing else. Whether a release is newer, what it is called, how it is
@@ -79,8 +79,8 @@ func (mygoNotifier) Notify(id, title, body string, open func()) {
 	})
 	notice.OnClick(open)
 	if err := notice.Show(); err != nil {
-		// The row in the about box still says what is ready: a desktop that
-		// will not show a notice is not a failed update.
+		// The check dialog still says what is ready: a desktop that will not
+		// show a notice is not a failed update.
 		slog.Warn("the update notice could not be shown", "error", err)
 	}
 }
@@ -89,42 +89,6 @@ func (mygoNotifier) Notify(id, title, body string, open func()) {
 // notice about the same version replaces the one already in Notification
 // Center rather than piling up beside it.
 const updateNoticeID = "boku-update-ready"
-
-// updateLine is what the about box says about updating, and whether it has
-// anything to say at all.
-//
-// The silent statuses are the reason it returns a bool, and there are two
-// kinds of them. A title that has not looked yet knows nothing, so it says
-// nothing: 「正在检查更新…」 belongs to a check that is actually running, and
-// a row claiming one before the first check has started would be a row that
-// never stops claiming it. A build that cannot update itself has nothing the
-// user could fix either. Neither draws a row, because a line about updating
-// on every launch is a line nobody asked for.
-func updateLine(state domain.UpdateState) (text string, show bool) {
-	switch state.Status {
-	case domain.UpdateChecking:
-		return "正在检查更新…", true
-	case domain.UpdateUpToDate:
-		return "已是最新版本", true
-	case domain.UpdateDownloading:
-		return downloadingLine(state), true
-	case domain.UpdateReady:
-		if version := updateVersion(state.Version); version != "" {
-			return "新版本 " + version + " 已就绪，重启以更新", true
-		}
-		return "新版本已就绪，重启以更新", true
-	case domain.UpdateFailed:
-		if detail := strings.TrimSpace(state.Detail); detail != "" {
-			return "检查更新失败：" + detail, true
-		}
-		return "检查更新失败", true
-	default:
-		// Idle, Unsupported, and any status this build does not know:
-		// nothing. A row is drawn only where there is something true to put
-		// in it.
-		return "", false
-	}
-}
 
 // downloadingLine says what is coming down and how far along it is: the
 // version, and the share once the total is known.
@@ -155,35 +119,6 @@ func updateMenuLabel(state domain.UpdateState) (label string, show bool) {
 		return "重启并更新到 " + version, true
 	}
 	return "重启并更新", true
-}
-
-// updateButtonKind is the one action the about box puts on the update row.
-type updateButtonKind int
-
-const (
-	// updateCheckButton is 「检查更新」: ask the feed whether there is
-	// something newer.
-	updateCheckButton updateButtonKind = iota
-	// updateRestartButton is 「重启并更新」: put the downloaded update in
-	// place.
-	updateRestartButton
-	// updateRetryButton is 「重试」: the last attempt failed, and the row
-	// offers the way back to one that works.
-	updateRetryButton
-)
-
-// updateAction decides what the row's button is, what it is called and
-// whether it is the primary tone. It is the primary one exactly when the
-// answer is "restart now"; the two ways of asking again are secondary.
-func updateAction(state domain.UpdateState) (kind updateButtonKind, label string, primary bool) {
-	switch state.Status {
-	case domain.UpdateReady:
-		return updateRestartButton, "重启并更新", true
-	case domain.UpdateFailed:
-		return updateRetryButton, "重试", false
-	default:
-		return updateCheckButton, "检查更新", false
-	}
 }
 
 // updateNotice is what the desktop notice says about a ready update.
@@ -270,9 +205,9 @@ func (s *State) startUpdateCheck() {
 				// log line would only make normal local development look broken.
 				return
 			}
-			// The service has already written the state this error is about,
-			// and the row says it in words the user can act on. What the row
-			// cannot say is which call it was, and that is the log's.
+			// The service has already written the state the dialog renders.
+			// What the dialog cannot say is which call it was, and that is the
+			// log's.
 			slog.Info("the update check did not finish", "error", err)
 		}
 	}()
@@ -313,8 +248,8 @@ func (s *State) installUpdate() {
 // get asked again on every frame.
 //
 // The notice is skipped silently where the desktop cannot show one, and where
-// there is no service at all: the row in the about box is the notice that is
-// always there.
+// there is no service at all: the check dialog is the place that says what
+// happened.
 func (s *State) noteReadyUpdate(state domain.UpdateState) {
 	if s.updates == nil || state.Status != domain.UpdateReady {
 		return
@@ -351,51 +286,11 @@ func (s *State) showUpdateSettings() {
 	s.openSettingsSection(sectionAbout)
 }
 
-// updateRow draws the about box's updating row: what the service says, and
-// the one action that follows from it.
-//
-// Nothing is drawn without a service, and nothing is drawn for a build that
-// cannot update itself: no label, no button, no explanation. That is the
-// whole of the silent rule — a user who cannot update should not be taught
-// that there is a feature they cannot have.
-func (s *State) updateRow(c *ui.Context) {
-	if s.updates == nil {
-		return
-	}
-	state := s.updateState()
-	text, show := updateLine(state)
-	if !show {
-		return
-	}
-	kind, label, primary := updateAction(state)
-	tone := buttonSecondary
-	if primary {
-		tone = buttonPrimary
-	}
-	// The label keeps its own width and the sentence takes the room that is
-	// left: the action is what the row is for, and one that grew with the
-	// words beside it would be pushed off the row by a long failure.
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
-		ui.Text(c, "更新").FontSize(sizeSmall).TextColor(colorTextMuted).SingleLine().Shrink(0)
-		ui.Text(c, text).FontSize(sizeSmall).TextColor(colorText).Wrap()
-		ui.Spacer(c)
-		if button := cardButton(c, label, tone); button.Clicked() {
-			s.pressUpdate(kind)
-		}
-	})
-}
-
 // updateCheckButton draws the about box's standing action: a check on
 // demand, which is how the user asks again without waiting for the next one
 // the application makes on its own.
 func (s *State) updateCheckButton(c *ui.Context) {
 	if s.updates == nil {
-		return
-	}
-	// A ready or a failed update already has a button of its own on the row,
-	// and two of them on one page would be two ways to do one thing.
-	switch s.updateState().Status {
-	case domain.UpdateReady, domain.UpdateFailed:
 		return
 	}
 	if button := designButton(c, "检查更新", buttonSecondary); button.Clicked() {
@@ -515,17 +410,6 @@ func updateVersionOrDev(version string) string {
 		return version
 	}
 	return "dev"
-}
-
-// pressUpdate runs one of the row's actions. Every one of them answers at
-// once: what they start is a goroutine.
-func (s *State) pressUpdate(kind updateButtonKind) {
-	switch kind {
-	case updateRestartButton:
-		s.installUpdate()
-	default:
-		s.startUpdateCheck()
-	}
 }
 
 // updateMenuItems is the tray menu's updating line: one item while an update

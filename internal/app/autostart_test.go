@@ -198,17 +198,3 @@ func TestAutostartReadFailureIsNotOff(t *testing.T) {
 		t.Errorf("the status = %q, %v; want a danger line", status.text, status.kind)
 	}
 }
-
-// The line under the switch names where the start lives, which the platform
-// decides: a System Settings page, a Windows value name. It is asked, not
-// assumed.
-func TestAutostartLocationLineComesFromThePlatform(t *testing.T) {
-	state := autostartState(t, &testAutostart{})
-	location := state.autostartLocationLine()
-	if location == "" {
-		t.Fatal("the section has no location to show under the switch")
-	}
-	if got, want := location, "test-start/"+autostartIdentifier; got != want {
-		t.Errorf("the location = %q, want %q", got, want)
-	}
-}

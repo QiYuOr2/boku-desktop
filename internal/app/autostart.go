@@ -110,25 +110,6 @@ func (s *State) setAutostart(on bool) {
 	s.Refresh()
 }
 
-// autostartLocationLine names where the start lives — the System Settings
-// page on macOS, the registry value on Windows. It is asked of the platform
-// rather than written down here, so that the line and the platform cannot
-// disagree.
-func (s *State) autostartLocationLine() string {
-	if s.autostart == nil {
-		return ""
-	}
-	launcher, err := s.autostartLauncher()
-	if err != nil {
-		return ""
-	}
-	location, err := s.autostart.Location(launcher)
-	if err != nil {
-		return ""
-	}
-	return location
-}
-
 // autostartUnsupportedNote is what the section says on a desktop with no
 // login start Boku can register. It is a fact about the platform, not a
 // failure of the user's, so it is drawn quietly.
@@ -143,14 +124,6 @@ const autostartApprovalNote = "系统里的登录项已被关闭；请在「系�
 // not in an Applications folder: a login item would name a program that is
 // not there at the next login, so it is refused.
 const autostartNotInstalledNote = "请先把 Boku 放进「应用程序」文件夹，再打开开机启动。"
-
-// autostartHelps is the line under a working switch: where the start is
-// unregistered from, which is what a user does when the switch does not tell
-// them what they want to know — "did it work?" is answered by the system's own
-// list, not by this page.
-func autostartHelps() string {
-	return "关闭后取消登记；系统中也可以随时查看或停用这一项。"
-}
 
 // autostartLabel is what the switch says.
 const autostartLabel = "开机自动启动"
@@ -173,13 +146,6 @@ func (s *State) autostartSwitch(c *ui.Context) {
 	on, enabled, status := s.autostartState()
 	if enabled {
 		ui.Checkbox(c, &on, autostartLabel).FontSize(sizeBody).OnClick(func() { s.setAutostart(on) })
-		notice(c, notePlain, autostartHelps())
-		if location := s.autostartLocationLine(); location != "" {
-			ui.Text(c, location).
-				FontSize(sizeTiny).
-				TextColor(colorTextMuted).
-				Wrap()
-		}
 	}
 	if status.text != "" {
 		notice(c, status.kind, status.text)

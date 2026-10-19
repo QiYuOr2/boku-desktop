@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -17,9 +16,9 @@ import (
 )
 
 // The update check is tested where it is a decision rather than a drawing:
-// what the row says, whether it is drawn, whether the tray menu gains a line,
-// whether the notice is shown and how often. What the row looks like is a
-// runtime acceptance, like the rest of the views.
+// what the dialog says, whether the tray menu gains a line, whether the
+// notice is shown and how often. What the dialog looks like is a runtime
+// acceptance, like the rest of the views.
 //
 // The fake service below stands where internal/update stands in production:
 // it reports a state the test sets, counts what it was asked, and calls back
@@ -115,125 +114,6 @@ func updateStateWith(t *testing.T, updates UpdateService, notifier updateNotifie
 	return state
 }
 
-// Each status has its own sentence in the about box, and the two that say
-// nothing say nothing at all. The table is the whole of the copy the user
-// reads about updating.
-func TestUpdateLineTable(t *testing.T) {
-	cases := []struct {
-		name  string
-		state domain.UpdateState
-		text  string
-		show  bool
-	}{
-		{
-			name:  "idle has not looked yet, and says nothing",
-			state: domain.UpdateState{Status: domain.UpdateIdle},
-			show:  false,
-		},
-		{
-			name:  "checking is in flight",
-			state: domain.UpdateState{Status: domain.UpdateChecking},
-			text:  "正在检查更新…",
-			show:  true,
-		},
-		{
-			name:  "up to date",
-			state: domain.UpdateState{Status: domain.UpdateUpToDate},
-			text:  "已是最新版本",
-			show:  true,
-		},
-		{
-			name: "downloading with a known total",
-			state: domain.UpdateState{
-				Status: domain.UpdateDownloading, Version: "0.1.0-beta.6",
-				Downloaded: 62, Total: 100,
-			},
-			text: "正在下载 0.1.0-beta.6… 62%",
-			show: true,
-		},
-		{
-			name: "downloading an unknown total",
-			state: domain.UpdateState{
-				Status: domain.UpdateDownloading, Version: "0.1.0-beta.6",
-				Downloaded: 10,
-			},
-			text: "正在下载 0.1.0-beta.6…",
-			show: true,
-		},
-		{
-			name: "downloading that rounds to nothing",
-			state: domain.UpdateState{
-				Status: domain.UpdateDownloading, Version: "0.1.0-beta.6",
-				Downloaded: 1, Total: 1000,
-			},
-			text: "正在下载 0.1.0-beta.6…",
-			show: true,
-		},
-		{
-			name:  "downloading without a version",
-			state: domain.UpdateState{Status: domain.UpdateDownloading, Downloaded: 5, Total: 10},
-			text:  "正在下载… 50%",
-			show:  true,
-		},
-		{
-			name:  "a download that is complete says 100%",
-			state: domain.UpdateState{Status: domain.UpdateDownloading, Version: "v1.2.3", Downloaded: 7, Total: 7},
-			text:  "正在下载 1.2.3… 100%",
-			show:  true,
-		},
-		{
-			name:  "ready with a version",
-			state: domain.UpdateState{Status: domain.UpdateReady, Version: "0.1.0-beta.6"},
-			text:  "新版本 0.1.0-beta.6 已就绪，重启以更新",
-			show:  true,
-		},
-		{
-			name:  "ready without a version",
-			state: domain.UpdateState{Status: domain.UpdateReady},
-			text:  "新版本已就绪，重启以更新",
-			show:  true,
-		},
-		{
-			name:  "failed with a reason",
-			state: domain.UpdateState{Status: domain.UpdateFailed, Detail: "网络连接被拒绝。"},
-			text:  "检查更新失败：网络连接被拒绝。",
-			show:  true,
-		},
-		{
-			name:  "failed without a reason",
-			state: domain.UpdateState{Status: domain.UpdateFailed},
-			text:  "检查更新失败",
-			show:  true,
-		},
-		{
-			name:  "a build that cannot update itself is silent",
-			state: domain.UpdateState{Status: domain.UpdateUnsupported},
-			show:  false,
-		},
-		{
-			name:  "a status this build does not know is silent",
-			state: domain.UpdateState{Status: domain.UpdateStatus(99)},
-			show:  false,
-		},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			text, show := updateLine(c.state)
-			if show != c.show {
-				t.Fatalf("updateLine(%v) shows %v, want %v", c.state.Status, show, c.show)
-			}
-			if text != c.text {
-				t.Errorf("updateLine(%v) = %q, want %q", c.state.Status, text, c.text)
-			}
-			// The row and the words agree: a line that is not shown has no
-			// text, so a caller cannot draw an empty row by mistake.
-			if !show && text != "" {
-				t.Errorf("a line that is not shown still said %q", text)
-			}
-		})
-	}
-}
-
 // The tray menu gains one item, and only for a ready update: every other
 // status would add a line that can never do anything.
 func TestUpdateMenuLabelTable(t *testing.T) {
@@ -268,35 +148,6 @@ func TestUpdateMenuLabelTable(t *testing.T) {
 			if label != c.label || show != c.show {
 				t.Errorf("updateMenuLabel(%v) = %q, %v; want %q, %v",
 					c.state.Status, label, show, c.label, c.show)
-			}
-		})
-	}
-}
-
-// The row's button is the one action that follows from the status, and only
-// a ready update's is the primary one.
-func TestUpdateActionTable(t *testing.T) {
-	cases := []struct {
-		name    string
-		state   domain.UpdateState
-		kind    updateButtonKind
-		label   string
-		primary bool
-	}{
-		{"idle can be checked", domain.UpdateState{Status: domain.UpdateIdle}, updateCheckButton, "检查更新", false},
-		{"checking is not asked again", domain.UpdateState{Status: domain.UpdateChecking}, updateCheckButton, "检查更新", false},
-		{"up to date can be checked", domain.UpdateState{Status: domain.UpdateUpToDate}, updateCheckButton, "检查更新", false},
-		{"downloading can be checked", domain.UpdateState{Status: domain.UpdateDownloading}, updateCheckButton, "检查更新", false},
-		{"ready restarts", domain.UpdateState{Status: domain.UpdateReady}, updateRestartButton, "重启并更新", true},
-		{"failed retries", domain.UpdateState{Status: domain.UpdateFailed}, updateRetryButton, "重试", false},
-		{"unsupported falls back to a check", domain.UpdateState{Status: domain.UpdateUnsupported}, updateCheckButton, "检查更新", false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			kind, label, primary := updateAction(c.state)
-			if kind != c.kind || label != c.label || primary != c.primary {
-				t.Errorf("updateAction(%v) = %v, %q, %v; want %v, %q, %v",
-					c.state.Status, kind, label, primary, c.kind, c.label, c.primary)
 			}
 		})
 	}
@@ -462,59 +313,6 @@ func TestUpdateMenuClickInstallsOffTheMainThread(t *testing.T) {
 	}
 }
 
-// The two buttons behave the same way: pressing them returns immediately and
-// asks the service, which is reported through the service's own state.
-func TestUpdatePressAnswersAtOnce(t *testing.T) {
-	updates := &testUpdates{state: domain.UpdateState{Status: domain.UpdateUpToDate}}
-	state := updateStateWith(t, updates, &testNotifier{supported: true})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		state.pressUpdate(updateCheckButton)
-	}()
-	waitClosed(t, done, "the check button")
-	if err := waitForCalls(t, updates, 1, 0); err != nil {
-		t.Fatal(err)
-	}
-
-	updates.report(domain.UpdateState{Status: domain.UpdateReady, Version: "2.0.0"})
-	done = make(chan struct{})
-	go func() {
-		defer close(done)
-		state.pressUpdate(updateRestartButton)
-	}()
-	waitClosed(t, done, "the restart button")
-	if err := waitForCalls(t, updates, 1, 1); err != nil {
-		t.Fatal(err)
-	}
-
-	// A failed check is retried the same way: the button is a check.
-	updates.report(domain.UpdateState{Status: domain.UpdateFailed, Detail: "x"})
-	state.pressUpdate(updateRetryButton)
-	if err := waitForCalls(t, updates, 2, 1); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// A check that answers with an error has already written the state the row
-// shows; what it must not do is take the goroutine down with it.
-func TestUpdatePressSurvivesAnError(t *testing.T) {
-	updates := &testUpdates{
-		state:      domain.UpdateState{Status: domain.UpdateIdle},
-		checkErr:   domain.ErrUpdateUnavailable,
-		installErr: errors.New("the file is in use"),
-	}
-	state := updateStateWith(t, updates, &testNotifier{supported: true})
-	state.pressUpdate(updateCheckButton)
-	if err := waitForCalls(t, updates, 1, 0); err != nil {
-		t.Fatal(err)
-	}
-	state.pressUpdate(updateRestartButton)
-	if err := waitForCalls(t, updates, 1, 1); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // The notice is shown once per version, not once per frame the state is
 // polled in — and not at all for a version the user has already been told
 // about.
@@ -651,21 +449,6 @@ func TestUpdateNoticeFromTheServiceChange(t *testing.T) {
 	updates.report(domain.UpdateState{Status: domain.UpdateReady, Version: "0.1.0-beta.6"})
 	if got := len(notifier.notices); got != 1 {
 		t.Errorf("the notice was shown %d times, want once", got)
-	}
-}
-
-// Idle is not "checking": a title that has not looked yet draws no row at
-// all, and the only row about a check is the one a running check has.
-func TestUpdateIdleDrawsNoRow(t *testing.T) {
-	updates := &testUpdates{state: domain.UpdateState{Status: domain.UpdateIdle}}
-	state := updateStateWith(t, updates, &testNotifier{supported: true})
-	text, show := updateLine(state.updateState())
-	if show || text != "" {
-		t.Errorf("an idle state said %q and showed %v, want nothing at all", text, show)
-	}
-	updates.report(domain.UpdateState{Status: domain.UpdateChecking})
-	if text, show := updateLine(state.updateState()); !show || text != "正在检查更新…" {
-		t.Errorf("a running check said %q, showed %v; want 正在检查更新…", text, show)
 	}
 }
 

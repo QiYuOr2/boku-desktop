@@ -1528,8 +1528,7 @@ func (s *State) historyButton(c *ui.Context) ui.Element {
 // machine rather than a preference Boku stores: the section asks the platform
 // every frame (autostart.go), so a start the user disabled somewhere else
 // shows as disabled here. The switch is drawn only where the platform can
-// register one, and the line under it says where the start is unregistered
-// from — a switch that appears to work but cannot is worse than no switch.
+// register one; failures remain visible below it.
 func (s *State) generalSection(c *ui.Context, head *ui.Handle) {
 	inset(c, func() {
 		stacked(c, float32(16), func() {
@@ -1593,13 +1592,8 @@ func (s *State) generalSection(c *ui.Context, head *ui.Handle) {
 }
 
 // aboutSection is what the application is: the version, what it was built
-// with, where its files are, and whether there is a newer version of it.
-//
-// The update row is the one live thing on this page. It is not a setting: it
-// is what the update service is doing, read from the service every frame the
-// way the login switch reads the system. A build that cannot update itself
-// shows no row at all, and nor does a page with no service behind it — the
-// section is the same page it was before either exists.
+// with, where its files are, and a button to check whether there is a newer
+// version.
 func (s *State) aboutSection(c *ui.Context, head *ui.Handle) {
 	inset(c, func() {
 		stacked(c, float32(16), func() {
@@ -1616,7 +1610,6 @@ func (s *State) aboutSection(c *ui.Context, head *ui.Handle) {
 						aboutLine(c, "平台", runtime.GOOS+" / "+runtime.GOARCH)
 						aboutLine(c, "构建", runtime.Version())
 						aboutLine(c, "凭据", s.credentialPath())
-						s.updateRow(c)
 					})
 				})
 
@@ -1627,8 +1620,6 @@ func (s *State) aboutSection(c *ui.Context, head *ui.Handle) {
 				s.updateCheckButton(c)
 				ui.Spacer(c)
 			})
-			notice(c, notePlain, "面板与划词翻译都由你配置的服务直接应答；"+
-				"检查更新只向 Boku 的公开 GitHub Release 索要版本信息与更新包。")
 		})
 	})
 }
