@@ -7,6 +7,11 @@
 *.test
 *.exe
 
+# 测试夹具里的快捷方式：开机自启动的 .lnk 读取测试要用一份 Windows 真正
+# 写出来的文件。开发机上常见的全局 gitignore 里有 *.lnk（防止误提交自己
+# 桌面上的快捷方式），这里把测试目录下的那一份显式放回来。
+!/internal/platform/autostart/testdata/*.lnk
+
 # 本地数据库（真实数据库在 mygo.App.Path(mygo.PathUserData) 之下，
 # 测试用 :memory: 或临时目录）
 *.db

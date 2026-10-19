@@ -36,11 +36,15 @@ func agent(t *testing.T) *LaunchAgent {
 // The document is the one launchd reads: a property list with the label, the
 // program and its argument, and the flag that starts it at login.
 func TestLaunchAgentDocument(t *testing.T) {
-	doc, err := agent(t).Document(launcher())
+	// One manager for the whole test: agent(t) makes a temporary directory,
+	// and two calls are two directories. What is checked is the path the
+	// manager itself puts the file at, so it comes from the same value.
+	a := agent(t)
+	doc, err := a.Document(launcher())
 	if err != nil {
 		t.Fatalf("Document failed: %v", err)
 	}
-	if got, want := doc.Key, filepath.Join(agent(t).Dir, "com.boku.app.plist"); got != want {
+	if got, want := doc.Key, filepath.Join(a.Dir, "com.boku.app.plist"); got != want {
 		t.Errorf("the launch agent is %q, want %q", got, want)
 	}
 	// It has to parse as a property list, not just contain the right words.
