@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"github.com/egoist/mygo"
 
 	"boku/internal/domain"
+	"boku/internal/platform/httpc"
 	"boku/internal/update"
 )
 
@@ -43,7 +45,8 @@ const (
 	// updateUserAgent is how Boku asks the feed who it is. GitHub is the one
 	// host this application contacts that is not the user's own service, and it
 	// can say what is asking.
-	updateUserAgent = "Boku"
+	updateUserAgent   = "Boku"
+	githubReleasesURL = "https://api.github.com/repos/QiYuOr2/boku-desktop/releases?per_page=100"
 )
 
 // errFeedMissing says the feed answered 404: no release is published for this
@@ -63,14 +66,68 @@ type mygoUpdater struct {
 	client *http.Client
 }
 
-// Enabled reports whether this build can update itself: one published with an
-// update feed, in a directory the user may write.
-func (u *mygoUpdater) Enabled() bool { return mygo.Updater.Enabled() }
+// Enabled reports whether this build can check the public update channel.
+// Checking is useful to every build, including go run and mygo dev; MyGo's
+// own Enabled additionally answers whether this particular executable can be
+// replaced in place, which only matters when Install is called.
+func (u *mygoUpdater) Enabled() bool { return true }
 
 // Release reads the manifest of this build and turns it into the release the
 // interface shows. It is update.Updater.
 func (u *mygoUpdater) Release(ctx context.Context, current string) (*update.Release, error) {
-	return u.release(ctx, releaseFeed(), current)
+	feed, err := u.latestManifest(ctx, releaseFeed())
+	if err != nil {
+		if errors.Is(err, errFeedMissing) {
+			slog.Info("no release is published for this build yet", "version", current)
+			return nil, nil
+		}
+		return nil, err
+	}
+	return u.release(ctx, feed, current)
+}
+
+// githubRelease is the part of GitHub's release list this application needs.
+// The selected asset is the signed manifest; its archive URL and signature
+// remain inside that manifest, where MyGo verifies them during installation.
+type githubRelease struct {
+	Draft      bool                 `json:"draft"`
+	Prerelease bool                 `json:"prerelease"`
+	Assets     []githubReleaseAsset `json:"assets"`
+}
+
+type githubReleaseAsset struct {
+	Name        string `json:"name"`
+	DownloadURL string `json:"browser_download_url"`
+}
+
+// latestManifest selects the newest published stable release which carries
+// this platform's manifest. If this repository has not made a stable release
+// yet, its newest published prerelease is the update channel instead. GitHub's
+// /releases/latest endpoint deliberately omits prereleases, so it cannot
+// express that fallback.
+func (u *mygoUpdater) latestManifest(ctx context.Context, endpoint string) (string, error) {
+	payload, err := u.get(ctx, endpoint)
+	if err != nil {
+		return "", err
+	}
+	var releases []githubRelease
+	if err := json.Unmarshal(payload, &releases); err != nil {
+		return "", update.BadRelease("releases", "the release list could not be read")
+	}
+	name := "update-" + updateTarget() + ".json"
+	for _, prerelease := range []bool{false, true} {
+		for _, release := range releases {
+			if release.Draft || release.Prerelease != prerelease {
+				continue
+			}
+			for _, asset := range release.Assets {
+				if asset.Name == name && strings.TrimSpace(asset.DownloadURL) != "" {
+					return asset.DownloadURL, nil
+				}
+			}
+		}
+	}
+	return "", errFeedMissing
 }
 
 // release is Release for a feed URL a test can name. A 404 is the answer of a
@@ -182,16 +239,11 @@ type mygoRelauncher struct{}
 // Relaunch posts the quit to the main thread and returns.
 func (mygoRelauncher) Relaunch() { mygo.App.Relaunch() }
 
-// releaseFeed is where this build's update manifest is published: the newest
-// release of the public repository, tagged with the prefix mygo.json names.
-// MyGo compiles the same URL into the binary, and this is the only place the
-// application writes it.
-//
-// A development build never asks it: mygo.Updater.Enabled is false there
-// because the binary carries no feed at all.
+// releaseFeed is the public list of Boku releases. The updater selects a
+// release from it rather than using GitHub's /latest redirect, so a repository
+// containing only prereleases remains a usable update channel.
 func releaseFeed() string {
-	return "https://github.com/QiYuOr2/boku-desktop/releases/latest/download/update-" +
-		updateTarget() + ".json"
+	return githubReleasesURL
 }
 
 // updateTarget names the pair of files `mygo build` publishes for this
@@ -213,10 +265,18 @@ func updateTarget() string {
 // started here: main starts it once the application is ready, because a check
 // belongs after the tray exists.
 func newUpdates(userData, version string) (*update.Service, error) {
+	// MyGo's installer has no transport injection point: it uses
+	// http.DefaultClient when the user chooses "重启并更新". Install the same
+	// proxy-aware transport before MyGo can issue that request, so its archive
+	// download follows the exact rule as the check and verification requests.
+	http.DefaultTransport = httpc.ProxyTransport()
 	svc, err := update.New(update.Options{
-		Current:    version,
-		Dir:        filepath.Join(userData, "updates"),
-		Updater:    &mygoUpdater{client: &http.Client{Timeout: updateCheckTimeout}},
+		Current: version,
+		Dir:     filepath.Join(userData, "updates"),
+		Updater: &mygoUpdater{client: &http.Client{
+			Timeout:   updateCheckTimeout,
+			Transport: httpc.ProxyTransport(),
+		}},
 		Relauncher: mygoRelauncher{},
 	})
 	if err != nil {

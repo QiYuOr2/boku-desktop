@@ -73,7 +73,7 @@ func New(opts Options) *Client {
 		timeout:   opts.Timeout,
 	}
 	if c.http == nil {
-		c.http = &http.Client{Transport: proxyTransport()}
+		c.http = &http.Client{Transport: ProxyTransport()}
 	}
 	if c.userAgent == "" {
 		c.userAgent = "Boku"
@@ -87,14 +87,14 @@ func New(opts Options) *Client {
 	return c
 }
 
-// proxyTransport is the transport a client built here uses: the standard one,
+// ProxyTransport is the transport every Boku HTTP client uses: the standard one,
 // which knows how to dial and how long to wait, with the proxy decision drawn
 // from the environment and then from the machine itself.
 //
 // It is a clone rather than a replacement, so that everything else about it —
 // the dial timeouts, the connection reuse, the TLS settings — stays what the
 // platform's own defaults are.
-func proxyTransport() *http.Transport {
+func ProxyTransport() *http.Transport {
 	standard, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
 		return &http.Transport{Proxy: ProxyFunc()}

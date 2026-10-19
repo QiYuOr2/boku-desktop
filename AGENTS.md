@@ -159,8 +159,9 @@ testdata/       适配器测试用的原始响应样本
 
 ## Network Rules
 
-- 出网行为只写在 `internal/panel/<厂商>` 与 `internal/translate/<后端>`，统一走
-  `internal/platform/httpc`。
+- **所有出网**统一复用 `internal/platform/httpc` 的代理决策：厂商请求走它的 Client；
+  受第三方 API 限制而必须使用标准库 Client 的装配代码也必须使用
+  `httpc.ProxyTransport()`。不得因更新检查、下载或其他非厂商请求绕开系统代理。
 - 每个请求必须有超时与取消；默认超时 10 秒。
 - 响应体读取有上限（默认 1 MiB）。
 - HTTP 错误必须翻译成领域错误，不透传响应体。

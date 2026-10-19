@@ -25,9 +25,7 @@
 设置窗口用来配置每个面板与工具的凭据和行为。
 
 <p align="center">
-  <img src="./docs/images/flyout.png" width="267" alt="悬浮窗：DeepSeek 余额、Codex 额度与剪贴板">
-  <img src="./docs/images/translate.png" width="341" alt="划词翻译卡片：原文、译文与注音">
-  <img src="./docs/images/settings.png" width="352" alt="设置窗口：API Key、划词翻译、剪贴板">
+  <img src="./docs/images/boku-promo-desktop.png" width="960" alt="Boku：个人面板与效率工具，展示余额、划词翻译、剪贴板历史与设置">
 </p>
 
 ## 状态
@@ -60,8 +58,8 @@ v0.1.0，早期开发中，接口和数据结构都可能变。
   「获取辅助功能权限」会让系统把 Boku 列进该列表并弹出授权窗口；开关仍由用户
   在系统设置里打开。未授权时回退到读取剪贴板。开发构建是 ad-hoc 签名，重建后
   系统可能重新询问。
-- 自动更新只在**安装版**上可用：`go run` / `mygo dev` 的构建不带更新源，关于页
-  不会显示更新那一行。点「重启并更新」时会再下载一次更新包。
+- 开发构建与安装版都检查同一个 GitHub Release 通道；点「重启并更新」时会再下载一次
+  更新包。只有 MyGo 允许就地替换的安装位置才能实际安装更新。
 
 ## 构建
 
