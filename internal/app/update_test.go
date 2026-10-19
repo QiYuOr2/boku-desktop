@@ -351,6 +351,12 @@ func TestUpdateDialogState(t *testing.T) {
 			current: "",
 			want:    updateDialogInfo{latest: "未能获取", status: "检查更新失败：网络连接被拒绝。"},
 		},
+		{
+			name:    "unsupported is settled instead of loading forever",
+			state:   domain.UpdateState{Status: domain.UpdateUnsupported},
+			current: "0.1.0",
+			want:    updateDialogInfo{latest: "不可用", status: "当前构建不支持自动更新"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

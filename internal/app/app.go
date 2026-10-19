@@ -156,10 +156,6 @@ type State struct {
 	// Scheduled checks still update the row, but do not interrupt the user with
 	// a dialog of their own.
 	updateCheckDialog bool
-	// updateCheckPending closes the small gap between the click and the update
-	// service publishing UpdateChecking. It makes the dialog acknowledge the
-	// click immediately, rather than briefly showing the previous result.
-	updateCheckPending bool
 	// autostartStatus is what the last press of that switch said, shown under
 	// it. The state itself is not kept here, only the answer to the press.
 	autostartStatus autostartStatus

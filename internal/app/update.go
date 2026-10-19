@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -237,9 +238,6 @@ func (s *State) onUpdateChanged() { s.refresh(s.refreshReadyUpdate) }
 // version that has just become ready.
 func (s *State) refreshReadyUpdate() {
 	state := s.updateState()
-	if s.updateCheckPending && state.Settled() {
-		s.updateCheckPending = false
-	}
 	s.noteReadyUpdate(state)
 }
 
@@ -266,6 +264,12 @@ func (s *State) startUpdateCheck() {
 	}
 	go func() {
 		if err := updates.Check(context.Background()); err != nil {
+			if errors.Is(err, domain.ErrUpdateUnsupported) {
+				// Development and package-managed builds are expected not to
+				// update themselves. The dialog renders that settled state; a
+				// log line would only make normal local development look broken.
+				return
+			}
 			// The service has already written the state this error is about,
 			// and the row says it in words the user can act on. What the row
 			// cannot say is which call it was, and that is the log's.
@@ -407,7 +411,6 @@ func (s *State) openUpdateCheckDialog() {
 		return
 	}
 	s.updateCheckDialog = true
-	s.updateCheckPending = true
 	s.startUpdateCheck()
 }
 
@@ -460,9 +463,6 @@ func updateDialogState(state domain.UpdateState, current string) updateDialogInf
 func (s *State) updateCheckDialogView(c *ui.Context) {
 	ui.Modal(c, &s.updateCheckDialog, func() {
 		state := s.updateState()
-		if s.updateCheckPending && state.Status != domain.UpdateChecking && state.Status != domain.UpdateDownloading {
-			state.Status = domain.UpdateChecking
-		}
 		info := updateDialogState(state, s.version)
 		ui.Column(c).Width(float32(340)).Gap(float32(12)).Children(func() {
 			ui.Text(c, "检查更新").FontSize(sizeTitle).FontWeight(600).TextColor(colorText)
