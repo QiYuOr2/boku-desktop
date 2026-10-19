@@ -232,6 +232,7 @@ func (s *State) settingsView(c *ui.Context) {
 		})
 		footer(c, s.versionLine())
 	})
+	s.updateCheckDialogView(c)
 }
 
 // settingsPageContent draws the sections, one under the other, and then puts

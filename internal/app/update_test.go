@@ -320,6 +320,47 @@ func TestUpdateVersionTrimsTheTag(t *testing.T) {
 	}
 }
 
+func TestUpdateDialogState(t *testing.T) {
+	cases := []struct {
+		name    string
+		state   domain.UpdateState
+		current string
+		want    updateDialogInfo
+	}{
+		{
+			name:    "checking shows a loading latest version",
+			state:   domain.UpdateState{Status: domain.UpdateChecking},
+			current: "v0.1.0",
+			want:    updateDialogInfo{latest: "正在获取", status: "正在获取最新版本…", loading: true},
+		},
+		{
+			name:    "up to date compares with the current version",
+			state:   domain.UpdateState{Status: domain.UpdateUpToDate},
+			current: "v0.1.0",
+			want:    updateDialogInfo{latest: "0.1.0", status: "已是最新版本"},
+		},
+		{
+			name:    "ready names the new version",
+			state:   domain.UpdateState{Status: domain.UpdateReady, Version: "v0.2.0"},
+			current: "0.1.0",
+			want:    updateDialogInfo{latest: "0.2.0", status: "新版本已准备就绪"},
+		},
+		{
+			name:    "failure does not invent a latest version",
+			state:   domain.UpdateState{Status: domain.UpdateFailed, Detail: "网络连接被拒绝。"},
+			current: "",
+			want:    updateDialogInfo{latest: "未能获取", status: "检查更新失败：网络连接被拒绝。"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := updateDialogState(c.state, c.current); got != c.want {
+				t.Errorf("updateDialogState(%+v, %q) = %+v, want %+v", c.state, c.current, got, c.want)
+			}
+		})
+	}
+}
+
 // A State with no update service is a build without one: the row is not
 // drawn, the menu is what it always was, and nothing checks on its own or
 // panics when asked to.

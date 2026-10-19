@@ -235,7 +235,13 @@ func (s *State) onUpdateChanged() { s.refresh(s.refreshReadyUpdate) }
 // refreshReadyUpdate is the half of the update check that runs on the main
 // thread: it reads what the service reports, and shows the notice once for a
 // version that has just become ready.
-func (s *State) refreshReadyUpdate() { s.noteReadyUpdate(s.updateState()) }
+func (s *State) refreshReadyUpdate() {
+	state := s.updateState()
+	if s.updateCheckPending && state.Settled() {
+		s.updateCheckPending = false
+	}
+	s.noteReadyUpdate(state)
+}
 
 // updateState is what the views draw: the service's answer, or a status of
 // its own when there is no service. It is read once per frame and waits for
@@ -389,8 +395,126 @@ func (s *State) updateCheckButton(c *ui.Context) {
 		return
 	}
 	if button := designButton(c, "检查更新", buttonSecondary); button.Clicked() {
-		s.pressUpdate(updateCheckButton)
+		s.openUpdateCheckDialog()
 	}
+}
+
+// openUpdateCheckDialog opens the result of a check before asking for it.
+// Check itself stays asynchronous: a button callback is on the main thread,
+// while the dialog reads the service's state on subsequent frames.
+func (s *State) openUpdateCheckDialog() {
+	if s.updates == nil {
+		return
+	}
+	s.updateCheckDialog = true
+	s.updateCheckPending = true
+	s.startUpdateCheck()
+}
+
+// updateDialogInfo is the small, presentation-only summary in the explicit
+// check dialog. Keeping the words out of the view makes the version mapping
+// testable without testing pixels or a MyGo window.
+type updateDialogInfo struct {
+	latest  string
+	status  string
+	loading bool
+}
+
+func updateDialogState(state domain.UpdateState, current string) updateDialogInfo {
+	current = updateVersion(current)
+	if current == "" {
+		current = "dev"
+	}
+	version := updateVersion(state.Version)
+	switch state.Status {
+	case domain.UpdateChecking:
+		return updateDialogInfo{latest: "正在获取", status: "正在获取最新版本…", loading: true}
+	case domain.UpdateDownloading:
+		if version == "" {
+			version = "正在准备"
+		}
+		return updateDialogInfo{latest: version, status: downloadingLine(state), loading: true}
+	case domain.UpdateUpToDate:
+		return updateDialogInfo{latest: current, status: "已是最新版本"}
+	case domain.UpdateReady:
+		if version == "" {
+			version = "已找到新版本"
+		}
+		return updateDialogInfo{latest: version, status: "新版本已准备就绪"}
+	case domain.UpdateFailed:
+		if state.Detail != "" {
+			return updateDialogInfo{latest: "未能获取", status: "检查更新失败：" + state.Detail}
+		}
+		return updateDialogInfo{latest: "未能获取", status: "检查更新失败"}
+	case domain.UpdateUnsupported:
+		return updateDialogInfo{latest: "不可用", status: "当前构建不支持自动更新"}
+	default:
+		return updateDialogInfo{latest: "尚未获取", status: "等待检查更新"}
+	}
+}
+
+// updateCheckDialogView draws the dialog opened by the About section's
+// "检查更新" button. It is deliberately separate from updateRow: the row is
+// passive status for scheduled checks, whereas this dialog is an answer to a
+// request the user just made.
+func (s *State) updateCheckDialogView(c *ui.Context) {
+	ui.Modal(c, &s.updateCheckDialog, func() {
+		state := s.updateState()
+		if s.updateCheckPending && state.Status != domain.UpdateChecking && state.Status != domain.UpdateDownloading {
+			state.Status = domain.UpdateChecking
+		}
+		info := updateDialogState(state, s.version)
+		ui.Column(c).Width(float32(340)).Gap(float32(12)).Children(func() {
+			ui.Text(c, "检查更新").FontSize(sizeTitle).FontWeight(600).TextColor(colorText)
+			ui.Column(c).FillWidth().
+				Background(colorField).
+				Border(1, colorBorder).
+				Radius(radiusField).
+				Padding(float32(10)).
+				Gap(float32(8)).
+				Children(func() {
+					updateDialogVersionLine(c, "最新版本", info.latest)
+					updateDialogVersionLine(c, "当前版本", updateVersionOrDev(s.version))
+				})
+			ui.Row(c).AlignItems(ui.Center).Gap(float32(8)).Children(func() {
+				if info.loading {
+					ui.Spinner(c)
+				}
+				ui.Text(c, info.status).FontSize(sizeSmall).TextColor(colorTextBody).Wrap()
+			})
+			ui.Row(c).FillWidth().Justify(ui.End).Gap(float32(8)).Children(func() {
+				if state.Status == domain.UpdateReady {
+					if button := designButton(c, "重启并更新", buttonPrimary); button.Clicked() {
+						s.updateCheckDialog = false
+						s.installUpdate()
+					}
+				}
+				if state.Status == domain.UpdateFailed {
+					if button := designButton(c, "重试", buttonSecondary); button.Clicked() {
+						s.startUpdateCheck()
+					}
+				}
+				if button := designButton(c, "关闭", buttonSecondary); button.Clicked() {
+					s.updateCheckDialog = false
+				}
+			})
+		})
+	})
+}
+
+func updateDialogVersionLine(c *ui.Context, label, version string) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
+		ui.Text(c, label).FontSize(sizeSmall).TextColor(colorTextMuted)
+		ui.Spacer(c)
+		ui.Text(c, version).FontSize(sizeSmall).Font("monospace").TextColor(colorText).SingleLine()
+	})
+}
+
+func updateVersionOrDev(version string) string {
+	if version = updateVersion(version); version != "" {
+		return version
+	}
+	return "dev"
 }
 
 // pressUpdate runs one of the row's actions. Every one of them answers at
