@@ -608,8 +608,26 @@ func theme(dark bool) *ui.Theme {
 		base.Focus = p.brand.Alpha(0.60)
 	}
 	base.Radius = radiusField
+	// The family every window's text is drawn in. It names the CJK faces
+	// after the Latin ones on every desktop, so that a Chinese glyph is the
+	// same shape whatever language the system is in: without it the text
+	// system falls back per script, and an English or Japanese Windows picks
+	// a different face than a Chinese one does.
+	base.Font = uiFontFamily
 	return base
 }
+
+// uiFontFamily is the family the application's text is drawn in: the design's
+// own stack, which asks for the Latin faces of the system the way it always
+// did and then names the CJK face before giving up. MyGo takes a
+// comma-separated list and draws each character in the first family that has
+// it, so the reading order below is also the fallback order.
+//
+// The design's stack is the source of this list (docs/ui.md §7); changing it
+// there changes it here.
+const uiFontFamily = "-apple-system, BlinkMacSystemFont, \"Segoe UI\", " +
+	"\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", " +
+	"\"Noto Sans CJK JP\", \"Noto Sans CJK SC\", \"Yu Gothic\", sans-serif"
 
 // useDesign points the frame being built at one appearance of Boku's design:
 // it installs the palette the helpers below read, and the matching theme for

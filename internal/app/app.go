@@ -30,6 +30,7 @@ import (
 	"boku/internal/credential"
 	"boku/internal/domain"
 	"boku/internal/panel"
+	"boku/internal/platform/autostart"
 	"boku/internal/translate"
 )
 
@@ -99,6 +100,12 @@ type Deps struct {
 	// platform implementation; replacing it with one backed by MyGo's own
 	// API (or nil) is the only change that future API needs.
 	PopoverAppearance PopoverAppearance
+	// Autostart is the platform's login start: what "开机自动启动" reads and
+	// writes. It is nil where nothing was injected, and a State without one
+	// draws no switch — a switch that cannot do anything is worse than none.
+	// main injects internal/platform/autostart's platform implementation; a
+	// test injects its own.
+	Autostart autostart.Manager
 }
 
 // State is the whole presentation state. It is read and written on the main
@@ -121,6 +128,14 @@ type State struct {
 	appearanceStore   AppearanceStore
 	applyAppearance   func(AppearanceMode)
 	popoverAppearance PopoverAppearance
+	// autostart is the platform's login start, or nil when there is none to
+	// offer. The settings page's switch is drawn from it every frame, and it
+	// is the only writer: the system's own record is the one truth about
+	// whether Boku starts at login.
+	autostart autostart.Manager
+	// autostartStatus is what the last press of that switch said, shown under
+	// it. The state itself is not kept here, only the answer to the press.
+	autostartStatus autostartStatus
 	// appearanceStatus is what the last attempt to save the theme said,
 	// shown under the control in the settings window.
 	appearanceStatus string
@@ -217,9 +232,6 @@ type State struct {
 	// than a number because a field is built several times per frame, and
 	// what the user has typed is what it has to keep.
 	delayInput string
-	// alwaysOnTop is the general switch: whether the quick window is
-	// created above other windows.
-	alwaysOnTop bool
 	// settingsScroll is how far the settings page is scrolled. The sidebar
 	// owns it: clicking an entry moves it to that section, and reading it is
 	// what tells the sidebar which chapter the user is looking at. It is a
@@ -404,6 +416,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		appearanceStore:   deps.AppearanceStore,
 		applyAppearance:   deps.ApplyAppearance,
 		popoverAppearance: deps.PopoverAppearance,
+		autostart:         deps.Autostart,
 		dark:              appearance.Dark(false),
 		selectionGranted:  true,
 		trayIcon:          trayIcon,

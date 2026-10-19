@@ -150,6 +150,116 @@ func TestWrittenFileIsTheSectionsOwnKeys(t *testing.T) {
 	}
 }
 
+// A key no section owns survives a save. A person may write one by hand, and
+// an older build may have left one behind: changing any other setting must not
+// quietly shrink their file, which is the promise "a missing key keeps its
+// default" makes from the other side.
+func TestAnUnclaimedKeySurvivesASave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	original := `{"version":1,"tools":{"handWritten":"kept","clipboardMonitoring":true}}`
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatalf("write the settings file: %v", err)
+	}
+	section := newTestSection("clipboard")
+	section.value = map[string]any{"clipboardMonitoring": true}
+	store, err := New(path, section)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	if err := store.Load(context.Background()); err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	// The change a user makes is to something else entirely.
+	section.value = map[string]any{"clipboardMonitoring": false}
+	if err := store.Save(context.Background()); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the settings file: %v", err)
+	}
+	var doc document
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("the settings file is not the documented shape: %v", err)
+	}
+	if got := string(doc.Tools["handWritten"]); got != `"kept"` {
+		t.Errorf("handWritten = %s, want it kept as it was: %s", got, data)
+	}
+	// And the setting the user did change is the one that changed.
+	if got := string(doc.Tools["clipboardMonitoring"]); got != "false" {
+		t.Errorf("clipboardMonitoring = %s, want false", got)
+	}
+}
+
+// Update rereads the file and writes it back whole, so it has to keep the
+// unclaimed keys too — it is the path every setting change takes.
+func TestUpdateKeepsAnUnclaimedKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	original := `{"version":1,"tools":{"futureBuildKey":{"nested":[1,2]}}}`
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatalf("write the settings file: %v", err)
+	}
+	section := newTestSection("clipboard")
+	store, err := New(path, section)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	err = store.Update(context.Background(), "clipboard", func() error {
+		section.value = map[string]any{"clipboardMonitoring": true}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the settings file: %v", err)
+	}
+	var doc document
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("the settings file is not the documented shape: %v", err)
+	}
+	if got := string(doc.Tools["futureBuildKey"]); !strings.Contains(got, `"nested"`) {
+		t.Errorf("futureBuildKey = %s, want it kept as it was: %s", got, data)
+	}
+	if got := string(doc.Tools["clipboardMonitoring"]); got != "true" {
+		t.Errorf("clipboardMonitoring = %s, want true", got)
+	}
+}
+
+// A key a section does own is the section's to write: the store does not put
+// the old value back over the new one, or the change would undo itself.
+func TestAClaimedKeyIsWrittenByItsSection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	original := `{"version":1,"tools":{"clipboardMonitoring":true}}`
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatalf("write the settings file: %v", err)
+	}
+	section := newTestSection("clipboard")
+	store, err := New(path, section)
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	err = store.Update(context.Background(), "clipboard", func() error {
+		section.value = map[string]any{"clipboardMonitoring": false}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Update failed: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read the settings file: %v", err)
+	}
+	var doc document
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("the settings file is not the documented shape: %v", err)
+	}
+	if got := string(doc.Tools["clipboardMonitoring"]); got != "false" {
+		t.Errorf("clipboardMonitoring = %s, want the section's false", got)
+	}
+}
+
 // Two features writing one key is a mistake in the assembly, not something to
 // settle silently: whichever won would be decided by the order the sections
 // happened to be registered in.

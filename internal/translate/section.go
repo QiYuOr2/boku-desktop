@@ -110,11 +110,15 @@ func (s *Section) Decode(values map[string]json.RawMessage) error {
 	if err := into(values, keyPinned, &settings.Pinned); err != nil {
 		return err
 	}
-	var delayMs int64
-	if err := into(values, keyCloseDelay, &delayMs); err != nil {
-		return err
-	}
-	if delayMs != 0 {
+	// The delay is read as "does the file name this key", not as "is the
+	// value non-zero": zero is a choice the user can make (MinCloseDelay),
+	// and it means the card closes at once. Reading a present zero as an
+	// absent key put every such user back on the default at the next start.
+	if raw, present := values[keyCloseDelay]; present {
+		var delayMs int64
+		if err := json.Unmarshal(raw, &delayMs); err != nil {
+			return fmt.Errorf("%s: %w", keyCloseDelay, err)
+		}
 		settings.CloseDelay = time.Duration(delayMs) * time.Millisecond
 	}
 	var custom map[string]customDocument

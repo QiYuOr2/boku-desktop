@@ -73,6 +73,11 @@ type Store struct {
 	mu       sync.Mutex
 	sections []Section
 	byName   map[string]Section
+	// unclaimed holds the keys the file had and no section owns, as they were
+	// read: a hand-written key, or one a section dropped since. They are
+	// written back unchanged, so that changing one setting does not shrink a
+	// file the user is editing. The store still does not know what they mean.
+	unclaimed map[string]json.RawMessage
 }
 
 // document is what settings.json holds: the version, and the flat object the
@@ -127,6 +132,14 @@ func (s *Store) Load(ctx context.Context) error {
 	return s.read()
 }
 
+// read loads the file into every section.
+//
+// A decode that fails part-way is the one case where the sections and the file
+// disagree: the sections before the failing one have already taken what the
+// file said, and those after it have not. Telling the caller is all that can be
+// done here — the file itself is not wrong, and the failure is the section's —
+// but a section must be able to make Decode all-or-nothing if it cares, and
+// this is the note that says so.
 func (s *Store) read() error {
 	data, err := os.ReadFile(s.Path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -148,7 +161,40 @@ func (s *Store) read() error {
 			return fmt.Errorf("settings: %s: %s: %w", s.Path, section.Name(), err)
 		}
 	}
+	s.rememberUnclaimed(doc.Tools)
 	return nil
+}
+
+// rememberUnclaimed keeps the keys of the file that no section claims, so that
+// a save puts them back. It has to run after every Decode: what a section owns
+// is only known once every section has read the file.
+func (s *Store) rememberUnclaimed(tools map[string]json.RawMessage) {
+	if len(tools) == 0 {
+		return
+	}
+	claimed := make(map[string]bool, len(tools))
+	for _, section := range s.sections {
+		values, err := section.Encode()
+		if err != nil {
+			// A section that cannot say what it owns leaves the question
+			// open; the write it is about to be part of reports the error.
+			continue
+		}
+		for key := range values {
+			claimed[key] = true
+		}
+	}
+	unclaimed := make(map[string]json.RawMessage)
+	for key, raw := range tools {
+		if !claimed[key] {
+			unclaimed[key] = raw
+		}
+	}
+	if len(unclaimed) == 0 {
+		s.unclaimed = nil
+		return
+	}
+	s.unclaimed = unclaimed
 }
 
 // Update reads the file, hands one section to change, and writes the whole
@@ -213,6 +259,14 @@ func (s *Store) write() error {
 			}
 			tools[key] = raw
 		}
+	}
+	// Keys nobody claims go back as they came. A key a section did claim is
+	// the section's to write, so it is not put back from here.
+	for key, raw := range s.unclaimed {
+		if _, claimed := tools[key]; claimed {
+			continue
+		}
+		tools[key] = raw
 	}
 	doc := document{Version: FileVersion, Tools: tools}
 	data, err := json.MarshalIndent(doc, "", "  ")

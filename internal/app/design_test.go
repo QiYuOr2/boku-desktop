@@ -2,6 +2,7 @@ package app
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -34,4 +35,47 @@ func TestBothPalettesChooseEveryColor(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Both appearances have to name the application's font: it is what keeps a
+// Chinese glyph the same shape whatever language the system is in, and a
+// theme that leaves it empty draws in the framework's per-script fallback.
+// The two themes differ in color, not in type.
+func TestBothAppearancesNameTheApplicationFont(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		if got := theme(dark).Font; got != uiFontFamily {
+			t.Errorf("theme(dark=%v).Font = %q, want %q", dark, got, uiFontFamily)
+		}
+	}
+}
+
+// The family list ends at sans-serif: on a system with none of the named
+// faces a character is drawn in whatever the platform offers rather than
+// being refused. And the CJK face is named before the list ends, which is the
+// whole point of the task.
+func TestUIFontFamilyEndsAtTheSystemFallback(t *testing.T) {
+	families := strings.Split(uiFontFamily, ", ")
+	for i, family := range families {
+		families[i] = strings.Trim(strings.TrimSpace(family), `"`)
+	}
+	if last := families[len(families)-1]; last != "sans-serif" {
+		t.Errorf("the family list ends at %q, want sans-serif", last)
+	}
+	// A CJK face has to be named before the generic fallback: the families
+	// after the generic one are never reached.
+	for _, want := range []string{"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC"} {
+		if !slicesContains(families, want) {
+			t.Errorf("the family list does not name %q: %q", want, families)
+		}
+	}
+}
+
+// slicesContains is a small helper so the test reads as the check it is.
+func slicesContains(list []string, want string) bool {
+	for _, got := range list {
+		if got == want {
+			return true
+		}
+	}
+	return false
 }

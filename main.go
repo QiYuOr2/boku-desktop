@@ -29,6 +29,7 @@ import (
 	"boku/internal/panel"
 	codexpanel "boku/internal/panel/codex"
 	deepseekpanel "boku/internal/panel/deepseek"
+	"boku/internal/platform/autostart"
 	"boku/internal/platform/httpc"
 	"boku/internal/platform/popoverappearance"
 	"boku/internal/platform/selection"
@@ -93,6 +94,13 @@ func main() {
 		popoverAppearance = popoverappearance.New()
 	}
 
+	// Starting at login is the platform's own registration — a Run value on
+	// Windows, a launch agent on macOS — and it is injected rather than
+	// reached for: the settings window knows the switch, and this is the only
+	// line that knows how each desktop keeps it. On a desktop with no such
+	// registration the manager says so, and the switch says so in turn.
+	loginStart := autostart.New()
+
 	// A clipboard reading happening on the poll's goroutine comes back
 	// here, on the main thread. The state does not exist yet when the
 	// service is built, so the callback reads it through a variable that
@@ -131,6 +139,7 @@ func main() {
 			state.SyncAppearance(mygo.Theme.IsDark())
 		},
 		PopoverAppearance: popoverAppearance,
+		Autostart:         loginStart,
 	})
 	if err != nil {
 		log.Fatal(err)

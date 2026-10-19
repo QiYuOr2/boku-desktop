@@ -1521,12 +1521,14 @@ func (s *State) historyButton(c *ui.Context) ui.Element {
 }
 
 // generalSection is the application's own behavior: what it does when it
-// starts, and where its data is.
+// starts, where its data is, and what the platform starts for the user.
 //
-// Two of the three switches are drawn disabled with a line saying why: the
-// application cannot register itself to start on this platform yet, and a
-// switch that looks like a switch but does nothing is worse than one that
-// says it is not there.
+// The last of those is the "开机自动启动" switch, which is a fact about the
+// machine rather than a preference Boku stores: the section asks the platform
+// every frame (autostart.go), so a start the user disabled somewhere else
+// shows as disabled here. The switch is drawn only where the platform can
+// register one, and the line under it says where the start is unregistered
+// from — a switch that appears to work but cannot is worse than no switch.
 func (s *State) generalSection(c *ui.Context, head *ui.Handle) {
 	inset(c, func() {
 		stacked(c, float32(16), func() {
@@ -1554,11 +1556,6 @@ func (s *State) generalSection(c *ui.Context, head *ui.Handle) {
 					}
 				})
 
-				alwaysOnTop := s.alwaysOnTop
-				ui.Checkbox(c, &alwaysOnTop, "始终置顶悬浮窗").
-					FontSize(sizeBody).
-					OnClick(func() { s.setAlwaysOnTop(alwaysOnTop) })
-
 				// The panels that read something of the user's own — today
 				// the Codex quota, which comes from the login the command
 				// line already made — are switches here. What the switch
@@ -1576,11 +1573,7 @@ func (s *State) generalSection(c *ui.Context, head *ui.Handle) {
 					notice(c, notePlain, s.panelStatus)
 				}
 
-				unsupported := false
-				ui.Checkbox(c, &unsupported, "开机自动启动").FontSize(sizeBody).Disabled(true)
-				notice(c, notePlain, "尚未实现：需要平台的自启动注册，会在后续任务里接上。")
-				// ui.Checkbox(c, &unsupported, "启动时最小化到托盘").FontSize(sizeBody).Disabled(true)
-				// notice(c, notePlain, "尚未实现：应用没有主窗口，启动即常驻托盘。")
+				s.autostartSwitch(c)
 			})
 
 			stacked(c, float32(8), func() {
@@ -2211,13 +2204,6 @@ func (s *State) copyVersionInfo() {
 		CopiedAt:    time.Now().UTC(),
 	}
 	s.clipboard.CopyAsync(entry, nil)
-}
-
-// setAlwaysOnTop remembers the preference. The quick window is created again
-// on every open, so the switch takes effect the next time it is shown.
-func (s *State) setAlwaysOnTop(on bool) {
-	s.alwaysOnTop = on
-	s.Refresh()
 }
 
 // setPanelOn flips an optional panel's switch and says what happened, so the

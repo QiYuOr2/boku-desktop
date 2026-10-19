@@ -1,6 +1,8 @@
 package translate
 
 import (
+	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -205,5 +207,65 @@ func TestTheEmptySettingsAnswerWithTheirDefaults(t *testing.T) {
 	if empty.CloseDelayOr() != 0 {
 		t.Errorf("CloseDelayOr of nothing = %s, want no delay: zero is a choice, not a gap",
 			empty.CloseDelayOr())
+	}
+}
+
+// Zero is a choice the user makes when they want the card to go at once, so a
+// file that says zero has to read as zero. It used to read as "the key is not
+// there" — which silently put every such user back on the default at the next
+// start.
+func TestAZeroCloseDelayReadsAsZero(t *testing.T) {
+	section := NewSection()
+	values := map[string]json.RawMessage{
+		keyCloseDelay: json.RawMessage(`0`),
+	}
+	if err := section.Decode(values); err != nil {
+		t.Fatalf("Decode failed: %v", err)
+	}
+	if got := section.Current().CloseDelay; got != 0 {
+		t.Errorf("CloseDelay = %s, want 0: the file said zero", got)
+	}
+}
+
+// And a file that does not mention it keeps the default: the two cases are
+// different, and telling them apart is the whole of the fix.
+func TestAnAbsentCloseDelayKeepsTheDefault(t *testing.T) {
+	section := NewSection()
+	if err := section.Decode(map[string]json.RawMessage{}); err != nil {
+		t.Fatalf("Decode failed: %v", err)
+	}
+	if got := section.Current().CloseDelayOr(); got != DefaultCloseDelay {
+		t.Errorf("CloseDelayOr = %s, want the default %s", got, DefaultCloseDelay)
+	}
+}
+
+// A zero goes out to the file and comes back a zero: what the settings window
+// shows after a restart is what the user chose.
+func TestAZeroCloseDelaySurvivesTheFile(t *testing.T) {
+	section := NewSection()
+	settings := section.Current()
+	settings.CloseDelay = 0
+	section.Set(settings)
+	encoded, err := section.Encode()
+	if err != nil {
+		t.Fatalf("Encode failed: %v", err)
+	}
+	if got, want := fmt.Sprint(encoded[keyCloseDelay]), "0"; got != want {
+		t.Errorf("%s = %s, want %s", keyCloseDelay, got, want)
+	}
+	values := map[string]json.RawMessage{}
+	for key, value := range encoded {
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatalf("marshal %s: %v", key, err)
+		}
+		values[key] = raw
+	}
+	reread := NewSection()
+	if err := reread.Decode(values); err != nil {
+		t.Fatalf("Decode failed: %v", err)
+	}
+	if got := reread.Current().CloseDelay; got != 0 {
+		t.Errorf("after the round trip CloseDelay = %s, want 0", got)
 	}
 }

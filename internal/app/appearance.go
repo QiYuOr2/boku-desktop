@@ -84,15 +84,13 @@ func (a *Appearance) Dark(systemDark bool) bool {
 // does not know follows the desktop: a settings file written by a newer build
 // must not stop this one from starting.
 func (a *Appearance) Decode(values map[string]json.RawMessage) error {
-	raw, present := values[appearanceThemeKey]
-	if !present {
-		return nil
+	if raw, present := values[appearanceThemeKey]; present {
+		var mode string
+		if err := json.Unmarshal(raw, &mode); err != nil {
+			return fmt.Errorf("%s: %w", appearanceThemeKey, err)
+		}
+		a.mode = AppearanceMode(mode).Normalize()
 	}
-	var mode string
-	if err := json.Unmarshal(raw, &mode); err != nil {
-		return fmt.Errorf("%s: %w", appearanceThemeKey, err)
-	}
-	a.mode = AppearanceMode(mode).Normalize()
 	return nil
 }
 
