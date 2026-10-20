@@ -208,6 +208,13 @@ type chatMessage struct {
 	Content any    `json:"content"`
 }
 
+// ImageTimeout bounds one vision request. Recognizing and translating a
+// screenshot routinely takes longer than an ordinary API call; the 10-second
+// default would cut the stream in the middle of the model's answer, and the
+// app would report its own deadline as a network timeout. The screenshot task
+// gives the whole operation two minutes, and this request may use all of it.
+const ImageTimeout = 2 * time.Minute
+
 // ImageOptions is an OpenAI-compatible vision request. Image is PNG bytes;
 // callers never log it or include it in errors.
 type ImageOptions struct {
@@ -221,7 +228,8 @@ type ImageOptions struct {
 	Headers         map[string]string
 	MaxTokens       int
 	DisableThinking bool
-	Timeout         time.Duration
+	// Timeout overrides ImageTimeout for this request; zero uses it.
+	Timeout time.Duration
 }
 
 // chatResponse is as much of the answer as is read: the first choice's
@@ -263,8 +271,12 @@ func TranslateImage(ctx context.Context, opts ImageOptions) (string, error) {
 	if key := strings.TrimSpace(opts.APIKey); key != "" {
 		headers["Authorization"] = "Bearer " + key
 	}
+	timeout := opts.Timeout
+	if timeout <= 0 {
+		timeout = ImageTimeout
+	}
 	var content string
-	result, err := opts.Client.PostJSONStream(ctx, EndpointOf(opts.BaseURL), headers, body, httpc.RequestOptions{Timeout: opts.Timeout}, func(stream io.Reader) error {
+	result, err := opts.Client.PostJSONStream(ctx, EndpointOf(opts.BaseURL), headers, body, httpc.RequestOptions{Timeout: timeout}, func(stream io.Reader) error {
 		var readErr error
 		content, readErr = readSSE(stream)
 		return readErr

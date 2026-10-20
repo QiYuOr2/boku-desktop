@@ -747,6 +747,8 @@ func friendlyError(err error) string {
 		return "服务暂时不可用，请稍后再试。"
 	case errors.Is(err, domain.ErrProviderNotFound):
 		return "找不到这个数据源。"
+	case errors.Is(err, domain.ErrScreenRecordingDenied):
+		return "需要屏幕录制权限才能读取截图。"
 	case errors.As(err, &bad):
 		if bad.Reason != "" {
 			return "服务返回了无法识别的数据：" + bad.Reason

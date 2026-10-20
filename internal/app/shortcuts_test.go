@@ -334,6 +334,29 @@ func TestFriendlyAcceleratorNamesThePlatformsModifier(t *testing.T) {
 	}
 }
 
+// The recorder field writes the same binding more tightly than prose does: no
+// spaces around the plus, so the widest ordinary three-key combination fits
+// beside the screenshot field's clear icon.
+func TestCompactAccelerator(t *testing.T) {
+	cases := []struct {
+		in, goos, want string
+	}{
+		{"Ctrl+Shift+T", "windows", "Ctrl+Shift+T"},
+		{"Shift + Command + T", "darwin", "Shift+Command+T"},
+		{"CmdOrCtrl+Alt+T", "darwin", "Command+Alt+T"},
+		{"CmdOrCtrl+Alt+T", "linux", "Ctrl+Alt+T"},
+		{"Super+Space", "darwin", "Command+Space"},
+		{"Super+Space", "linux", "Super+Space"},
+		{"", "darwin", ""},
+		{"   ", "darwin", ""},
+	}
+	for _, tt := range cases {
+		if got := compactAcceleratorFor(tt.in, tt.goos); got != tt.want {
+			t.Errorf("compactAcceleratorFor(%q, %s) = %q, want %q", tt.in, tt.goos, got, tt.want)
+		}
+	}
+}
+
 // waitForTranslation waits until the translation tool has reached a state,
 // which is how a test waits for work the shortcut started: the answer arrives
 // on the main thread, and a test window has no frame to carry it.

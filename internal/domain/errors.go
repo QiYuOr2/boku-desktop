@@ -39,6 +39,13 @@ var (
 	ErrUnsupportedClipboardFormat = errors.New("unsupported clipboard format")
 	ErrTranslateUnavailable       = errors.New("translation unavailable")
 	ErrImageTranslateUnavailable  = errors.New("image translation unavailable")
+	// ErrScreenRecordingDenied is macOS refusing to read the screen because
+	// the user has not allowed Boku to record it. It is not a translation
+	// failure and not a missing translator: the window sends the user to the
+	// System Settings switch. The capture is checked before pixels are read,
+	// because an unauthorized CoreGraphics read returns black rather than
+	// nothing.
+	ErrScreenRecordingDenied = errors.New("screen recording denied")
 	// ErrTranslateDisabled is the tool switched off, which is not the same
 	// thing as the tool having nowhere to send a text. They are separate
 	// errors because they are separate sentences to the user: "you turned this

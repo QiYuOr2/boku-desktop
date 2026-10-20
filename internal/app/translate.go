@@ -71,6 +71,10 @@ const (
 	translateUnconfigured
 	// translateNoText is a clipboard with nothing to translate in it.
 	translateNoText
+	// translateNeedsScreenRecording is macOS without the permission the
+	// screenshot read needs. It is not a translation failure: the fix is a
+	// switch in System Settings, and the card says where it is.
+	translateNeedsScreenRecording
 	// translateFailed is a translator that failed, with the reason kept.
 	translateFailed
 )
@@ -347,6 +351,8 @@ func translationFailureStatus(err error) translateStatus {
 		return translateUnconfigured
 	case errors.Is(err, domain.ErrInvalidArgument):
 		return translateNoText
+	case errors.Is(err, domain.ErrScreenRecordingDenied):
+		return translateNeedsScreenRecording
 	default:
 		return translateFailed
 	}
