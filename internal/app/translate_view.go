@@ -76,6 +76,8 @@ func (s *State) translateView(c *ui.Context) {
 						cardLine(c)
 						s.translateReadings(c)
 					}
+				case translateQRReady:
+					s.translateQRBlock(c)
 				case translateLoading:
 					s.translateSourceBlock(c)
 					cardLine(c)
@@ -206,6 +208,38 @@ func (s *State) translateTargetBlock(c *ui.Context) {
 		})
 }
 
+// translateQRBlock is the whole card for a QR code: the text the code held.
+//
+// It is one block rather than the translation's two, because a QR code's
+// contents are not a source that became something else — they are the answer
+// itself. The label says that, and the copy action is the only thing the card
+// can do with it.
+func (s *State) translateQRBlock(c *ui.Context) {
+	ui.Column(c).FillWidth().
+		Padding(float32(cardHeadTop), float32(cardEdge), float32(cardBodyEnd), float32(cardEdge)).
+		Children(func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(6)).Children(func() {
+				eyebrow(c, "识别结果")
+				ui.Spacer(c)
+				ui.Row(c).Shrink(0).AlignItems(ui.Center).Children(func() {
+					if s.copiedLabel("source") {
+						notice(c, noteSuccess, "已复制")
+						return
+					}
+					if button := cardIconButton(c, s.copyMark, "复制识别结果"); button.Clicked() {
+						s.copyTranslation("source")
+					}
+				})
+			})
+			ui.Spacer(c).Height(float32(8)).Shrink(0)
+			ui.Text(c, s.translation.source).
+				FontSize(float32(sizeCardTarget)).
+				TextColor(colorBodyInk).
+				Wrap().
+				LineHeight(1.6)
+		})
+}
+
 // translateReadings is the card's third block, under the translation: the row
 // that opens the annotation, and — once it is open — the words that carry
 // something to say.
@@ -324,9 +358,12 @@ func (s *State) translateNoticeBlock(c *ui.Context) {
 					})
 				case translateFailed:
 					notice(c, noteDanger, s.translation.failure)
-					if s.translation.image {
+					switch {
+					case s.translation.qr:
+						notice(c, notePlain, "让二维码完整出现在选区里，再按二维码按钮试一次。")
+					case s.translation.image:
 						notice(c, notePlain, "按截图快捷键重新选取区域。")
-					} else {
+					default:
 						notice(c, notePlain, "选中文本并复制，再按一次快捷键重试。")
 					}
 				default:
@@ -406,6 +443,8 @@ func (s *State) translateFoot(c *ui.Context) {
 // product design does not allow.
 func (s *State) translationOrigin() string {
 	switch s.translation.status {
+	case translateQRReady:
+		return "二维码识别"
 	case translateReady:
 		if s.translation.image {
 			return "AI 图片翻译 · " + s.translation.result.ProviderName
@@ -423,6 +462,9 @@ func (s *State) translationOrigin() string {
 		}
 		return "AI 翻译 · 正在请求"
 	default:
+		if s.translation.qr {
+			return "二维码识别"
+		}
 		if s.translation.image {
 			return "截图翻译"
 		}

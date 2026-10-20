@@ -22,7 +22,7 @@ Desktop 是单个 Go 进程。顶层按**功能**分包：每个功能自己拥�
 
 ```text
 internal/domain            实体、值对象、端口接口、错误码、Clock。零依赖
-internal/kit               纯函数（金额、文本、语言、脱敏）。只依赖 domain
+internal/kit               纯函数（金额、文本、语言、脱敏、二维码解码）。只依赖 domain
 internal/platform          外部世界适配：httpc / sysclip / selection / atomicfile
 internal/contract/<厂商>    厂商身份常量：providerId、凭据 key、申请页
         ↑

@@ -48,10 +48,10 @@ var clipboardSVG []byte
 //go:embed refresh.svg
 var refreshSVG []byte
 
-// The quick window footer's two actions: the way into the settings window and
-// the way out of the application. They are marks rather than words because the
-// footer is one line at the bottom of a card, and two words there read as
-// content while two marks read as what they are.
+// The quick window footer's actions: the two screenshot tools, the way into
+// the settings window and the way out of the application. They are marks
+// rather than words because the footer is one line at the bottom of a card,
+// and words there read as content while marks read as what they are.
 var (
 	//go:embed settings.svg
 	settingsSVG []byte
@@ -59,6 +59,8 @@ var (
 	quitSVG []byte
 	//go:embed screenshot.svg
 	screenshotSVG []byte
+	//go:embed qr.svg
+	qrSVG []byte
 )
 
 // The clipboard history's kind marks: what a recorded copy is drawn as, in
@@ -153,6 +155,9 @@ func Quit() []byte { return quitSVG }
 
 // Screenshot returns the region-capture mark used beside settings.
 func Screenshot() []byte { return screenshotSVG }
+
+// QR returns the mark that starts recognition of a QR code on the screen.
+func QR() []byte { return qrSVG }
 
 // HistoryText returns the mark for a copy that is text.
 func HistoryText() []byte { return historyTextSVG }
