@@ -21,6 +21,9 @@ func TestTheDefaultsAreWhatAFreshInstallationHas(t *testing.T) {
 	if got.AcceleratorOr() != DefaultAccelerator {
 		t.Errorf("shortcut = %q, want %q", got.AcceleratorOr(), DefaultAccelerator)
 	}
+	if got.ScreenshotAcceleratorOr() != DefaultScreenshotAccelerator {
+		t.Errorf("screenshot shortcut = %q, want %q", got.ScreenshotAcceleratorOr(), DefaultScreenshotAccelerator)
+	}
 	if !got.Furigana || !got.LoanwordGloss {
 		t.Error("the Japanese annotations do not start on")
 	}
@@ -29,6 +32,23 @@ func TestTheDefaultsAreWhatAFreshInstallationHas(t *testing.T) {
 	}
 	if got.CloseDelayOr() != DefaultCloseDelay {
 		t.Errorf("close delay = %s, want %s", got.CloseDelayOr(), DefaultCloseDelay)
+	}
+}
+
+func TestScreenshotShortcutMayBeClearedAndPersists(t *testing.T) {
+	section := NewSection()
+	if err := section.Decode(map[string]json.RawMessage{"translateScreenshotAccelerator": json.RawMessage(`""`)}); err != nil {
+		t.Fatal(err)
+	}
+	if got := section.Current().ScreenshotAcceleratorOr(); got != "" {
+		t.Fatalf("shortcut = %q, want cleared", got)
+	}
+	encoded, err := section.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := encoded["translateScreenshotAccelerator"]; got != "" {
+		t.Fatalf("stored = %#v, want empty", got)
 	}
 }
 

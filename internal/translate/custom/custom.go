@@ -12,6 +12,8 @@ package custom
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -33,10 +35,9 @@ const (
 	// It is this feature's own word, and it is only used until the user gives
 	// the service a name of their own.
 	DefaultDisplayName = "自定义"
-	// DefaultModel is the model asked for when the user named none. Every
-	// compatible service has a different catalogue, so this is a guess that
-	// the window shows: a user whose service does not know it changes it in
-	// the settings, and the error names the model the service refused.
+	// DefaultModel preserves existing configuration files written before a
+	// custom service stored its model. New services must name their model in
+	// the settings window.
 	DefaultModel = "gpt-4o-mini"
 	// APIKeyCredential is the name the key is stored under, without the
 	// provider prefix.
@@ -62,7 +63,6 @@ type Translator struct {
 	// window reads it to show the address and the name; a translation uses
 	// whatever is stored at the moment the request is made.
 	settings func() openai.CustomService
-	model    string
 	now      func() time.Time
 }
 
@@ -74,7 +74,6 @@ func New(client *httpc.Client, id string, settings func() openai.CustomService) 
 		client:   client,
 		id:       id,
 		settings: settings,
-		model:    DefaultModel,
 		now:      func() time.Time { return time.Now().UTC() },
 	}
 }
@@ -108,6 +107,7 @@ func (t *Translator) Descriptor() domain.TranslatorDescriptor {
 		Endpoint:             openai.EndpointOf(current.BaseURL),
 		BaseURLSetting:       "custom.baseURL",
 		AllowEmptyCredential: true,
+		SupportsImage:        current.SupportsImage,
 	}
 }
 
@@ -130,9 +130,62 @@ func (t *Translator) current() openai.CustomService {
 	}
 	raw := t.settings()
 	return openai.CustomService{
-		BaseURL:     openai.NormalizeBaseURL(raw.BaseURL),
-		DisplayName: strings.TrimSpace(raw.DisplayName),
+		BaseURL:       openai.NormalizeBaseURL(raw.BaseURL),
+		DisplayName:   strings.TrimSpace(raw.DisplayName),
+		Model:         modelOrDefault(raw.Model),
+		SupportsImage: raw.SupportsImage,
 	}
+}
+
+func modelOrDefault(model string) string {
+	if value := strings.TrimSpace(model); value != "" {
+		return value
+	}
+	// Existing configuration files predate the model field. Keeping their
+	// original default avoids silently breaking a working text service.
+	return DefaultModel
+}
+
+// TranslateImage uses the same model and endpoint as the text translator. It
+// is intentionally available for the capability probe before Descriptor says
+// the service supports images; normal image translation remains gated by that
+// verified descriptor bit.
+func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credentials, image []byte, target domain.Language) (domain.TranslationResult, error) {
+	if len(image) == 0 {
+		return domain.TranslationResult{}, fmt.Errorf("%w: there is no image to translate", domain.ErrInvalidArgument)
+	}
+	if !target.Valid() {
+		target = domain.LangChinese
+	}
+	service := t.current()
+	if service.BaseURL == "" {
+		return domain.TranslationResult{}, fmt.Errorf("%w: custom image translator has no address", domain.ErrInvalidArgument)
+	}
+	content, err := openai.TranslateImage(ctx, openai.ImageOptions{
+		Client: t.client, BaseURL: service.BaseURL, Model: service.Model,
+		APIKey: strings.TrimSpace(creds.Secrets[APIKeyCredential]), Target: target, Image: image,
+		System: `You translate text visible in an image. Return exactly one JSON object and no Markdown: {"sourceLang":"ja","sourceText":"original visible text","targetLang":"zh","translatedText":"translation"}. Use only zh,en,ja,ko,ru,ar for language codes. Preserve line breaks. If no readable text exists, use empty strings.`,
+	})
+	if err != nil {
+		return domain.TranslationResult{}, err
+	}
+	var answer struct {
+		SourceLang     domain.Language `json:"sourceLang"`
+		SourceText     string          `json:"sourceText"`
+		TargetLang     domain.Language `json:"targetLang"`
+		TranslatedText string          `json:"translatedText"`
+	}
+	if err := json.Unmarshal([]byte(content), &answer); err != nil {
+		return domain.TranslationResult{}, fmt.Errorf("%w: image translator did not return the required JSON", domain.ErrProviderBadResponse)
+	}
+	if answer.TargetLang == "" {
+		answer.TargetLang = target
+	}
+	result := domain.TranslationResult{SourceText: strings.TrimSpace(answer.SourceText), TranslatedText: strings.TrimSpace(answer.TranslatedText), SourceLang: answer.SourceLang, TargetLang: answer.TargetLang, ProviderID: t.id, CreatedAt: t.now()}
+	if err := result.Validate(); err != nil {
+		return domain.TranslationResult{}, err
+	}
+	return result, nil
 }
 
 // Translate asks for the translation.
@@ -167,7 +220,7 @@ func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, re
 	content, err := openai.Translate(ctx, openai.Options{
 		Client:  t.client,
 		BaseURL: settings.BaseURL,
-		Model:   t.model,
+		Model:   settings.Model,
 		APIKey:  key,
 		System:  openai.SystemPrompt(source, req.TargetLang, options),
 		Source:  source,
@@ -212,3 +265,4 @@ func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, re
 // ensure the interface is satisfied where it is defined, not at the call
 // site.
 var _ domain.Translator = (*Translator)(nil)
+var _ domain.ImageTranslator = (*Translator)(nil)

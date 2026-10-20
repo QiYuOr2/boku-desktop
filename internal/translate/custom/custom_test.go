@@ -43,6 +43,37 @@ func TestDescriptorFollowsTheSettings(t *testing.T) {
 	}
 }
 
+func TestImageTranslationStreamsAndFollowsVerifiedCapability(t *testing.T) {
+	var streamed bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Stream bool `json:"stream"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		streamed = request.Stream
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"sourceLang\\\":\\\"en\\\",\\\"sourceText\\\":\\\"Hello\\\",\\\"targetLang\\\":\\\"zh\\\",\\\"translatedText\\\":\\\"你好\\\"}\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	settings := openai.CustomService{BaseURL: server.URL, SupportsImage: true}
+	reply := New(httpc.New(httpc.Options{}), "custom", func() openai.CustomService { return settings })
+	result, err := reply.TranslateImage(t.Context(), domain.Credentials{Secrets: map[string]string{}}, []byte{0x89, 'P', 'N', 'G'}, domain.LangChinese)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !streamed {
+		t.Error("image request did not ask for a stream")
+	}
+	if result.SourceText != "Hello" || result.TranslatedText != "你好" {
+		t.Fatalf("result = %+v", result)
+	}
+	if !reply.Descriptor().SupportsImage {
+		t.Error("verified capability is not exposed by the descriptor")
+	}
+}
+
 // An address nobody typed is a configuration problem, and it is named as
 // one before anything is sent.
 func TestTranslateWithoutAnAddress(t *testing.T) {
@@ -109,6 +140,30 @@ func TestTranslateSendsTheKeyWhenThereIsOne(t *testing.T) {
 	}
 	if auth != "Bearer sk-test-0002" {
 		t.Errorf("authorization = %q", auth)
+	}
+}
+
+func TestTranslateUsesTheConfiguredModel(t *testing.T) {
+	var model string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		model = request.Model
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"你好"}}]}`))
+	}))
+	defer server.Close()
+	reply := New(httpc.New(httpc.Options{}), "custom", func() openai.CustomService {
+		return openai.CustomService{BaseURL: server.URL, Model: "vision-model-v3"}
+	})
+	if _, err := reply.Translate(t.Context(), domain.Credentials{}, domain.TranslationRequest{Text: "hello", TargetLang: domain.LangChinese}); err != nil {
+		t.Fatal(err)
+	}
+	if model != "vision-model-v3" {
+		t.Errorf("model = %q, want configured model", model)
 	}
 }
 

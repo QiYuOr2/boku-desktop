@@ -106,10 +106,10 @@ func (n *testNotifier) Notify(id, title, body string, open func()) {
 
 // updateStateWith builds the real presentation state over the given fakes,
 // with an update service attached the way the assembly attaches one.
-func updateStateWith(t *testing.T, updates UpdateService, notifier updateNotifier) *State {
+func updateStateWith(t *testing.T, updates UpdateService, notifier desktopNotifier) *State {
 	t.Helper()
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	state.updateNotifier = notifier
+	state.notifier = notifier
 	state.AttachUpdates(updates)
 	return state
 }
@@ -224,7 +224,7 @@ func TestUpdateDialogState(t *testing.T) {
 func TestUpdateWithoutAService(t *testing.T) {
 	notifier := &testNotifier{supported: true}
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	state.updateNotifier = notifier
+	state.notifier = notifier
 
 	if status := state.updateState().Status; status != domain.UpdateUnsupported {
 		t.Errorf("a state with no service reported %v, want unsupported", status)

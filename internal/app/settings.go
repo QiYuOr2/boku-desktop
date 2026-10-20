@@ -137,12 +137,13 @@ type connectForm struct {
 	keys map[string]string
 	// hasCredential is whether each provider has one.
 	hasCredential map[string]bool
-	// newName and newURL are the service being added, as typed into the
+	// newName, newURL and newModel are the service being added, as typed into the
 	// blank card at the foot of the section. They are not credentials: they
 	// live in the settings file, in the clear, and they are cleared once the
 	// service is added.
-	newName string
-	newURL  string
+	newName  string
+	newURL   string
+	newModel string
 	// busy is the card that is being tested or saved, or empty.
 	busy string
 	// busyNote says what that card is busy with, as the line under it reads.
@@ -175,6 +176,7 @@ type translateCard struct {
 	credentialKey   string
 	needsCredential bool
 	configured      bool
+	supportsImage   bool
 }
 
 // openSettings shows the settings window, creating it the first time.
@@ -634,6 +636,7 @@ func (s *State) newCustomServiceCard(c *ui.Context) {
 				stacked(c, float32(6), func() {
 					s.newServiceNameField(c)
 					s.newServiceURLField(c)
+					s.newServiceModelField(c)
 				})
 				s.newServiceRow(c)
 				s.cardStatusLine(c, translateCard{id: newCustomServiceID})
@@ -776,7 +779,8 @@ func (s *State) clearCardInput(id string) {
 	}
 }
 
-// newServiceNameField and newServiceURLField are the two fields of the card
+// newServiceNameField, newServiceURLField and newServiceModelField are the
+// fields of the card
 // that adds a service. They are not credentials: they are on the window's own
 // face, not masked, and they are stored in the settings file once the service
 // is added.
@@ -794,6 +798,13 @@ func (s *State) newServiceNameField(c *ui.Context) {
 func (s *State) newServiceURLField(c *ui.Context) {
 	field := ui.TextInput(c, &s.form.newURL)
 	field.Placeholder("Base URL  https://api.example.com/v1").Label("Base URL").SingleLine()
+	field.Disabled(s.form.busy != "")
+	fieldFrame(c, field).FillWidth().Font("monospace")
+}
+
+func (s *State) newServiceModelField(c *ui.Context) {
+	field := ui.TextInput(c, &s.form.newModel)
+	field.Placeholder("模型名称，如 gpt-4o-mini").Label("模型名称").SingleLine()
 	field.Disabled(s.form.busy != "")
 	fieldFrame(c, field).FillWidth().Font("monospace")
 }
@@ -886,6 +897,7 @@ func (s *State) deleteCredential(card translateCard) {
 	service := s.translate
 	id, key := card.id, card.credentialKey
 	s.form.busy, s.form.deleteArmed = card.id, ""
+	slog.Info("translator configuration deletion requested", "event", "translator_configuration_deletion_requested", "provider", card.id, "customService", ownService)
 	if ownService {
 		s.form.busyNote = "正在删除这个服务…"
 	} else {
@@ -920,6 +932,11 @@ func (s *State) deleteCredential(card translateCard) {
 			// No window: this state exists only while a test builds the
 			// view, and there is nothing to hand the answer to.
 			return
+		}
+		if err != nil {
+			slog.Warn("translator configuration deletion failed", "event", "translator_configuration_deletion_failed", "provider", id, "error", err)
+		} else {
+			slog.Info("translator configuration deleted", "event", "translator_configuration_deleted", "provider", id, "customService", ownService)
 		}
 		window.Update(func() { s.credentialForgotten(id, err) })
 	}()
@@ -1149,6 +1166,9 @@ func (s *State) providerOption(c *ui.Context, card translateCard, settings trans
 				FontSize(sizeBody).
 				TextColor(chooseTextColor(card.configured)).
 				SingleLine()
+			if card.supportsImage {
+				kindBadge(c, colorSkyTile, colorSkyInk, "支持图片翻译")
+			}
 			ui.Spacer(c)
 			switch {
 			case isFreeTranslator(card.id):
@@ -1282,7 +1302,18 @@ func (s *State) shortcutSwitches(c *ui.Context) {
 				ui.Text(c, "划词后弹出翻译").FontSize(sizeBody).TextColor(colorTextSoft).SingleLine()
 				ui.Text(c, "选中文字后按此键显示浮窗").FontSize(sizeTiny).TextColor(colorTextMuted).SingleLine()
 			})
-			s.shortcutButton(c)
+			s.shortcutButton(c, shortcutText)
+		})
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(12)).Children(func() {
+			ui.Column(c).Grow(1).Children(func() {
+				ui.Text(c, "截图翻译").FontSize(sizeBody).TextColor(colorTextSoft).SingleLine()
+				label := friendlyAccelerator(s.translateSettingsOr().ScreenshotAcceleratorOr())
+				if label == "" {
+					label = "已关闭"
+				}
+				ui.Text(c, "框选屏幕后直接使用 AI 翻译 · "+label).FontSize(sizeTiny).TextColor(colorTextMuted).SingleLine()
+			})
+			s.shortcutButton(c, shortcutScreenshot)
 		})
 
 		// What is bound now, or why nothing is. A registration that failed
@@ -1370,56 +1401,88 @@ func (s *State) RequestSelectionAccess() bool {
 // While it is recording it keeps the keyboard — the framework sends every key
 // of the focused element to HandleInput — so the combination the user presses
 // is read rather than acted on by the window.
-func (s *State) shortcutButton(c *ui.Context) ui.Element {
-	accelerator := s.shortcut.accelerator
-	if accelerator == "" {
+func (s *State) shortcutButton(c *ui.Context, kind shortcutKind) ui.Element {
+	state := s.shortcutStateFor(kind)
+	accelerator := state.accelerator
+	if accelerator == "" && kind == shortcutText {
 		accelerator = s.translateSettingsOr().AcceleratorOr()
 	}
+	if accelerator == "" && kind == shortcutScreenshot {
+		accelerator = s.translateSettingsOr().ScreenshotAcceleratorOr()
+	}
 	label := friendlyAccelerator(accelerator)
-	if s.shortcut.recording {
+	if label == "" {
+		label = "点击录制"
+	}
+	if state.recording {
 		label = "按下组合键…"
 	}
-	button := ui.ButtonBase(c).Label("快捷键 "+friendlyAccelerator(accelerator)).
-		MinWidth(float32(140)).
-		Height(heightControl-4).
-		Padding(0, float32(12)).
-		Radius(radiusField).
-		Border(1, colorBorder).
-		Background(colorSurface).
-		Focusable().
-		Cursor(ui.CursorPointer)
-	switch {
-	case s.shortcut.recording:
-		button.Background(colorBrandTintStrong).Border(1, colorBrand)
-	case button.Hovered() || button.Focused():
-		button.Background(colorHover)
-	}
-	button.Children(func() {
-		text := ui.Text(c, label).
-			FontSize(sizeSmall).
-			Font("monospace").
-			SingleLine()
-		if s.shortcut.recording {
-			text.TextColor(colorBrand)
-		} else {
-			text.TextColor(colorTextSoft)
+	// The recorder always owns the same 140-point column. Screenshot's clear
+	// affordance is layered inside that column, so its presence never shifts the
+	// two shortcut fields off their shared right edge.
+	control := ui.Box(c).
+		Width(float32(140)).
+		Height(heightControl - 4)
+	control.Children(func() {
+		button := ui.ButtonBase(c).Label("快捷键 "+friendlyAccelerator(accelerator)).
+			Absolute().Fill().
+			Padding(0, float32(12)).
+			Radius(radiusField).
+			Border(1, colorBorder).
+			Background(colorSurface).
+			Focusable().
+			Cursor(ui.CursorPointer)
+		switch {
+		case state.recording:
+			button.Background(colorBrandTintStrong).Border(1, colorBrand)
+		case button.Hovered() || button.Focused():
+			button.Background(colorHover)
+		}
+		button.Children(func() {
+			text := ui.Text(c, label).
+				// A tight 10-point monospace label keeps the widest ordinary
+				// three-key combination (for example Ctrl + Shift + T) inside
+				// the same field on every platform.
+				FontSize(sizeTiny).
+				Font("monospace").
+				LetterSpacing(float32(-0.25)).
+				SingleLine()
+			if state.recording {
+				text.TextColor(colorBrand)
+			} else {
+				text.TextColor(colorTextSoft)
+			}
+		})
+		// The keys arrive here only while recording, and only this button takes
+		// them: what is pressed elsewhere in the window is not a binding.
+		button.HandleInput(s.captureShortcut)
+		if state.recording {
+			// The keyboard has to be here for the keys to arrive at all.
+			button.AutoFocus()
+		}
+		if button.Clicked() {
+			if state.recording {
+				s.cancelShortcutCapture()
+			} else {
+				s.beginShortcutCapture(kind)
+			}
+		}
+		if kind == shortcutScreenshot && accelerator != "" {
+			// This is intentionally a child of the same field rather than a sibling
+			// in the settings row: both controls stay aligned, and the X has a clear
+			// association with only this binding.
+			if clear := cardIconButton(c, s.closeMark, "清除截图翻译快捷键").Absolute().Right(float32(2)).Top(shortcutClearTop()); clear.Clicked() {
+				s.clearScreenshotShortcut()
+			}
 		}
 	})
-	// The keys arrive here only while recording, and only this button takes
-	// them: what is pressed elsewhere in the window is not a binding.
-	button.HandleInput(s.captureShortcut)
-	if s.shortcut.recording {
-		// The keyboard has to be here for the keys to arrive at all.
-		button.AutoFocus()
-	}
-	if button.Clicked() {
-		if s.shortcut.recording {
-			s.cancelShortcutCapture()
-		} else {
-			s.beginShortcutCapture()
-		}
-	}
-	return button
+	return control
+}
+
+func shortcutClearTop() float32 {
+	fieldHeight := heightControl - 4
+	iconTarget := sizeCardMark + 2*cardMarkPad
+	return float32((fieldHeight - iconTarget) / 2)
 }
 
 // clipboardSection is the clipboard tool: the two switches, the record range
@@ -1713,6 +1776,7 @@ func (s *State) clipboardStatusLine() string { return s.clipboardStatus }
 // key again, which is why this is one action rather than two: the two states a
 // user can be in are "off, and the key is free" and "on, and the key opens it".
 func (s *State) setTranslationEnabled(enabled bool) {
+	slog.Info("translation enabled setting changed", "event", "translation_enabled_changed", "enabled", enabled)
 	s.saveTranslationSetting("划词翻译已打开。", func(ctx context.Context) error {
 		return s.translate.SetEnabled(ctx, enabled)
 	})
@@ -1721,6 +1785,7 @@ func (s *State) setTranslationEnabled(enabled bool) {
 
 // setTranslationFurigana turns the reading of Japanese kanji on or off.
 func (s *State) setTranslationFurigana(on bool) {
+	slog.Info("furigana setting changed", "event", "translation_furigana_changed", "enabled", on)
 	s.saveTranslationSetting("已更新汉字读音的标注。", func(ctx context.Context) error {
 		return s.translate.SetFurigana(ctx, on)
 	})
@@ -1729,6 +1794,7 @@ func (s *State) setTranslationFurigana(on bool) {
 // setTranslationLoanwordGloss turns the English original of a katakana
 // loanword on or off.
 func (s *State) setTranslationLoanwordGloss(on bool) {
+	slog.Info("loanword gloss setting changed", "event", "translation_loanword_gloss_changed", "enabled", on)
 	s.saveTranslationSetting("已更新外来语原词的标注。", func(ctx context.Context) error {
 		return s.translate.SetLoanwordGloss(ctx, on)
 	})
@@ -1736,6 +1802,7 @@ func (s *State) setTranslationLoanwordGloss(on bool) {
 
 // setTranslationPinned decides whether the window starts pinned.
 func (s *State) setTranslationPinned(pinned bool) {
+	slog.Info("translation default pin setting changed", "event", "translation_default_pin_changed", "pinned", pinned)
 	s.saveTranslationSetting("浮窗行为已保存。", func(ctx context.Context) error {
 		return s.translate.SetPinned(ctx, pinned)
 	})
@@ -1744,6 +1811,7 @@ func (s *State) setTranslationPinned(pinned bool) {
 // setTranslationCloseDelay decides how long the window waits before closing
 // itself.
 func (s *State) setTranslationCloseDelay(delay time.Duration) {
+	slog.Info("translation close delay changed", "event", "translation_close_delay_changed", "delay", delay)
 	s.saveTranslationSetting("关闭延迟已保存。", func(ctx context.Context) error {
 		return s.translate.SetCloseDelay(ctx, delay)
 	})
@@ -1752,6 +1820,7 @@ func (s *State) setTranslationCloseDelay(delay time.Duration) {
 
 // setTranslationProvider chooses the translator to use.
 func (s *State) setTranslationProvider(id string) {
+	slog.Info("translation provider changed", "event", "translation_provider_changed", "provider", id)
 	s.saveTranslationSetting("已改用 "+id+"。", func(ctx context.Context) error {
 		return s.translate.SetProvider(ctx, id)
 	})
@@ -1794,6 +1863,7 @@ func (s *State) translateCards() []translateCard {
 			credentialKey:   view.CredentialKey,
 			needsCredential: view.NeedsCredential,
 			configured:      view.Configured,
+			supportsImage:   view.SupportsImage,
 		})
 	}
 	return cards
@@ -1893,13 +1963,13 @@ func credentialStored(names []string, card translateCard) bool {
 // message that was just set, nor what the user has typed in the other cards.
 func (s *State) reloadCredentialsAfterSave() {
 	status, keys := s.form.status, s.form.keys
-	name, url := s.form.newName, s.form.newURL
+	name, url, model := s.form.newName, s.form.newURL, s.form.newModel
 	s.loadCredentials()
 	s.form.status = status
 	if keys != nil {
 		s.form.keys = keys
 	}
-	s.form.newName, s.form.newURL = name, url
+	s.form.newName, s.form.newURL, s.form.newModel = name, url, model
 }
 
 // testCredential asks a service whether a key works, without storing it. The
@@ -1930,11 +2000,18 @@ func (s *State) testCredential(card translateCard) {
 		override[card.credentialKey] = value
 	}
 	s.form.busy = card.id
+	slog.Info("translator connection test requested", "event", "translator_connection_test_requested", "provider", card.id, "hasCredentialOverride", len(override) > 0)
 	s.form.busyNote = "正在连接 " + card.displayName + "…"
 	s.setCardStatus(card.id, statusNone, "")
 
 	go func() {
+		startedAt := time.Now()
 		err := service.TestTranslator(context.Background(), card.id, override)
+		if err != nil {
+			slog.Warn("translator connection test failed", "event", "translator_connection_test_failed", "provider", card.id, "duration", time.Since(startedAt), "error", err)
+		} else {
+			slog.Info("translator connection test completed", "event", "translator_connection_test_completed", "provider", card.id, "duration", time.Since(startedAt))
+		}
 		window.Update(func() {
 			s.form.busy = ""
 			if err != nil {
@@ -1963,9 +2040,15 @@ func (s *State) addCustomService() {
 		return
 	}
 	name := strings.TrimSpace(s.form.newName)
-	address, _ := translate.CustomSettings{BaseURL: s.form.newURL}.Normalize().BaseURL, name
+	configured := translate.CustomSettings{BaseURL: s.form.newURL, Model: s.form.newModel}.Normalize()
+	address, model := configured.BaseURL, configured.Model
 	if address == "" {
 		s.setCardStatus(newCustomServiceID, statusError, "请先填写 Base URL。")
+		s.Refresh()
+		return
+	}
+	if model == "" {
+		s.setCardStatus(newCustomServiceID, statusError, "请填写模型名称。")
 		s.Refresh()
 		return
 	}
@@ -1975,14 +2058,17 @@ func (s *State) addCustomService() {
 	secrets := s.secretService
 
 	s.form.busy = newCustomServiceID
+	slog.Info("custom translator creation requested", "event", "custom_translator_creation_requested", "hasAPIKey", key != "")
 	s.form.busyNote = "正在添加…"
 	s.setCardStatus(newCustomServiceID, statusNone, "")
 
 	go func() {
+		startedAt := time.Now()
 		ctx := context.Background()
 		id, err := service.AddCustomTranslator(ctx, translate.CustomSettings{
 			BaseURL:     address,
 			DisplayName: name,
+			Model:       model,
 		})
 		if err == nil && key != "" && secrets != nil {
 			err = secrets.Set(ctx, id, "apiKey", key)
@@ -1993,18 +2079,42 @@ func (s *State) addCustomService() {
 				slog.Warn("the new service could not be registered", "error", err)
 			}
 		}
+		// A custom service can point at any OpenAI-compatible gateway. Its model
+		// catalogue does not reliably advertise vision support, so test the
+		// exact endpoint with a tiny image after the key and translator exist.
+		// Failure does not undo the service: it can still be a useful text
+		// translator, and the stored capability remains false.
+		imageSupported := false
+		if err == nil {
+			probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+			imageSupported, _ = service.DetectCustomImageCapability(probeCtx, id)
+			cancel()
+		}
+		if err != nil {
+			slog.Warn("custom translator creation failed", "event", "custom_translator_creation_failed", "duration", time.Since(startedAt), "error", err)
+		} else {
+			slog.Info("custom translator created", "event", "custom_translator_created", "provider", id, "imageSupported", imageSupported, "duration", time.Since(startedAt))
+		}
 		window.Update(func() {
 			s.form.busy = ""
 			if err != nil {
 				s.setCardStatus(newCustomServiceID, statusError, friendlyError(err))
 				return
 			}
-			s.form.newName, s.form.newURL = "", ""
+			s.form.newName, s.form.newURL, s.form.newModel = "", "", ""
 			s.clearCardInput(newCustomServiceID)
 			s.reloadCredentialsAfterSave()
-			s.setCardStatus(id, statusOK, "已添加。")
+			if imageSupported {
+				s.setCardStatus(id, statusOK, "已添加，支持图片翻译。")
+			} else if key != "" {
+				s.setCardStatus(id, statusOK, "已添加，仅支持文本翻译。")
+			} else {
+				s.setCardStatus(id, statusOK, "已添加。")
+			}
 			s.setCardStatus(newCustomServiceID, statusNone, "")
-			s.testCredential(cardOfID(s, id))
+			if key == "" {
+				s.testCredential(cardOfID(s, id))
+			}
 		})
 	}()
 }
@@ -2072,11 +2182,17 @@ func (s *State) saveCredential(card translateCard) {
 	secrets := s.secretService
 	id, credentialKey := card.id, card.credentialKey
 	s.form.busy = card.id
+	slog.Info("translator credential save requested", "event", "translator_credential_save_requested", "provider", card.id, "credentialKey", card.credentialKey)
 	s.form.busyNote = "正在保存…"
 	s.setCardStatus(card.id, statusNone, "")
 
 	go func() {
 		err := secrets.Set(context.Background(), id, credentialKey, key)
+		if err != nil {
+			slog.Warn("translator credential save failed", "event", "translator_credential_save_failed", "provider", id, "credentialKey", credentialKey, "error", err)
+		} else {
+			slog.Info("translator credential saved", "event", "translator_credential_saved", "provider", id, "credentialKey", credentialKey)
+		}
 		window.Update(func() {
 			s.form.busy = ""
 			if err != nil {

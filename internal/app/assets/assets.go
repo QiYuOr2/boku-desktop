@@ -57,6 +57,8 @@ var (
 	settingsSVG []byte
 	//go:embed quit.svg
 	quitSVG []byte
+	//go:embed screenshot.svg
+	screenshotSVG []byte
 )
 
 // The clipboard history's kind marks: what a recorded copy is drawn as, in
@@ -148,6 +150,9 @@ func Settings() []byte { return settingsSVG }
 
 // Quit returns the quit mark as the SVG document it is.
 func Quit() []byte { return quitSVG }
+
+// Screenshot returns the region-capture mark used beside settings.
+func Screenshot() []byte { return screenshotSVG }
 
 // HistoryText returns the mark for a copy that is text.
 func HistoryText() []byte { return historyTextSVG }

@@ -267,6 +267,23 @@ type ClipboardDevice interface {
 	WriteImage(ctx context.Context, png []byte) error
 }
 
+// ClipboardChangeCounter is an optional capability of a platform clipboard.
+// Its value changes whenever another application writes to the clipboard.
+// Consumers use it when the fact that a new copy happened matters even when
+// the bytes happen to equal the previous copy.
+//
+// A zero value means the platform cannot provide a counter.
+type ClipboardChangeCounter interface {
+	ChangeCount() uint32
+}
+
+// ScreenshotDevice opens the platform region picker and returns the PNG the
+// user selected. It belongs to the platform boundary; the translation feature
+// only ever receives transient bytes.
+type ScreenshotDevice interface {
+	Capture(ctx context.Context) ([]byte, error)
+}
+
 // ErrClipboardChanged reports content that changed while it was being read,
 // so the reading is dropped rather than recorded half-way.
 var ErrClipboardChanged = errors.New("clipboard changed while reading")

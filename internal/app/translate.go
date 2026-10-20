@@ -78,7 +78,13 @@ const (
 // translationState is the window's state, on the main thread with the rest of
 // the view state.
 type translationState struct {
-	status translateStatus
+	status  translateStatus
+	image   bool
+	preview *ui.Bitmap
+	// imageTaskID is non-zero only for a screenshot task. It lets a completed
+	// background task update the card that is already showing that task without
+	// reopening a card the user closed.
+	imageTaskID uint64
 	// source is what was translated; result is what came back.
 	source string
 	result translate.Result
@@ -149,6 +155,8 @@ func (s *State) startTranslation(at mygo.Point) {
 	if s.translate == nil {
 		return
 	}
+	startedAt := time.Now()
+	slog.Info("translation requested", "event", "text_translation_requested", "source", "shortcut")
 	// A second press while the card is open is a second translation: what
 	// the user copied may have changed, and the card is about what they
 	// just selected.
@@ -180,6 +188,7 @@ func (s *State) startTranslation(at mygo.Point) {
 		s.onMain(func() {
 			switch {
 			case err == nil:
+				slog.Info("translation completed", "event", "text_translation_completed", "provider", result.ProviderID, "sourceChars", len([]rune(text)), "duration", time.Since(startedAt))
 				// What the source is drawn from is the segments when there
 				// are any: the window shows the pieces the translator
 				// annotated, so that a reading sits over the word it
@@ -195,7 +204,7 @@ func (s *State) startTranslation(at mygo.Point) {
 			default:
 				// The card shows the user a shortened reason; the error
 				// itself is the one that says which way it failed.
-				slog.Warn("the translation failed", "error", err)
+				slog.Warn("the translation failed", "event", "text_translation_failed", "sourceChars", len([]rune(text)), "duration", time.Since(startedAt), "error", err)
 				s.translation = translationState{
 					status:  translationFailureStatus(err),
 					result:  translate.Result{},
@@ -212,10 +221,67 @@ func (s *State) startTranslation(at mygo.Point) {
 	}()
 }
 
+// startScreenshotTranslation starts native region selection away from the UI
+// thread, then sends only the transient PNG to the selected image translator.
+// Both the flyout button and the global shortcut enter through this function.
+func (s *State) startScreenshotTranslation() {
+	requestedAt := s.cursorPoint()
+	if s.translate == nil || s.screenshot == nil {
+		return
+	}
+	startedAt := time.Now()
+	slog.Info("screenshot translation requested", "event", "screenshot_translation_requested")
+	settings, err := s.translate.Settings()
+	if err != nil {
+		s.showTranslation(requestedAt, translationState{status: translateFailed, failure: friendlyError(err)})
+		return
+	}
+	service, capture := s.translate, s.screenshot
+	go func() {
+		captureCtx, cancelCapture := context.WithTimeout(context.Background(), screenshotCaptureTimeout)
+		image, err := capture.Capture(captureCtx)
+		cancelCapture()
+		var preview *ui.Bitmap
+		if err == nil {
+			slog.Info("screenshot captured", "event", "screenshot_capture_completed", "imageBytes", len(image), "duration", time.Since(startedAt))
+			preview, err = ui.DecodeBitmap(image)
+		}
+		if err == nil {
+			// The user has finished choosing a region. Only now does the card
+			// appear. Its anchor is read on the main thread after the selection,
+			// rather than at the time the button or shortcut launched the picker.
+			// The task keeps running after that card is closed.
+			s.onMain(func() {
+				anchor := s.cursorPoint()
+				id, ok := s.startImageTranslationTask(service, image, preview, settings.Pinned)
+				if !ok {
+					s.showTranslation(anchor, translationState{status: translateFailed, image: true, preview: preview, failure: "已有两个图片翻译任务正在进行，请稍后再试。", pinned: settings.Pinned})
+					return
+				}
+				s.showImageTranslationTask(id, anchor)
+			})
+			return
+		}
+		// Esc, a click without a usable rectangle, and replacing an in-flight
+		// picker are normal ways out of the app-owned selection UI. They are
+		// not translation failures and should leave no card behind.
+		if errors.Is(err, context.Canceled) {
+			slog.Info("screenshot capture cancelled", "event", "screenshot_capture_cancelled", "duration", time.Since(startedAt))
+			return
+		}
+		slog.Warn("screenshot capture failed", "event", "screenshot_capture_failed", "duration", time.Since(startedAt), "error", err)
+		s.onMain(func() {
+			s.showTranslation(requestedAt, translationState{status: translationFailureStatus(err), image: true, failure: friendlyError(err), pinned: settings.Pinned})
+		})
+	}()
+}
+
 // onMain runs a piece of work that changes the view state on the thread that
-// owns it: through the window when there is one — that is what asks for the
-// frame which shows the change — and here and now when there is not, which is
-// how the state a translation reaches can be tested without a window.
+// owns it: through an existing window when there is one — that is what asks
+// for the frame which shows the change — or through Application.WhenReady
+// when all windows are closed. The latter is essential for screenshot tasks:
+// their image can arrive after the tray flyout was dismissed, but creating a
+// translation card still has to happen on the UI thread.
 //
 // A caller is a goroutine, so the update body may touch the state only inside
 // this call.
@@ -224,6 +290,25 @@ func (s *State) onMain(update func()) {
 		window.Update(update)
 		return
 	}
+	if s.panel != nil {
+		s.panel.Update(update)
+		return
+	}
+	if s.settingsWindow != nil {
+		s.settingsWindow.Update(update)
+		return
+	}
+	if s.historyWindow != nil {
+		s.historyWindow.Update(update)
+		return
+	}
+	if s.app != nil {
+		s.app.WhenReady(update)
+		return
+	}
+	// A small state constructed by a unit test has no running application.
+	// Running synchronously is then the only meaningful way to exercise the
+	// state transition, and is never a production-thread escape hatch.
 	update()
 }
 
@@ -231,6 +316,17 @@ func (s *State) onMain(update func()) {
 // its own, shorter timeout; this is the ceiling for everything around it,
 // including the clipboard read.
 const translationTimeout = 20 * time.Second
+
+const (
+	// screenshotCaptureTimeout bounds an abandoned Boku region selector.
+	screenshotCaptureTimeout = 45 * time.Second
+	// screenshotTranslationTimeout is deliberately independent of capture.
+	// Vision endpoints expose no task/progress API, so an open HTTP request
+	// cannot prove whether a model is queued, reasoning, or stuck. Two minutes
+	// is a user-cancellable upper bound for a background task, not a claim of
+	// server-side progress.
+	screenshotTranslationTimeout = 2 * time.Minute
+)
 
 // translationFailureStatus maps an error to what the card shows. The four
 // answers the tool has are different things to the user, and each one is a
@@ -283,6 +379,7 @@ func (s *State) showTranslationInactive(at mygo.Point, state translationState) {
 			func() {
 				if s.translateWindow == window {
 					s.translateWindow = nil
+					s.translationVisible = false
 				}
 				s.cancelTranslationClose()
 			},
@@ -299,6 +396,7 @@ func (s *State) showTranslationInactive(at mygo.Point, state translationState) {
 	s.placeTranslation(window, at)
 	s.fitTranslationWindow()
 	window.ShowInactive()
+	s.translationVisible = true
 }
 
 // focusTranslation gives the card the keyboard: it is the second half of
@@ -663,6 +761,7 @@ func (s *State) cancelTranslationClose() {
 func (s *State) closeTranslation() {
 	s.cancelTranslationClose()
 	s.endCardDrag()
+	s.translationVisible = false
 	if s.translateWindow != nil {
 		s.translateWindow.Hide()
 	}
@@ -672,6 +771,12 @@ func (s *State) closeTranslation() {
 // frame that draws the pin in its new state.
 func (s *State) toggleTranslationPin() {
 	s.translation.pinned = !s.translation.pinned
+	slog.Info("translation card pin changed", "event", "translation_card_pin_changed", "pinned", s.translation.pinned, "image", s.translation.image)
+	if s.translation.imageTaskID != 0 {
+		if task := s.imageTranslationTask(s.translation.imageTaskID); task != nil {
+			task.pinned = s.translation.pinned
+		}
+	}
 	if s.translation.pinned {
 		s.cancelTranslationClose()
 	}
@@ -918,6 +1023,7 @@ func (s *State) copyTranslation(which string) {
 	if strings.TrimSpace(value) == "" {
 		return
 	}
+	slog.Info("translation copied", "event", "translation_copied", "part", which, "image", s.translation.image, "chars", len([]rune(value)))
 	s.translation.copied = which
 	s.translation.copiedAt = time.Now()
 	window := s.translateWindow

@@ -12,10 +12,14 @@
 package openai
 
 import (
+	"bufio"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
+	"time"
 
 	"boku/internal/domain"
 	"boku/internal/kit"
@@ -68,6 +72,10 @@ type CustomService struct {
 	// DisplayName is what the user calls the service. Empty means the
 	// interface uses its own word for it.
 	DisplayName string
+	// Model is the OpenAI-compatible model name to ask.
+	Model string
+	// SupportsImage is a verified capability stored by the translation feature.
+	SupportsImage bool
 }
 
 // NormalizeBaseURL turns what a user typed into an address the application
@@ -187,15 +195,33 @@ func EndpointOf(baseURL string) string {
 // OpenAI-compatible service understands are sent: a service built on the
 // same protocol is not always built on the same extras.
 type chatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []chatMessage `json:"messages"`
-	Temperature float64       `json:"temperature"`
-	Stream      bool          `json:"stream"`
+	Model              string         `json:"model"`
+	Messages           []chatMessage  `json:"messages"`
+	Temperature        float64        `json:"temperature"`
+	Stream             bool           `json:"stream"`
+	MaxTokens          int            `json:"max_tokens,omitempty"`
+	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs,omitempty"`
 }
 
 type chatMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
+}
+
+// ImageOptions is an OpenAI-compatible vision request. Image is PNG bytes;
+// callers never log it or include it in errors.
+type ImageOptions struct {
+	Client                         *httpc.Client
+	BaseURL, Model, APIKey, System string
+	Target                         domain.Language
+	Image                          []byte
+	// Headers, MaxTokens and DisableThinking are only supplied when a
+	// particular OpenAI-compatible service documents them. They remain empty
+	// for generic endpoints so we do not send vendor extensions by default.
+	Headers         map[string]string
+	MaxTokens       int
+	DisableThinking bool
+	Timeout         time.Duration
 }
 
 // chatResponse is as much of the answer as is read: the first choice's
@@ -206,6 +232,99 @@ type chatResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+}
+
+// TranslateImage sends one image as a data URL in the standard multimodal chat
+// shape and reads its SSE response as it arrives. The final model output still
+// has to be the required JSON envelope; streaming only reduces time-to-first
+// output and never turns partial model text into a translation.
+func TranslateImage(ctx context.Context, opts ImageOptions) (string, error) {
+	if opts.Client == nil || len(opts.Image) == 0 || strings.TrimSpace(opts.Model) == "" || EndpointOf(opts.BaseURL) == "" {
+		return "", fmt.Errorf("%w: incomplete image translation request", domain.ErrInvalidArgument)
+	}
+	request := chatRequest{Model: strings.TrimSpace(opts.Model), Messages: []chatMessage{
+		{Role: "system", Content: opts.System},
+		{Role: "user", Content: []map[string]any{
+			{"type": "text", "text": "Read and translate this image according to the system instruction."},
+			{"type": "image_url", "image_url": map[string]string{"url": "data:image/png;base64," + base64.StdEncoding.EncodeToString(opts.Image)}},
+		}},
+	}, Temperature: 0, Stream: true, MaxTokens: opts.MaxTokens}
+	if opts.DisableThinking {
+		request.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
+	}
+	body, err := json.Marshal(request)
+	if err != nil {
+		return "", fmt.Errorf("chat: encode image request: %w", err)
+	}
+	headers := make(map[string]string, len(opts.Headers)+1)
+	for name, value := range opts.Headers {
+		headers[name] = value
+	}
+	if key := strings.TrimSpace(opts.APIKey); key != "" {
+		headers["Authorization"] = "Bearer " + key
+	}
+	var content string
+	result, err := opts.Client.PostJSONStream(ctx, EndpointOf(opts.BaseURL), headers, body, httpc.RequestOptions{Timeout: opts.Timeout}, func(stream io.Reader) error {
+		var readErr error
+		content, readErr = readSSE(stream)
+		return readErr
+	})
+	if err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(chatResponse{Choices: []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	}{{Message: struct {
+		Content string `json:"content"`
+	}{Content: content}}}})
+	if err != nil {
+		return "", fmt.Errorf("chat: encode stream response: %w", err)
+	}
+	result.Payload = payload
+	return readAnswer(result, opts.Target)
+}
+
+// readSSE accumulates OpenAI-compatible chat-completion deltas. A completed
+// stream ends with [DONE]; accepting an EOF before that would make a network
+// truncation look like a finished translation.
+func readSSE(stream io.Reader) (string, error) {
+	scanner := bufio.NewScanner(stream)
+	scanner.Buffer(make([]byte, 8*1024), httpc.DefaultMaxBytes)
+	var answer strings.Builder
+	done := false
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" {
+			done = true
+			continue
+		}
+		var event struct {
+			Choices []struct {
+				Delta struct {
+					Content string `json:"content"`
+				} `json:"delta"`
+			} `json:"choices"`
+		}
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			return "", fmt.Errorf("%w: image stream contains an invalid event", domain.ErrProviderBadResponse)
+		}
+		for _, choice := range event.Choices {
+			answer.WriteString(choice.Delta.Content)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("%w: image stream stopped before completion", domain.ErrProviderTimeout)
+	}
+	if !done {
+		return "", fmt.Errorf("%w: image stream ended without completion", domain.ErrProviderBadResponse)
+	}
+	return answer.String(), nil
 }
 
 // Translate makes the request and reads the answer out of it.

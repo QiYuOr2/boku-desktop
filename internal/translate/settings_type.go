@@ -45,6 +45,8 @@ type Settings struct {
 	// "CmdOrCtrl+Shift+T". Changing it is a later task; it is stored now so
 	// that the file is where the answer lives.
 	Accelerator string
+	// ScreenshotAccelerator starts native region capture. Empty disables it.
+	ScreenshotAccelerator string
 	// Provider names the translator to use, by the id it is registered under.
 	// A name no translator answers to is replaced by the default.
 	Provider string
@@ -85,6 +87,11 @@ type CustomSettings struct {
 	// DisplayName is what the user calls the service. Empty means the
 	// interface uses its own word for it.
 	DisplayName string
+	// Model is the OpenAI-compatible model name selected by the user.
+	Model string
+	// SupportsImage is set only after Boku successfully completes a real
+	// multimodal request against this service. Missing means not yet verified.
+	SupportsImage bool
 }
 
 // CustomServiceIDs returns the ids of the user's own services, sorted, which is
@@ -151,7 +158,8 @@ const (
 	// Command on macOS, Ctrl on Windows and Linux. Writing "Ctrl" here would
 	// bind Control+Shift+T on macOS, which is not the combination a Mac user
 	// means.
-	DefaultAccelerator = "CmdOrCtrl+Shift+T"
+	DefaultAccelerator           = "CmdOrCtrl+Shift+T"
+	DefaultScreenshotAccelerator = "CmdOrCtrl+Alt+T"
 	// MinCloseDelay and MaxCloseDelay bound the wait before the window closes
 	// itself. Zero is allowed and means "at once": a user who wants the
 	// window gone when they look away can say so.
@@ -172,12 +180,13 @@ const (
 // window unpinned and closing soon after it loses the keyboard.
 func Defaults() Settings {
 	return Settings{
-		Enabled:       true,
-		Accelerator:   DefaultAccelerator,
-		Provider:      DefaultProvider,
-		Furigana:      true,
-		LoanwordGloss: true,
-		CloseDelay:    DefaultCloseDelay,
+		Enabled:               true,
+		Accelerator:           DefaultAccelerator,
+		ScreenshotAccelerator: DefaultScreenshotAccelerator,
+		Provider:              DefaultProvider,
+		Furigana:              true,
+		LoanwordGloss:         true,
+		CloseDelay:            DefaultCloseDelay,
 	}.Normalize()
 }
 
@@ -221,6 +230,7 @@ func (s Settings) Normalize() Settings {
 func (c CustomSettings) Normalize() CustomSettings {
 	c.BaseURL = NormalizeBaseURL(c.BaseURL)
 	c.DisplayName = strings.TrimSpace(c.DisplayName)
+	c.Model = strings.TrimSpace(c.Model)
 	if runes := []rune(c.DisplayName); len(runes) > MaxNameChars {
 		c.DisplayName = strings.TrimSpace(string(runes[:MaxNameChars]))
 	}
@@ -277,6 +287,10 @@ func (s Settings) AcceleratorOr() string {
 	}
 	return s.Accelerator
 }
+
+// ScreenshotAcceleratorOr returns the capture shortcut. Empty is meaningful:
+// the user explicitly cleared it.
+func (s Settings) ScreenshotAcceleratorOr() string { return strings.TrimSpace(s.ScreenshotAccelerator) }
 
 // NormalizeBaseURL turns what a user typed into an address the application
 // will ask, or into nothing.

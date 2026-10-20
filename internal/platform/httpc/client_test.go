@@ -163,6 +163,22 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
+func TestPostJSONWithOptionsUsesOnlyTheRequestDeadline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(60 * time.Millisecond)
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer server.Close()
+
+	client := New(Options{HTTPClient: server.Client(), Timeout: 20 * time.Millisecond})
+	if _, err := client.PostJSONWithOptions(context.Background(), server.URL, nil, []byte(`{}`), RequestOptions{Timeout: 150 * time.Millisecond}); err != nil {
+		t.Fatalf("request-specific deadline was not used: %v", err)
+	}
+	if _, err := client.PostJSON(context.Background(), server.URL, nil, []byte(`{}`)); !errors.Is(err, domain.ErrProviderTimeout) {
+		t.Errorf("ordinary request = %v, want ErrProviderTimeout", err)
+	}
+}
+
 func TestCanceledContext(t *testing.T) {
 	release := make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
