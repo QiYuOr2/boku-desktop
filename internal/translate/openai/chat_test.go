@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"boku/internal/domain"
 	"boku/internal/platform/httpc"
@@ -579,5 +580,53 @@ func TestTranslateHonoursCancellation(t *testing.T) {
 	}
 	if !errors.Is(err, domain.ErrProviderTimeout) && !errors.Is(err, context.Canceled) {
 		t.Errorf("a cancelled request = %v", err)
+	}
+}
+
+// A screenshot is read and translated in one model turn, which takes longer
+// than an ordinary API call. The image request must not be cut off by the HTTP
+// client's 10-second default: otherwise the stream stops mid-answer and the
+// app reports its own deadline as a network timeout.
+func TestImageRequestIsNotCappedByTheOrdinaryTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"sourceLang\\\":\\\"en\\\",\\\"sourceText\\\":\\\"Hello\\\",\\\"targetLang\\\":\\\"zh\\\",\\\"translatedText\\\":\\\"你好\\\"}\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	// A client whose ordinary requests would give up long before the answer.
+	client := httpc.New(httpc.Options{Timeout: 20 * time.Millisecond})
+	if _, err := TranslateImage(context.Background(), ImageOptions{
+		Client:  client,
+		BaseURL: server.URL,
+		Model:   "vision",
+		Image:   []byte{0x89, 'P', 'N', 'G'},
+		System:  "translate",
+		Target:  domain.LangChinese,
+	}); err != nil {
+		t.Fatalf("the image request used the client's ordinary timeout: %v", err)
+	}
+}
+
+// A caller that needs a narrower deadline can still ask for one.
+func TestImageRequestHonoursANarrowerTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	_, err := TranslateImage(context.Background(), ImageOptions{
+		Client:  httpc.New(httpc.Options{}),
+		BaseURL: server.URL,
+		Model:   "vision",
+		Image:   []byte{0x89, 'P', 'N', 'G'},
+		System:  "translate",
+		Target:  domain.LangChinese,
+		Timeout: 20 * time.Millisecond,
+	})
+	if !errors.Is(err, domain.ErrProviderTimeout) {
+		t.Fatalf("a narrower image timeout = %v, want ErrProviderTimeout", err)
 	}
 }

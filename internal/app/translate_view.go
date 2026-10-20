@@ -58,7 +58,10 @@ func (s *State) translateView(c *ui.Context) {
 			// once it needs more room than that.
 			body := ui.Scroll(c).FillWidth().Grow(1)
 			body.Children(func() {
-				if s.translation.image {
+				// Only when there is an image: a failure before the capture
+				// (no Screen Recording permission) has none, and an empty
+				// preview box with the screenshot badge would say otherwise.
+				if s.translation.preview != nil {
 					s.imageTranslationPreview(c)
 				}
 				switch s.translation.status {
@@ -310,9 +313,22 @@ func (s *State) translateNoticeBlock(c *ui.Context) {
 				case translateNoText:
 					notice(c, noteWarning, "剪贴板里没有可翻译的文本。")
 					notice(c, notePlain, "选中文本并复制，再按一次快捷键。")
+				case translateNeedsScreenRecording:
+					notice(c, noteWarning, s.translation.failure)
+					notice(c, notePlain, "在「系统设置 > 隐私与安全性 > 屏幕与系统音频录制」里允许 Boku（没有就用 + 添加），再重试；系统要求时重启 Boku。")
+					ui.Spacer(c).Height(float32(4)).Shrink(0)
+					ui.Row(c).Children(func() {
+						if cardButton(c, "打开系统设置", buttonSecondary).Clicked() {
+							s.openScreenRecordingSettings()
+						}
+					})
 				case translateFailed:
 					notice(c, noteDanger, s.translation.failure)
-					notice(c, notePlain, "选中文本并复制，再按一次快捷键重试。")
+					if s.translation.image {
+						notice(c, notePlain, "按截图快捷键重新选取区域。")
+					} else {
+						notice(c, notePlain, "选中文本并复制，再按一次快捷键重试。")
+					}
 				default:
 					notice(c, notePlain, "选中文本并复制，再按快捷键。")
 				}
@@ -407,6 +423,9 @@ func (s *State) translationOrigin() string {
 		}
 		return "AI 翻译 · 正在请求"
 	default:
+		if s.translation.image {
+			return "截图翻译"
+		}
 		return "划词翻译"
 	}
 }

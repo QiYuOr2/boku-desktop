@@ -1410,7 +1410,10 @@ func (s *State) shortcutButton(c *ui.Context, kind shortcutKind) ui.Element {
 	if accelerator == "" && kind == shortcutScreenshot {
 		accelerator = s.translateSettingsOr().ScreenshotAcceleratorOr()
 	}
-	label := friendlyAccelerator(accelerator)
+	// The field shows the binding without the spaces the sentence under the
+	// row uses: the two keys of a macOS binding plus their plus signs are
+	// wider than the field once the clear icon has its room.
+	label := compactAccelerator(accelerator)
 	if label == "" {
 		label = "点击录制"
 	}
@@ -1423,10 +1426,19 @@ func (s *State) shortcutButton(c *ui.Context, kind shortcutKind) ui.Element {
 	control := ui.Box(c).
 		Width(float32(140)).
 		Height(heightControl - 4)
+	// The clear icon's 22-point target sits 2 points in from the field's right
+	// edge, and its mark starts 4 points further in. Reserve that column in the
+	// label's padding: without it the last letter of "Shift+Command+T" is drawn
+	// under the X, and the widest ordinary three-key binding
+	// ("Command+Control+T") would lose its last letter to the ellipsis.
+	labelPad := float32(12)
+	if kind == shortcutScreenshot && accelerator != "" {
+		labelPad = 24
+	}
 	control.Children(func() {
 		button := ui.ButtonBase(c).Label("快捷键 "+friendlyAccelerator(accelerator)).
 			Absolute().Fill().
-			Padding(0, float32(12)).
+			Padding(0, labelPad, 0, 12).
 			Radius(radiusField).
 			Border(1, colorBorder).
 			Background(colorSurface).
@@ -1440,9 +1452,9 @@ func (s *State) shortcutButton(c *ui.Context, kind shortcutKind) ui.Element {
 		}
 		button.Children(func() {
 			text := ui.Text(c, label).
-				// A tight 10-point monospace label keeps the widest ordinary
-				// three-key combination (for example Ctrl + Shift + T) inside
-				// the same field on every platform.
+				// A tight 10-point monospace label, written without spaces,
+				// keeps the widest ordinary three-key combination (for example
+				// Command+Control+T) inside the same field on every platform.
 				FontSize(sizeTiny).
 				Font("monospace").
 				LetterSpacing(float32(-0.25)).

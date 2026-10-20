@@ -355,7 +355,8 @@ type State struct {
 }
 
 // RegionCapture is the narrow platform boundary behind the app-owned region
-// picker. The rectangle is in physical virtual-desktop pixels.
+// picker. The rectangle is in the coordinate space the platform's reader
+// takes: screen points on macOS, physical virtual-desktop pixels on Windows.
 type RegionCapture interface {
 	Capture(context.Context, image.Rectangle) ([]byte, error)
 }
@@ -545,6 +546,7 @@ func (s *State) Setup() error {
 	s.tray = tray
 	s.logTrayBounds()
 	s.RefreshSelectionAccess()
+	requestScreenRecording()
 	if runtime.GOOS == "linux" {
 		// An AppIndicator can only show a menu and reports no clicks, so
 		// the menu is what opens the panel there.

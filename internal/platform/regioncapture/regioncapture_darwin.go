@@ -11,6 +11,9 @@ import (
 	"unsafe"
 
 	"github.com/ebitengine/purego"
+
+	"boku/internal/domain"
+	"boku/internal/platform/screenrecording"
 )
 
 // CoreGraphics is used directly instead of the screencapture command.  That
@@ -58,6 +61,12 @@ func (*Device) Capture(ctx context.Context, rect image.Rectangle) ([]byte, error
 	}
 	if rect.Dx() <= 0 || rect.Dy() <= 0 {
 		return nil, fmt.Errorf("region capture: empty rectangle")
+	}
+	// An unauthorized CGWindowListCreateImage does not fail: it returns black
+	// pixels, which would be sent to the translator as if they were the
+	// selection. Refuse before reading anything.
+	if !screenrecording.Granted() {
+		return nil, fmt.Errorf("%w: macOS has not allowed Boku to record the screen", domain.ErrScreenRecordingDenied)
 	}
 	// kCGWindowListOptionOnScreenOnly, kCGNullWindowID,
 	// kCGWindowImageDefault. CoreGraphics returns nil when Screen Recording

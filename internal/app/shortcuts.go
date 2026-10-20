@@ -528,9 +528,15 @@ func friendlyAccelerator(accelerator string) string {
 // friendlyAcceleratorFor is friendlyAccelerator with the platform passed in,
 // so that both spellings can be tested on one machine.
 func friendlyAcceleratorFor(accelerator, goos string) string {
+	return strings.Join(acceleratorParts(accelerator, goos), " + ")
+}
+
+// acceleratorParts resolves a binding into the names the platform gives its
+// modifiers and the key, in the order they were written.
+func acceleratorParts(accelerator, goos string) []string {
 	trimmed := strings.TrimSpace(accelerator)
 	if trimmed == "" {
-		return ""
+		return nil
 	}
 	parts := strings.Split(trimmed, "+")
 	for index, part := range parts {
@@ -548,7 +554,22 @@ func friendlyAcceleratorFor(accelerator, goos string) string {
 		}
 		parts[index] = part
 	}
-	return strings.Join(parts, " + ")
+	return parts
+}
+
+// compactAccelerator writes a binding for the recorder field: the same names
+// the sentence below uses, with no spaces around the plus. The field is 140
+// points wide and has to show the longest ordinary three-key combination
+// beside the clear icon of the screenshot binding — "Command + Control + T"
+// does not fit, "Command+Control+T" does. The long spelling still belongs to
+// prose (friendlyAccelerator) and to what assistive technology reads.
+func compactAccelerator(accelerator string) string {
+	return compactAcceleratorFor(accelerator, runtime.GOOS)
+}
+
+// compactAcceleratorFor is compactAccelerator with the platform passed in.
+func compactAcceleratorFor(accelerator, goos string) string {
+	return strings.Join(acceleratorParts(accelerator, goos), "+")
 }
 
 // shortcutPlatformNote is what the settings window says about the platform:
