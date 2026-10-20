@@ -83,6 +83,16 @@ func TestTheEnginesCarryTheirOwnIdentity(t *testing.T) {
 	}
 }
 
+func TestBilibiliDoesNotAdvertiseImageTranslation(t *testing.T) {
+	bilibili := NewBilibili(httpc.New(httpc.Options{}))
+	if bilibili.Descriptor().SupportsImage {
+		t.Error("Bilibili must not advertise image support")
+	}
+	if _, ok := any(bilibili).(domain.ImageTranslator); ok {
+		t.Error("Bilibili must not implement image translation")
+	}
+}
+
 // The names are the design's own: the settings page draws them as the two free
 // options, and they have to be what the user recognises.
 func TestTheEnginesAreNamedAsTheSettingsPageDrawsThem(t *testing.T) {

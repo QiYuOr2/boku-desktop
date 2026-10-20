@@ -22,14 +22,15 @@ import (
 // §8 of the storage design documents and a person may edit, so they are spelled
 // once, here, and never derived from a Go field name.
 const (
-	keyEnabled        = "translateEnabled"
-	keyAccelerator    = "translateAccelerator"
-	keyProvider       = "translateProvider"
-	keyFurigana       = "translateFurigana"
-	keyLoanwordGloss  = "translateLoanwordGloss"
-	keyPinned         = "translatePinned"
-	keyCloseDelay     = "translateCloseDelayMs"
-	keyCustomServices = "translators"
+	keyEnabled               = "translateEnabled"
+	keyAccelerator           = "translateAccelerator"
+	keyScreenshotAccelerator = "translateScreenshotAccelerator"
+	keyProvider              = "translateProvider"
+	keyFurigana              = "translateFurigana"
+	keyLoanwordGloss         = "translateLoanwordGloss"
+	keyPinned                = "translatePinned"
+	keyCloseDelay            = "translateCloseDelayMs"
+	keyCustomServices        = "translators"
 )
 
 // sectionName is what errors call this feature's settings.
@@ -59,8 +60,10 @@ type StoreSettings interface {
 
 // customDocument is what the file holds for a user-configured translator.
 type customDocument struct {
-	BaseURL     string `json:"baseURL,omitempty"`
-	DisplayName string `json:"displayName,omitempty"`
+	BaseURL       string `json:"baseURL,omitempty"`
+	DisplayName   string `json:"displayName,omitempty"`
+	Model         string `json:"model,omitempty"`
+	SupportsImage bool   `json:"supportsImage,omitempty"`
 }
 
 // Section is this feature's settings as the store sees them: a name, a way to
@@ -98,6 +101,9 @@ func (s *Section) Decode(values map[string]json.RawMessage) error {
 	if err := into(values, keyAccelerator, &settings.Accelerator); err != nil {
 		return err
 	}
+	if err := into(values, keyScreenshotAccelerator, &settings.ScreenshotAccelerator); err != nil {
+		return err
+	}
 	if err := into(values, keyProvider, &settings.Provider); err != nil {
 		return err
 	}
@@ -130,7 +136,7 @@ func (s *Section) Decode(values map[string]json.RawMessage) error {
 	// nothing to ask, and a row the user cannot use is a row in the way.
 	services := make(map[string]CustomSettings, len(custom))
 	for id, own := range custom {
-		cleaned := CustomSettings{BaseURL: own.BaseURL, DisplayName: own.DisplayName}.Normalize()
+		cleaned := CustomSettings{BaseURL: own.BaseURL, DisplayName: own.DisplayName, Model: own.Model, SupportsImage: own.SupportsImage}.Normalize()
 		if cleaned.BaseURL == "" {
 			continue
 		}
@@ -148,18 +154,21 @@ func (s *Section) Encode() (map[string]any, error) {
 	services := make(map[string]customDocument, len(settings.Custom))
 	for id, service := range settings.Custom {
 		services[id] = customDocument{
-			BaseURL:     service.BaseURL,
-			DisplayName: service.DisplayName,
+			BaseURL:       service.BaseURL,
+			DisplayName:   service.DisplayName,
+			Model:         service.Model,
+			SupportsImage: service.SupportsImage,
 		}
 	}
 	return map[string]any{
-		keyEnabled:       settings.Enabled,
-		keyAccelerator:   settings.AcceleratorOr(),
-		keyProvider:      settings.ProviderOr(),
-		keyFurigana:      settings.Furigana,
-		keyLoanwordGloss: settings.LoanwordGloss,
-		keyPinned:        settings.Pinned,
-		keyCloseDelay:    settings.CloseDelayOr().Milliseconds(),
+		keyEnabled:               settings.Enabled,
+		keyAccelerator:           settings.AcceleratorOr(),
+		keyScreenshotAccelerator: settings.ScreenshotAcceleratorOr(),
+		keyProvider:              settings.ProviderOr(),
+		keyFurigana:              settings.Furigana,
+		keyLoanwordGloss:         settings.LoanwordGloss,
+		keyPinned:                settings.Pinned,
+		keyCloseDelay:            settings.CloseDelayOr().Milliseconds(),
 		// The map is written even when it holds nothing worth keeping: its
 		// presence is what tells a reader that this build wrote the file, and
 		// therefore that an absent key inside it is a choice rather than a

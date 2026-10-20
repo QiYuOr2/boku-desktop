@@ -78,8 +78,10 @@ func (o *ownServices) register(id string) error {
 	return o.registry.Register(customtranslator.New(o.client, id, func() openai.CustomService {
 		service, _ := settings.Current().CustomService(id)
 		return openai.CustomService{
-			BaseURL:     service.BaseURL,
-			DisplayName: service.DisplayName,
+			BaseURL:       service.BaseURL,
+			DisplayName:   service.DisplayName,
+			Model:         service.Model,
+			SupportsImage: service.SupportsImage,
 		}
 	}))
 }

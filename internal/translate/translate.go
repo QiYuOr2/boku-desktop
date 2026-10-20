@@ -1,9 +1,13 @@
 package translate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/png"
 	"strings"
 	"time"
 
@@ -141,7 +145,8 @@ type TranslatorView struct {
 	// NeedsCredential is false for a translator that works without a key.
 	NeedsCredential bool
 	// Configured is whether what the translator needs is there now.
-	Configured bool
+	Configured    bool
+	SupportsImage bool
 }
 
 // Settings returns the translation configuration as it stands.
@@ -195,6 +200,11 @@ func (t *Translate) SetAccelerator(ctx context.Context, accelerator string) erro
 		return fmt.Errorf("%w: the shortcut is empty", domain.ErrInvalidArgument)
 	}
 	return t.SaveSettings(ctx, func(s *Settings) { s.Accelerator = trimmed })
+}
+
+// SetScreenshotAccelerator permits an empty shortcut, which means disabled.
+func (t *Translate) SetScreenshotAccelerator(ctx context.Context, accelerator string) error {
+	return t.SaveSettings(ctx, func(s *Settings) { s.ScreenshotAccelerator = strings.TrimSpace(accelerator) })
 }
 
 // SetProvider chooses the translator to use. An id no translator answers to
@@ -274,6 +284,79 @@ func (t *Translate) SetCustomTranslator(ctx context.Context, id string, settings
 	})
 }
 
+// DetectCustomImageCapability makes one small, real multimodal request to a
+// newly configured custom service and remembers only its boolean outcome. API
+// model catalogues do not describe vision support consistently, so a successful
+// request is the only capability signal the product can trust.
+func (t *Translate) DetectCustomImageCapability(ctx context.Context, id string) (bool, error) {
+	if !IsCustomService(id) {
+		return false, fmt.Errorf("%w: %s is not one of the user's own services", domain.ErrInvalidArgument, id)
+	}
+	reply, err := t.translators.Translator(id)
+	if err != nil {
+		return false, err
+	}
+	descriptor := reply.Descriptor()
+	imageReply, ok := reply.(domain.ImageTranslator)
+	if !ok {
+		return false, nil
+	}
+	creds, err := t.credentials(ctx, descriptor)
+	if err != nil {
+		return false, err
+	}
+	_, err = imageReply.TranslateImage(ctx, creds, imageCapabilityProbePNG(), domain.LangChinese)
+	supported := err == nil
+	if saveErr := t.SaveSettings(ctx, func(s *Settings) {
+		service, exists := s.Custom[id]
+		if !exists {
+			return
+		}
+		service.SupportsImage = supported
+		s.Custom[id] = service
+	}); saveErr != nil {
+		return false, saveErr
+	}
+	return supported, err
+}
+
+// imageCapabilityProbePNG renders a small, high-contrast A so that a model
+// which really received the image has readable source text to return. It is
+// generated in memory for each probe and is never logged or saved.
+func imageCapabilityProbePNG() []byte {
+	const scale = 8
+	pattern := []string{
+		"01110",
+		"10001",
+		"10001",
+		"11111",
+		"10001",
+		"10001",
+		"10001",
+	}
+	canvas := image.NewRGBA(image.Rect(0, 0, len(pattern[0])*scale, len(pattern)*scale))
+	for y := 0; y < canvas.Bounds().Dy(); y++ {
+		for x := 0; x < canvas.Bounds().Dx(); x++ {
+			canvas.Set(x, y, color.White)
+		}
+	}
+	for y, row := range pattern {
+		for x, bit := range row {
+			if bit != '1' {
+				continue
+			}
+			for dy := 0; dy < scale; dy++ {
+				for dx := 0; dx < scale; dx++ {
+					canvas.Set(x*scale+dx, y*scale+dy, color.Black)
+				}
+			}
+		}
+	}
+	var encoded bytes.Buffer
+	_ = png.Encode(&encoded, canvas)
+	return encoded.Bytes()
+}
+
 // RemoveCustomTranslator forgets one of the user's own services.
 //
 // The translator setting is left alone: if the service being removed was the
@@ -309,6 +392,7 @@ func (t *Translate) Providers(ctx context.Context) ([]TranslatorView, error) {
 			DocsURL:         descriptor.DocsURL,
 			Endpoint:        descriptor.Endpoint,
 			NeedsCredential: !descriptor.AllowEmptyCredential && len(descriptor.CredentialKeys) > 0,
+			SupportsImage:   descriptor.SupportsImage,
 		}
 		if len(descriptor.CredentialKeys) > 0 {
 			view.CredentialKey = descriptor.CredentialKeys[0]
@@ -334,6 +418,46 @@ func (t *Translate) Providers(ctx context.Context) ([]TranslatorView, error) {
 	// its place became the thing under the cursor. A list of choices must stay
 	// where it is while the user is choosing.
 	return views, nil
+}
+
+// TranslateImage asks the selected image-capable translator directly. The
+// provider receives the picture and returns source text and translation in one
+// response; Boku never performs or stores OCR locally.
+func (t *Translate) TranslateImage(ctx context.Context, image []byte) (Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if len(image) == 0 {
+		return Result{}, fmt.Errorf("%w: no image to translate", domain.ErrInvalidArgument)
+	}
+	settings, err := t.Settings()
+	if err != nil {
+		return Result{}, err
+	}
+	if !settings.Enabled {
+		return Result{}, fmt.Errorf("%w: 图片翻译已关闭", domain.ErrTranslateDisabled)
+	}
+	reply, err := t.translators.Translator(settings.ProviderOr())
+	if err != nil {
+		return Result{}, fmt.Errorf("%w: 找不到当前翻译服务", domain.ErrTranslateUnavailable)
+	}
+	descriptor := reply.Descriptor()
+	imageReply, ok := reply.(domain.ImageTranslator)
+	if !ok || !descriptor.SupportsImage {
+		return Result{}, fmt.Errorf("%w: %s 不支持图片翻译", domain.ErrImageTranslateUnavailable, descriptor.DisplayName)
+	}
+	creds, err := t.credentials(ctx, descriptor)
+	if err != nil {
+		return Result{}, err
+	}
+	translation, err := imageReply.TranslateImage(ctx, creds, image, domain.LangChinese)
+	if err != nil {
+		return Result{}, err
+	}
+	if err := translation.Validate(); err != nil {
+		return Result{}, err
+	}
+	return Result{SourceText: translation.SourceText, TranslatedText: translation.TranslatedText, SourceLang: translation.SourceLang, TargetLang: translation.TargetLang, ProviderID: descriptor.ID, ProviderName: descriptor.DisplayName, Note: translation.Note, At: translation.CreatedAt}, nil
 }
 
 // credentialStored reports whether what a translator asked for is in the

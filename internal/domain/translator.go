@@ -221,6 +221,9 @@ type TranslatorDescriptor struct {
 	// AllowEmptyCredential is set by a translator that works without one:
 	// a local service the user runs themselves.
 	AllowEmptyCredential bool
+	// SupportsImage says this translator can return both recognized text and
+	// its translation from an image.
+	SupportsImage bool
 }
 
 // Validate reports what is missing from the descriptor. The assembly checks
@@ -277,6 +280,12 @@ type Translator interface {
 	ID() string
 	Descriptor() TranslatorDescriptor
 	Translate(ctx context.Context, creds Credentials, req TranslationRequest) (TranslationResult, error)
+}
+
+// ImageTranslator is an optional extension for translators that accept image
+// bytes directly. The feature intentionally does no local OCR.
+type ImageTranslator interface {
+	TranslateImage(ctx context.Context, creds Credentials, image []byte, target Language) (TranslationResult, error)
 }
 
 // TranslatorRegistry is a use case's view of the registered translators: it

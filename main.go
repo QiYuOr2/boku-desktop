@@ -32,6 +32,7 @@ import (
 	"boku/internal/platform/autostart"
 	"boku/internal/platform/httpc"
 	"boku/internal/platform/popoverappearance"
+	"boku/internal/platform/regioncapture"
 	"boku/internal/platform/selection"
 	clipboarddevice "boku/internal/platform/sysclip"
 	"boku/internal/settings"
@@ -128,10 +129,11 @@ func main() {
 	})
 
 	state, err = app.New(mygo.App, app.Deps{
-		Panels:    panels,
-		Secrets:   secrets,
-		Clipboard: clipboard,
-		Translate: translate,
+		Panels:        panels,
+		Secrets:       secrets,
+		Clipboard:     clipboard,
+		Translate:     translate,
+		RegionCapture: regioncapture.New(),
 		// What the settings window calls after the user adds a service of
 		// their own: the translator for it has to exist before the next
 		// translation asks one.

@@ -8,6 +8,8 @@ package deepseek
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -26,18 +28,22 @@ const (
 	// defaultBaseURL is DeepSeek's own endpoint. Nothing guesses a
 	// service's address.
 	defaultBaseURL = "https://api.deepseek.com"
-	// defaultModel is the model the tool asks. A model name is a service's
+	// defaultModel is the text model the tool asks. A model name is a service's
 	// own detail and it moves; it is written here so that a change is one
 	// line in one file.
 	defaultModel = "deepseek-chat"
+	// imageModel is DeepSeek's current multimodal OpenAI-compatible model.
+	// deepseek-chat accepts text only, so image requests must name this model.
+	imageModel = "deepseek-flash"
 )
 
 // Translator asks DeepSeek to translate.
 type Translator struct {
-	client  *httpc.Client
-	baseURL string
-	model   string
-	now     func() time.Time
+	client     *httpc.Client
+	baseURL    string
+	model      string
+	imageModel string
+	now        func() time.Time
 }
 
 // New returns the translator, talking to DeepSeek itself.
@@ -49,10 +55,11 @@ func New(client *httpc.Client) *Translator {
 // use it to point at an httptest server.
 func NewWithBaseURL(client *httpc.Client, baseURL string) *Translator {
 	return &Translator{
-		client:  client,
-		baseURL: strings.TrimRight(baseURL, "/"),
-		model:   defaultModel,
-		now:     func() time.Time { return time.Now().UTC() },
+		client:     client,
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		model:      defaultModel,
+		imageModel: imageModel,
+		now:        func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -69,7 +76,60 @@ func (t *Translator) Descriptor() domain.TranslatorDescriptor {
 		CredentialKeys: []string{contract.APIKeyCredential},
 		DocsURL:        contract.DocsURL,
 		Endpoint:       openai.EndpointOf(t.baseURL),
+		SupportsImage:  true,
 	}
+}
+
+// TranslateImage asks DeepSeek's multimodal model to recognize and translate
+// visible text in one request. The image stays in memory and is never passed
+// through local OCR or persisted.
+func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credentials, image []byte, target domain.Language) (domain.TranslationResult, error) {
+	if len(image) == 0 {
+		return domain.TranslationResult{}, fmt.Errorf("%w: there is no image to translate", domain.ErrInvalidArgument)
+	}
+	if !target.Valid() {
+		target = domain.LangChinese
+	}
+	key, err := creds.Secret(contract.APIKeyCredential)
+	if err != nil {
+		return domain.TranslationResult{}, err
+	}
+	content, err := openai.TranslateImage(ctx, openai.ImageOptions{
+		Client:  t.client,
+		BaseURL: t.baseURL,
+		Model:   t.imageModel,
+		APIKey:  key,
+		Target:  target,
+		Image:   image,
+		System:  `You translate text visible in an image. Return exactly one JSON object and no Markdown: {"sourceLang":"ja","sourceText":"original visible text","targetLang":"zh","translatedText":"translation"}. Use only zh,en,ja,ko,ru,ar for language codes. Preserve line breaks. If no readable text exists, use empty strings.`,
+	})
+	if err != nil {
+		return domain.TranslationResult{}, err
+	}
+	var answer struct {
+		SourceLang     domain.Language `json:"sourceLang"`
+		SourceText     string          `json:"sourceText"`
+		TargetLang     domain.Language `json:"targetLang"`
+		TranslatedText string          `json:"translatedText"`
+	}
+	if err := json.Unmarshal([]byte(content), &answer); err != nil {
+		return domain.TranslationResult{}, fmt.Errorf("%w: image translator did not return the required JSON", domain.ErrProviderBadResponse)
+	}
+	if answer.TargetLang == "" {
+		answer.TargetLang = target
+	}
+	result := domain.TranslationResult{
+		SourceText:     strings.TrimSpace(answer.SourceText),
+		TranslatedText: strings.TrimSpace(answer.TranslatedText),
+		SourceLang:     answer.SourceLang,
+		TargetLang:     answer.TargetLang,
+		ProviderID:     ProviderID,
+		CreatedAt:      t.now(),
+	}
+	if err := result.Validate(); err != nil {
+		return domain.TranslationResult{}, err
+	}
+	return result, nil
 }
 
 // Translate asks for the translation.
@@ -153,3 +213,4 @@ func (t *Translator) translate(ctx context.Context, key string, req domain.Trans
 // ensure the interface is satisfied where it is defined, not at the call
 // site.
 var _ domain.Translator = (*Translator)(nil)
+var _ domain.ImageTranslator = (*Translator)(nil)

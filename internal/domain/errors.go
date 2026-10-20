@@ -38,6 +38,7 @@ var (
 	ErrInvalidMagnetURI           = errors.New("invalid magnet uri")
 	ErrUnsupportedClipboardFormat = errors.New("unsupported clipboard format")
 	ErrTranslateUnavailable       = errors.New("translation unavailable")
+	ErrImageTranslateUnavailable  = errors.New("image translation unavailable")
 	// ErrTranslateDisabled is the tool switched off, which is not the same
 	// thing as the tool having nowhere to send a text. They are separate
 	// errors because they are separate sentences to the user: "you turned this

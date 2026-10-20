@@ -15,6 +15,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"image"
 	"log"
 	"log/slog"
 	"os"
@@ -50,6 +51,10 @@ const (
 	// clipboard line under it and the footer. A section with more in it
 	// scrolls rather than pushing the lines off the window.
 	panelHeight = 380
+	// quickTaskRowHeight is the reserved vertical room for one image task in
+	// the tray flyout. The actual rows are content-driven; this conservative
+	// estimate lets the flyout grow before its scroll body needs to scroll.
+	quickTaskRowHeight = 52
 	// trayIconSize is the icon in device pixels: 16 points on a Retina
 	// display, which MyGo scales to the screen's density on Windows and
 	// Linux.
@@ -69,6 +74,12 @@ type Deps struct {
 	// Translate is the selection-translation tool. A State without one
 	// draws no translation window and binds no shortcut for it.
 	Translate *translate.Translate
+	// Screenshot opens the platform region selector and returns the chosen PNG.
+	Screenshot domain.ScreenshotDevice
+	// RegionCapture reads physical desktop pixels. When present, the app
+	// supplies its own cross-platform selection overlay and does not invoke a
+	// system screenshot UI or use the clipboard.
+	RegionCapture RegionCapture
 	// RegisterOwnServices registers a translator for every service the user
 	// runs themselves. The window calls it after the user adds one: a service
 	// the settings hold but the registry does not know is a row that cannot
@@ -124,6 +135,9 @@ type State struct {
 	secretService *credential.Secrets
 	clipboard     *clipboard.Clipboard
 	translate     *translate.Translate
+	screenshot    domain.ScreenshotDevice
+	regionCapture RegionCapture
+	regionSession *regionCaptureSession
 	shortcuts     ShortcutRegistrar
 	version       string
 	quit          func()
@@ -145,10 +159,10 @@ type State struct {
 	// it reports is read from it every frame rather than kept here, so that
 	// an answer arriving while no window is open is not lost.
 	updates UpdateService
-	// updateNotifier puts a notice about a ready update on the desktop. It
-	// is nil until an update service is assembled, which is why the row can
-	// be drawn without one.
-	updateNotifier updateNotifier
+	// notifier puts short, actionable notices on the desktop. Updates and
+	// completed image translations share it so notification behavior stays
+	// consistent across the application.
+	notifier desktopNotifier
 	// updateNotified is the version whose notice has already been shown in
 	// this run, so that a state polled once a frame is announced once.
 	updateNotified string
@@ -188,11 +202,12 @@ type State struct {
 	historyImage *ui.SVG
 	historyLink  *ui.SVG
 	historyCode  *ui.SVG
-	// settingsMark and quitMark are the quick window footer's two actions,
+	// screenshotMark, settingsMark and quitMark are footer actions,
 	// parsed once like the rest: they are marks rather than words, and what
 	// they mean is their label.
-	settingsMark *ui.SVG
-	quitMark     *ui.SVG
+	settingsMark   *ui.SVG
+	quitMark       *ui.SVG
+	screenshotMark *ui.SVG
 	// copyMark, pinMark and closeMark are the translation window's actions.
 	// They are parsed once for the same reason as the rest: a view is built
 	// several times per frame, and parsing a document is not a view's work.
@@ -312,8 +327,18 @@ type State struct {
 	// translateCloseTimer is the close the card asked for and has not
 	// reached yet, or nil.
 	translateCloseTimer *time.Timer
+	// translationVisible distinguishes a reusable, hidden card window from a
+	// card the user can currently see. Image task completion uses it to decide
+	// whether a system notification is useful.
+	translationVisible bool
 	// shortcut is what became of the translation shortcut.
 	shortcut shortcutState
+	// screenshotShortcut is independent and may deliberately be unbound.
+	screenshotShortcut shortcutState
+	// imageTasks are transient screenshot translations. They deliberately stay
+	// in memory only: a screenshot must never be written to app storage.
+	imageTasks      []imageTranslationTask
+	nextImageTaskID uint64
 	// selectionGranted says macOS' Accessibility permission is already
 	// granted. The settings page hides the request note and button while it
 	// is true; it is refreshed when the app becomes active, when the settings
@@ -327,6 +352,12 @@ type State struct {
 	// — the smaller numbers under the headline — which stay folded away
 	// until they are asked for.
 	detailsOpen bool
+}
+
+// RegionCapture is the narrow platform boundary behind the app-owned region
+// picker. The rectangle is in physical virtual-desktop pixels.
+type RegionCapture interface {
+	Capture(context.Context, image.Rectangle) ([]byte, error)
 }
 
 // New builds the tray icon and the state of the application. The caller
@@ -394,6 +425,10 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the quit mark: %w", err)
 	}
+	screenshotMark, err := ui.ParseSVG(assets.Screenshot())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the screenshot mark: %w", err)
+	}
 	copyMark, err := ui.ParseSVG(assets.Copy())
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the copy mark: %w", err)
@@ -431,6 +466,8 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		secretService:     deps.Secrets,
 		clipboard:         deps.Clipboard,
 		translate:         deps.Translate,
+		screenshot:        deps.Screenshot,
+		regionCapture:     deps.RegionCapture,
 		ownServices:       deps.RegisterOwnServices,
 		shortcuts:         deps.Shortcuts,
 		version:           deps.Version,
@@ -441,6 +478,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		popoverAppearance: deps.PopoverAppearance,
 		autostart:         deps.Autostart,
 		updates:           deps.Updates,
+		notifier:          mygoNotifier{},
 		dark:              appearance.Dark(false),
 		selectionGranted:  true,
 		trayIcon:          trayIcon,
@@ -454,12 +492,16 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		historyCode:       historyCode,
 		settingsMark:      settingsMark,
 		quitMark:          quitMark,
+		screenshotMark:    screenshotMark,
 		copyMark:          copyMark,
 		pinMark:           pinMark,
 		closeMark:         closeMark,
 		translationMark:   translationMark,
 		keyMark:           keyMark,
 		infoMark:          infoMark,
+	}
+	if state.regionCapture != nil {
+		state.screenshot = &nativeRegionScreenshot{state: state, capture: state.regionCapture}
 	}
 	// The update service was built before the state, so its change listener
 	// is installed now, once, before anything can ask it for a check: a
@@ -705,7 +747,7 @@ func (s *State) Open() {
 		Placement: quickWindowPlacement(runtime.GOOS, popover),
 		Gap:       4,
 		Width:     panelWidth,
-		Height:    panelHeight,
+		Height:    s.quickWindowHeight(),
 		// Focusable: a click outside closes it, as the system's menus do.
 		Focusable: true,
 		Shadow:    true,
@@ -734,6 +776,36 @@ func (s *State) Open() {
 	// runs off the main thread; the view never starts work of its own,
 	// because MyGo builds it several times per frame.
 	s.refreshAsync(true)
+}
+
+// quickWindowHeight grows the tray flyout for image tasks before its scroll
+// body is forced to scroll. A flyout must never occupy more than half of the
+// display work area: the rest of the desktop remains reachable, including on
+// compact screens. The fallback keeps tests without a screen deterministic.
+func (s *State) quickWindowHeight() int {
+	work := s.screenNear(s.cursorPoint())
+	return quickWindowHeightForTasks(len(s.imageTasks), work.Height)
+}
+
+// quickWindowHeightForTasks is the pure sizing rule behind quickWindowHeight.
+// Keeping it independent of the desktop makes the half-screen guarantee
+// testable without a live tray or display.
+func quickWindowHeightForTasks(tasks, workHeight int) int {
+	maxHeight := workHeight / 2
+	if maxHeight <= 0 {
+		maxHeight = panelHeight
+	}
+	wanted := panelHeight + max(tasks, 0)*quickTaskRowHeight
+	return clampInt(wanted, min(panelHeight, maxHeight), maxHeight)
+}
+
+// fitQuickWindow applies the same content-aware height after a task is
+// added, completed, retried, or removed. SetSize is the MyGo flyout API that
+// also re-places the window next to its tray anchor.
+func (s *State) fitQuickWindow() {
+	if s.panel != nil {
+		s.panel.SetSize(panelWidth, s.quickWindowHeight())
+	}
 }
 
 // View builds one frame of the quick window: the panel, the clipboard line
@@ -772,6 +844,7 @@ func (s *State) View(c *ui.Context) {
 			// two of them is the window's: the design's blocks are the
 			// window, not rows inside one margin.
 			s.card(c)
+			s.imageTranslationTasks(c)
 		})
 		// The clipboard row closes the content: it is about the desktop
 		// rather than about a panel, and it belongs at the far end of the
@@ -804,10 +877,18 @@ func (s *State) clipboardBottom(c *ui.Context) {
 // pointer that rests on it and for assistive technology.
 func (s *State) flyoutActions(c *ui.Context) {
 	ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(4)).Children(func() {
+		if s.screenshot != nil {
+			if button := quietIconButton(c, s.screenshotMark, "截图翻译"); button.Clicked() {
+				slog.Info("screenshot translation button clicked", "event", "screenshot_translation_requested", "source", "quick_window")
+				s.startScreenshotTranslation()
+			}
+		}
 		if button := quietIconButton(c, s.settingsMark, "设置"); button.Clicked() {
+			slog.Info("settings button clicked", "event", "settings_opened", "source", "quick_window")
 			s.openSettings()
 		}
 		if button := quietIconButton(c, s.quitMark, "退出"); button.Clicked() {
+			slog.Info("quit button clicked", "event", "quit_requested", "source", "quick_window")
 			s.quit()
 		}
 	})

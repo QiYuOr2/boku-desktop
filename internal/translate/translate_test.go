@@ -95,6 +95,13 @@ func (f *fakeTranslator) Translate(ctx context.Context, creds domain.Credentials
 	return result, nil
 }
 
+func (f *fakeTranslator) TranslateImage(ctx context.Context, creds domain.Credentials, image []byte, target domain.Language) (domain.TranslationResult, error) {
+	if len(image) == 0 {
+		return domain.TranslationResult{}, domain.ErrInvalidArgument
+	}
+	return f.Translate(ctx, creds, domain.TranslationRequest{Text: "image probe", SourceLang: domain.LangEnglish, TargetLang: target})
+}
+
 func (f *fakeTranslator) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1149,5 +1156,39 @@ func TestNewTranslateRequiresItsDependencies(t *testing.T) {
 	}
 	if _, err := NewTranslate(TranslateOptions{Translators: newFakeTranslators()}); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("without a secret store = %v", err)
+	}
+}
+
+func TestDetectCustomImageCapabilityPersistsOnlyTheVerifiedOutcome(t *testing.T) {
+	f := newTranslate(t)
+	ctx := context.Background()
+	if err := f.translate.SaveSettings(ctx, func(s *Settings) {
+		s.Custom["custom"] = CustomSettings{BaseURL: "https://api.example.com/v1"}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	supported, err := f.translate.DetectCustomImageCapability(ctx, "custom")
+	if err != nil || !supported {
+		t.Fatalf("DetectCustomImageCapability = %v, %v", supported, err)
+	}
+	settings, err := f.translate.Settings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !settings.Custom["custom"].SupportsImage {
+		t.Error("successful probe was not persisted")
+	}
+
+	f.custom.fail(domain.ErrProviderUnavailable)
+	supported, err = f.translate.DetectCustomImageCapability(ctx, "custom")
+	if err == nil || supported {
+		t.Fatalf("failed probe = %v, %v", supported, err)
+	}
+	settings, _ = f.translate.Settings()
+	if settings.Custom["custom"].SupportsImage {
+		t.Error("failed probe left a stale image capability")
+	}
+	if _, err := f.translate.DetectCustomImageCapability(ctx, "deepseek"); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("non-custom probe = %v, want invalid argument", err)
 	}
 }

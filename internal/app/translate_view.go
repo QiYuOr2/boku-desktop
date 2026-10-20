@@ -1,6 +1,7 @@
 package app
 
 import (
+	"log/slog"
 	"strconv"
 	"strings"
 
@@ -57,6 +58,9 @@ func (s *State) translateView(c *ui.Context) {
 			// once it needs more room than that.
 			body := ui.Scroll(c).FillWidth().Grow(1)
 			body.Children(func() {
+				if s.translation.image {
+					s.imageTranslationPreview(c)
+				}
 				switch s.translation.status {
 				case translateReady:
 					s.translateSourceBlock(c)
@@ -85,6 +89,24 @@ func (s *State) translateView(c *ui.Context) {
 		// How tall what was just built is, which is what the window is then
 		// sized to: a short answer gets a short card.
 		s.measureCard(c, card)
+	})
+}
+
+// imageTranslationPreview keeps the image's identity on the image itself.
+// It is an overlay rather than a blue content bar, matching the screenshot
+// translation visual language and leaving the card body for the result.
+func (s *State) imageTranslationPreview(c *ui.Context) {
+	preview := ui.Box(c).FillWidth().Height(float32(160)).Shrink(0).Radius(radiusField).Background(colorCardFoot)
+	preview.Children(func() {
+		if s.translation.preview != nil {
+			ui.Image(c, s.translation.preview).Absolute().Fill().Fit(ui.Contain).Radius(radiusField)
+		}
+		ui.Row(c).Absolute().Top(float32(8)).Left(float32(8)).Shrink(0).
+			Padding(float32(2), float32(6)).Radius(float32(4)).AlignItems(ui.Center).Gap(float32(4)).
+			Background(ui.RGBA(0, 0, 0, 0.50)).Children(func() {
+			ui.Icon(c, s.screenshotMark).Size(float32(10), float32(10)).TextColor(ui.RGBA(255, 255, 255, 0.92)).Shrink(0)
+			ui.Text(c, "截图").FontSize(sizeTiny).TextColor(ui.RGBA(255, 255, 255, 0.92)).SingleLine()
+		})
 	})
 }
 
@@ -341,10 +363,18 @@ func (s *State) translateFoot(c *ui.Context) {
 			TextColor(colorFooterInk).
 			SingleLine()
 		ui.Spacer(c)
+		if s.translation.imageTaskID != 0 {
+			ui.Text(c, "已加入后台任务，可关闭浮窗").
+				FontSize(float32(sizeTiny)).
+				TextColor(colorFooterInk).
+				SingleLine().
+				MinWidth(0)
+		}
 		if button := cardIconToggle(c, s.pinMark, pinLabel(s.translation.pinned), s.translation.pinned); button.Clicked() {
 			s.toggleTranslationPin()
 		}
 		if button := cardIconButton(c, s.closeMark, "关闭"); button.Clicked() {
+			slog.Info("translation card closed", "event", "translation_card_closed", "image", s.translation.image)
 			s.closeTranslation()
 		}
 	})
@@ -361,6 +391,9 @@ func (s *State) translateFoot(c *ui.Context) {
 func (s *State) translationOrigin() string {
 	switch s.translation.status {
 	case translateReady:
+		if s.translation.image {
+			return "AI 图片翻译 · " + s.translation.result.ProviderName
+		}
 		if name := strings.TrimSpace(s.translation.result.ProviderName); name != "" {
 			return "AI 翻译 · " + name
 		}
@@ -369,6 +402,9 @@ func (s *State) translationOrigin() string {
 		}
 		return "AI 翻译"
 	case translateLoading:
+		if s.translation.image {
+			return "AI 图片翻译 · 正在请求"
+		}
 		return "AI 翻译 · 正在请求"
 	default:
 		return "划词翻译"

@@ -100,9 +100,10 @@ type server struct {
 // chatRequest is the part of the request this mock reads.
 type chatRequest struct {
 	Model    string `json:"model"`
+	Stream   bool   `json:"stream"`
 	Messages []struct {
-		Role    string `json:"role"`
-		Content string `json:"content"`
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
 	} `json:"messages"`
 }
 
@@ -127,13 +128,23 @@ func (s *server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	system, text := "", ""
+	imageRequest := false
 	for _, message := range body.Messages {
 		switch message.Role {
 		case "system":
-			system = message.Content
+			system = stringContent(message.Content)
 		case "user":
-			text = message.Content
+			text, imageRequest = userContent(message.Content)
 		}
+	}
+	if imageRequest {
+		log.Printf(">> model=%q image=true", body.Model)
+		if body.Stream {
+			writeImageStream(w, body.Model)
+			return
+		}
+		writeChat(w, body.Model, imageAnswer())
+		return
 	}
 	// What was asked is printed, because the point of this mock is to see what
 	// Boku sends: the prompt is what decides the shape of the answer.
@@ -145,6 +156,50 @@ func (s *server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	content := s.answer(text, wantsPieces || s.annotate)
 	writeChat(w, body.Model, content)
+}
+
+// stringContent reads a text-only chat message. Image messages have an array
+// content value; treating that array as text used to make this local mock
+// reject the very screenshot request it exists to exercise.
+func stringContent(raw json.RawMessage) string {
+	var text string
+	_ = json.Unmarshal(raw, &text)
+	return text
+}
+
+// userContent reads either a conventional text message or the standard
+// OpenAI-compatible multimodal content array. The mock deliberately does not
+// retain or print the data URL: it only confirms that Boku sent an image.
+func userContent(raw json.RawMessage) (string, bool) {
+	if text := stringContent(raw); text != "" {
+		return text, false
+	}
+	var parts []struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		ImageURL struct {
+			URL string `json:"url"`
+		} `json:"image_url"`
+	}
+	if json.Unmarshal(raw, &parts) != nil {
+		return "", false
+	}
+	for _, part := range parts {
+		if part.Type == "image_url" && strings.HasPrefix(part.ImageURL.URL, "data:image/png;base64,") {
+			return "", true
+		}
+	}
+	return "", false
+}
+
+func imageAnswer() string {
+	return `{"sourceLang":"en","sourceText":"Boku screenshot test","targetLang":"zh","translatedText":"Boku 截图测试"}`
+}
+
+func writeImageStream(w http.ResponseWriter, model string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	answer, _ := json.Marshal(imageAnswer())
+	_, _ = fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%s}}]}\n\ndata: [DONE]\n\n", answer)
 }
 
 // answer is what the service answers with: a canned translation, or the text

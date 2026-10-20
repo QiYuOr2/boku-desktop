@@ -54,11 +54,11 @@ type UpdateService interface {
 	OnChange(fn func())
 }
 
-// updateNotifier is how the presentation puts a notice on the desktop. It is
+// desktopNotifier is how the presentation puts a notice on the desktop. It is
 // an interface for one reason: the system's notification needs a running
 // application, and what to say — and how often — is worth testing where
 // there is none.
-type updateNotifier interface {
+type desktopNotifier interface {
 	// Supported reports whether the desktop can show a notice.
 	Supported() bool
 	// Notify shows one notice, and runs open when it is clicked.
@@ -147,8 +147,8 @@ func (s *State) prepareUpdates(updates UpdateService) {
 		return
 	}
 	s.updates = updates
-	if s.updateNotifier == nil {
-		s.updateNotifier = mygoNotifier{}
+	if s.notifier == nil {
+		s.notifier = mygoNotifier{}
 	}
 	// The service may call this from any goroutine, for as long as it lives:
 	// what it is given is the state's own method, which touches nothing that
@@ -266,11 +266,11 @@ func (s *State) noteReadyUpdate(state domain.UpdateState) {
 		return
 	}
 	s.updateNotified = notified
-	if s.updateNotifier == nil || !s.updateNotifier.Supported() {
+	if s.notifier == nil || !s.notifier.Supported() {
 		return
 	}
 	title, body := updateNotice(state)
-	s.updateNotifier.Notify(updateNoticeID, title, body, s.showUpdateSettings)
+	s.notifier.Notify(updateNoticeID, title, body, s.showUpdateSettings)
 }
 
 // updateNotifiedWithoutVersion stands in updateNotified for a notice about a

@@ -158,6 +158,52 @@ func TestTranslateAsksAndReadsTheAnswer(t *testing.T) {
 	}
 }
 
+func TestTranslateImageUsesTheMultimodalModel(t *testing.T) {
+	var (
+		model string
+		auth  string
+		image bool
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		var request struct {
+			Model    string `json:"model"`
+			Messages []struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		model = request.Model
+		image = len(request.Messages) == 2 && strings.Contains(string(request.Messages[1].Content), "image_url")
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"sourceLang\\\":\\\"en\\\",\\\"sourceText\\\":\\\"Hello\\\",\\\"targetLang\\\":\\\"zh\\\",\\\"translatedText\\\":\\\"你好\\\"}\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	translated := NewWithBaseURL(httpc.New(httpc.Options{}), server.URL)
+	result, err := translated.TranslateImage(context.Background(), credentials(), []byte{0x89, 'P', 'N', 'G'}, domain.LangChinese)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if model != imageModel {
+		t.Errorf("model = %q, want %q", model, imageModel)
+	}
+	if !image {
+		t.Error("image request did not contain image_url")
+	}
+	if auth != "Bearer sk-test-0001" {
+		t.Errorf("authorization = %q", auth)
+	}
+	if result.SourceText != "Hello" || result.TranslatedText != "你好" {
+		t.Errorf("result = %+v", result)
+	}
+	if !translated.Descriptor().SupportsImage {
+		t.Error("DeepSeek must advertise image support")
+	}
+}
+
 // A model that answers nothing is a failure at the boundary, never an empty
 // window.
 func TestTranslateRefusesAnEmptyAnswer(t *testing.T) {

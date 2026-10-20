@@ -86,6 +86,13 @@ type shortcutState struct {
 	note string
 }
 
+type shortcutKind uint8
+
+const (
+	shortcutText shortcutKind = iota
+	shortcutScreenshot
+)
+
 // registerShortcuts binds the translation shortcut and remembers what
 // happened. It runs once, from WhenReady: a shortcut needs the running
 // application, and a tray application that cannot bind one still starts.
@@ -97,6 +104,7 @@ type shortcutState struct {
 func (s *State) registerShortcuts() {
 	accelerator := s.translateSettingsOr().AcceleratorOr()
 	s.shortcut = shortcutState{accelerator: accelerator}
+	s.screenshotShortcut = shortcutState{accelerator: s.translateSettingsOr().ScreenshotAcceleratorOr()}
 	s.bindShortcutForSwitch()
 }
 
@@ -130,11 +138,30 @@ func (s *State) bindShortcutForSwitch() {
 // again, and because that leaves a moment with no shortcut, a combination the
 // platform refuses is answered by putting the previous one back.
 func (s *State) bindShortcut(binding shortcutBinding) error {
+	return s.bindShortcutSet(binding.accelerator, s.translateSettingsOr().ScreenshotAcceleratorOr())
+}
+
+// bindShortcutSet registers the two independent shortcuts as one operation:
+// MyGo can release all bindings but not a single binding.
+func (s *State) bindShortcutSet(text, screenshot string) error {
 	if s.shortcuts == nil {
 		return fmt.Errorf("没有可用的全局快捷键实现")
 	}
 	s.shortcuts.UnregisterAll()
-	return s.shortcuts.Register(binding.accelerator, binding.fn)
+	if err := s.shortcuts.Register(text, s.onTranslateShortcut); err != nil {
+		return err
+	}
+	if screenshot == "" || s.screenshot == nil {
+		return nil
+	}
+	if strings.EqualFold(screenshot, text) {
+		return fmt.Errorf("截图翻译快捷键不能与划词翻译快捷键相同")
+	}
+	if err := s.shortcuts.Register(screenshot, s.onScreenshotShortcut); err != nil {
+		return err
+	}
+	s.screenshotShortcut = shortcutState{accelerator: screenshot, registered: true}
+	return nil
 }
 
 // unregisterShortcuts releases the binding. The application calls it on the
@@ -153,19 +180,48 @@ func (s *State) unregisterShortcuts() {
 // goroutine: a translation is a network request, and a request must never be
 // waited out on the thread that draws.
 func (s *State) onTranslateShortcut() {
+	slog.Info("translation shortcut invoked", "event", "text_translation_shortcut_invoked")
 	s.startTranslation(s.cursorPoint())
 }
 
+func (s *State) onScreenshotShortcut() {
+	slog.Info("screenshot shortcut invoked", "event", "screenshot_translation_shortcut_invoked")
+	s.startScreenshotTranslation()
+}
+
+// clearScreenshotShortcut persists the explicit disabled state and releases
+// both bindings before restoring the text shortcut alone.
+func (s *State) clearScreenshotShortcut() {
+	slog.Info("screenshot shortcut cleared", "event", "screenshot_shortcut_cleared")
+	if s.translate != nil {
+		_ = s.translate.SetScreenshotAccelerator(backgroundContext(), "")
+	}
+	s.screenshotShortcut = shortcutState{}
+	if s.translateSettingsOr().Enabled {
+		s.bindShortcutForSwitch()
+	}
+	s.Refresh()
+}
+
 // beginShortcutCapture starts recording the next key combination.
-func (s *State) beginShortcutCapture() {
-	s.shortcut.recording = true
+func (s *State) beginShortcutCapture(kinds ...shortcutKind) {
+	kind := shortcutText
+	if len(kinds) > 0 {
+		kind = kinds[0]
+	}
+	s.shortcut.recording = kind == shortcutText
+	s.screenshotShortcut.recording = kind == shortcutScreenshot
 	s.shortcut.note = ""
+	s.screenshotShortcut.note = ""
+	slog.Info("shortcut recording started", "event", "shortcut_recording_started", "kind", kind)
 	s.Refresh()
 }
 
 // cancelShortcutCapture stops recording without changing anything.
 func (s *State) cancelShortcutCapture() {
 	s.shortcut.recording = false
+	s.screenshotShortcut.recording = false
+	slog.Info("shortcut recording cancelled", "event", "shortcut_recording_cancelled")
 	s.Refresh()
 }
 
@@ -180,7 +236,10 @@ func (s *State) cancelShortcutCapture() {
 // either way, so that what the user presses while recording does not also act
 // on the window behind the button.
 func (s *State) captureShortcut(ev ui.InputEvent) bool {
-	if !s.shortcut.recording {
+	kind := shortcutText
+	if s.screenshotShortcut.recording {
+		kind = shortcutScreenshot
+	} else if !s.shortcut.recording {
 		return false
 	}
 	if ev.Kind != ui.InputKeyDown {
@@ -193,19 +252,56 @@ func (s *State) captureShortcut(ev ui.InputEvent) bool {
 	}
 	if isModifierKey(ev.Key) {
 		if !ev.Repeat {
-			s.shortcut.note = "修饰键要和一个字母或功能键一起按。"
+			s.shortcutStateFor(kind).note = "修饰键要和一个字母或功能键一起按。"
 			s.Refresh()
 		}
 		return true
 	}
 	accelerator, ok := acceleratorOf(ev)
 	if !ok {
-		s.shortcut.note = modifierHint()
+		s.shortcutStateFor(kind).note = modifierHint()
 		s.Refresh()
 		return true
 	}
-	s.applyShortcut(accelerator)
+	if kind == shortcutScreenshot {
+		s.applyScreenshotShortcut(accelerator)
+	} else {
+		s.applyShortcut(accelerator)
+	}
 	return true
+}
+
+func (s *State) shortcutStateFor(kind shortcutKind) *shortcutState {
+	if kind == shortcutScreenshot {
+		return &s.screenshotShortcut
+	}
+	return &s.shortcut
+}
+
+func (s *State) applyScreenshotShortcut(accelerator string) {
+	previous := s.screenshotShortcut.accelerator
+	if previous == "" {
+		previous = s.translateSettingsOr().ScreenshotAcceleratorOr()
+	}
+	s.screenshotShortcut.recording = false
+	text := s.shortcut.accelerator
+	if text == "" {
+		text = s.translateSettingsOr().AcceleratorOr()
+	}
+	if err := s.bindShortcutSet(text, accelerator); err != nil {
+		restored := s.bindShortcutSet(text, previous)
+		s.screenshotShortcut = shortcutState{accelerator: previous, registered: restored == nil, err: restored, note: "用不了 " + friendlyAccelerator(accelerator) + "：" + friendlyError(err) + "，仍然是 " + friendlyAccelerator(previous) + "。"}
+		s.Refresh()
+		return
+	}
+	s.screenshotShortcut = shortcutState{accelerator: accelerator, registered: true}
+	slog.Info("screenshot shortcut changed", "event", "screenshot_shortcut_changed", "accelerator", accelerator)
+	if s.translate != nil {
+		if err := s.translate.SetScreenshotAccelerator(backgroundContext(), accelerator); err != nil {
+			slog.Warn("the screenshot shortcut could not be remembered", "accelerator", accelerator, "error", err)
+		}
+	}
+	s.Refresh()
 }
 
 // applyShortcut binds a combination and says what happened.
@@ -236,6 +332,7 @@ func (s *State) applyShortcut(accelerator string) {
 		accelerator: accelerator,
 		registered:  true,
 	}
+	slog.Info("translation shortcut changed", "event", "text_translation_shortcut_changed", "accelerator", accelerator)
 	if s.translate != nil {
 		// The binding is remembered, so that the next launch registers the
 		// same one. Failing to write it does not take the working binding

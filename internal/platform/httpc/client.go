@@ -51,6 +51,13 @@ type Options struct {
 	Timeout    time.Duration
 }
 
+// RequestOptions narrows the configuration of one request without changing
+// the client shared by other providers. A non-positive Timeout keeps the
+// client's default deadline.
+type RequestOptions struct {
+	Timeout time.Duration
+}
+
 // Client makes the requests. It is safe to use from several goroutines, and
 // it keeps no state between calls.
 type Client struct {
@@ -106,12 +113,72 @@ func ProxyTransport() *http.Transport {
 
 // GetJSON asks for a JSON document.
 func (c *Client) GetJSON(ctx context.Context, endpoint string, headers map[string]string) (domain.FetchResult, error) {
-	return c.do(ctx, http.MethodGet, endpoint, headers, nil)
+	return c.do(ctx, http.MethodGet, endpoint, headers, nil, RequestOptions{})
 }
 
 // PostJSON sends a JSON document and asks for one back.
 func (c *Client) PostJSON(ctx context.Context, endpoint string, headers map[string]string, body []byte) (domain.FetchResult, error) {
-	return c.do(ctx, http.MethodPost, endpoint, headers, body)
+	return c.do(ctx, http.MethodPost, endpoint, headers, body, RequestOptions{})
+}
+
+// PostJSONWithOptions sends JSON with a request-specific deadline. It is for
+// operations such as image inference whose documented latency is different
+// from ordinary API requests; it must not be used to silently relax the
+// application's default for every provider.
+func (c *Client) PostJSONWithOptions(ctx context.Context, endpoint string, headers map[string]string, body []byte, opts RequestOptions) (domain.FetchResult, error) {
+	return c.do(ctx, http.MethodPost, endpoint, headers, body, opts)
+}
+
+// PostJSONStream sends JSON and passes a successful response body to consume.
+// It keeps the same proxy, deadline, status translation and response ceiling
+// as ordinary requests, while allowing protocols such as server-sent events to
+// be decoded incrementally by their protocol package.
+func (c *Client) PostJSONStream(ctx context.Context, endpoint string, headers map[string]string, body []byte, opts RequestOptions, consume func(io.Reader) error) (domain.FetchResult, error) {
+	safe := kit.Redact(endpoint)
+	if consume == nil {
+		return domain.FetchResult{Endpoint: safe}, fmt.Errorf("%w: stream consumer is required", domain.ErrInvalidArgument)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timeout := c.timeout
+	if opts.Timeout > 0 {
+		timeout = opts.Timeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return domain.FetchResult{Endpoint: safe}, fmt.Errorf("%w: %s: %v", domain.ErrInvalidArgument, safe, err)
+	}
+	request.Header.Set("User-Agent", c.userAgent)
+	request.Header.Set("Accept", "text/event-stream")
+	request.Header.Set("Content-Type", "application/json")
+	for name, value := range headers {
+		request.Header.Set(name, value)
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return domain.FetchResult{Endpoint: safe}, transportError(err, safe)
+	}
+	defer response.Body.Close()
+	result := domain.FetchResult{Endpoint: safe, FetchedAt: time.Now().UTC(), HTTPStatus: response.StatusCode}
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		payload, readErr := readLimited(response.Body, c.maxBytes)
+		if readErr != nil {
+			return result, readErr
+		}
+		return result, statusError(response.StatusCode, safe, payload)
+	}
+	limited := &io.LimitedReader{R: response.Body, N: c.maxBytes + 1}
+	if err := consume(limited); err != nil {
+		return result, err
+	}
+	if limited.N <= 0 {
+		return result, &domain.BadResponseError{Endpoint: safe, HTTPStatus: response.StatusCode, Reason: fmt.Sprintf("the response is larger than %d bytes", c.maxBytes)}
+	}
+	return result, nil
 }
 
 // PostForm sends an application/x-www-form-urlencoded body and asks for a
@@ -122,7 +189,7 @@ func (c *Client) PostForm(ctx context.Context, endpoint string, headers map[stri
 	for name, value := range headers {
 		merged[name] = value
 	}
-	return c.do(ctx, http.MethodPost, endpoint, merged, []byte(form.Encode()))
+	return c.do(ctx, http.MethodPost, endpoint, merged, []byte(form.Encode()), RequestOptions{})
 }
 
 // do performs one request and translates everything that can go wrong into
@@ -135,12 +202,16 @@ func (c *Client) PostForm(ctx context.Context, endpoint string, headers map[stri
 //	2xx but not JSON BadResponseError
 //	timeout, cancel  ErrProviderTimeout
 //	no answer        ErrProviderUnavailable
-func (c *Client) do(ctx context.Context, method, endpoint string, headers map[string]string, body []byte) (domain.FetchResult, error) {
+func (c *Client) do(ctx context.Context, method, endpoint string, headers map[string]string, body []byte, opts RequestOptions) (domain.FetchResult, error) {
 	safe := kit.Redact(endpoint)
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	timeout := c.timeout
+	if opts.Timeout > 0 {
+		timeout = opts.Timeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	var payload io.Reader
