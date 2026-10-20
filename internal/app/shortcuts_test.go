@@ -65,10 +65,14 @@ func TestShortcutCallbackReturnsAtOnce(t *testing.T) {
 		t.Fatal("the shortcut callback did not return: something in it waits")
 	}
 	// What the callback left behind is the window asking for a translation.
-	// The answer itself arrives on the thread that owns the state, so it is
-	// left to land rather than waited for here.
-	if state.translation.status != translateLoading {
-		t.Errorf("the window is in state %d, want the loading state", state.translation.status)
+	// The answer itself arrives on the thread that owns the state, and a fake
+	// translator can answer before this line runs: loading and ready are both
+	// the state the callback is allowed to leave. Waiting for a particular one
+	// made this a test of the fake's speed rather than of the callback.
+	switch state.translation.status {
+	case translateLoading, translateReady:
+	default:
+		t.Errorf("the window is in state %d, want loading or ready", state.translation.status)
 	}
 	if !card.visible() {
 		t.Error("the card the callback asked for was not shown")

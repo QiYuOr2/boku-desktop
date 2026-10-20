@@ -30,6 +30,7 @@ import (
 	"boku/internal/clipboard"
 	"boku/internal/credential"
 	"boku/internal/domain"
+	"boku/internal/kit"
 	"boku/internal/panel"
 	"boku/internal/platform/autostart"
 	"boku/internal/translate"
@@ -137,6 +138,10 @@ type State struct {
 	translate     *translate.Translate
 	screenshot    domain.ScreenshotDevice
 	regionCapture RegionCapture
+	// qrDecode reads the text a captured PNG holds. It is a field rather than
+	// a direct call so that the screenshot flow can be exercised without a
+	// real QR code in a fixture; New gives it the real decoder.
+	qrDecode      func([]byte) (string, error)
 	regionSession *regionCaptureSession
 	shortcuts     ShortcutRegistrar
 	version       string
@@ -208,6 +213,7 @@ type State struct {
 	settingsMark   *ui.SVG
 	quitMark       *ui.SVG
 	screenshotMark *ui.SVG
+	qrMark         *ui.SVG
 	// copyMark, pinMark and closeMark are the translation window's actions.
 	// They are parsed once for the same reason as the rest: a view is built
 	// several times per frame, and parsing a document is not a view's work.
@@ -430,6 +436,10 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the screenshot mark: %w", err)
 	}
+	qrMark, err := ui.ParseSVG(assets.QR())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the QR mark: %w", err)
+	}
 	copyMark, err := ui.ParseSVG(assets.Copy())
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the copy mark: %w", err)
@@ -469,6 +479,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		translate:         deps.Translate,
 		screenshot:        deps.Screenshot,
 		regionCapture:     deps.RegionCapture,
+		qrDecode:          kit.DecodeQRCodePNG,
 		ownServices:       deps.RegisterOwnServices,
 		shortcuts:         deps.Shortcuts,
 		version:           deps.Version,
@@ -494,6 +505,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		settingsMark:      settingsMark,
 		quitMark:          quitMark,
 		screenshotMark:    screenshotMark,
+		qrMark:            qrMark,
 		copyMark:          copyMark,
 		pinMark:           pinMark,
 		closeMark:         closeMark,
@@ -873,13 +885,17 @@ func (s *State) clipboardBottom(c *ui.Context) {
 }
 
 // flyoutActions is the quick window's footer: everything the user can always
-// do from here. The two actions are marks rather than words — the footer is one
+// do from here. The actions are marks rather than words — the footer is one
 // line at the bottom of a card, and a word there reads as another piece of
 // content while a mark reads as what it is. Each keeps its label for the
 // pointer that rests on it and for assistive technology.
 func (s *State) flyoutActions(c *ui.Context) {
 	ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(4)).Children(func() {
 		if s.screenshot != nil {
+			if button := quietIconButton(c, s.qrMark, "识别二维码"); button.Clicked() {
+				slog.Info("QR recognition button clicked", "event", "qr_recognition_requested", "source", "quick_window")
+				s.startQRRecognition()
+			}
 			if button := quietIconButton(c, s.screenshotMark, "截图翻译"); button.Clicked() {
 				slog.Info("screenshot translation button clicked", "event", "screenshot_translation_requested", "source", "quick_window")
 				s.startScreenshotTranslation()

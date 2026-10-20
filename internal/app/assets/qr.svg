@@ -1,0 +1,19 @@
+<!-- The QR mark: the quick window's scan action, drawn left of the screenshot
+     mark. Three finder squares and the few modules that make the rest of a QR
+     code recognisable at 14 points. Like the other footer marks it is a
+     currentColor line drawing, so the line it sits on decides its color. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <rect x="3" y="3" width="6" height="6" rx="1"/>
+  <rect x="15" y="3" width="6" height="6" rx="1"/>
+  <rect x="3" y="15" width="6" height="6" rx="1"/>
+  <path d="M15 15h3v3h-3z"/>
+  <path d="M21 15v.01"/>
+  <path d="M15 21h.01"/>
+  <path d="M21 21v-3h-3"/>
+  <path d="M12 3v.01"/>
+  <path d="M12 8v.01"/>
+  <path d="M3 12h.01"/>
+  <path d="M8 12v3"/>
+  <path d="M12 15v.01"/>
+  <path d="M12 21v-3"/>
+</svg>

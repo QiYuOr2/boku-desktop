@@ -65,6 +65,9 @@ const (
 	translateLoading
 	// translateReady is a translation.
 	translateReady
+	// translateQRReady is the text of a QR code, read locally. It is not a
+	// translation: it has no target language, no service and no annotation.
+	translateQRReady
 	// translateOff is the tool switched off in the settings.
 	translateOff
 	// translateUnconfigured is the tool with no usable translator.
@@ -82,8 +85,14 @@ const (
 // translationState is the window's state, on the main thread with the rest of
 // the view state.
 type translationState struct {
-	status  translateStatus
-	image   bool
+	status translateStatus
+	// image says the card is about a screenshot, which is what the foot says
+	// and what a failure tells the user to try again with.
+	image bool
+	// qr says the card is about a QR code. The capture is the same one the
+	// screenshot tool uses, but the answer is text read on this machine
+	// rather than a translation: there is no service and no network.
+	qr      bool
 	preview *ui.Bitmap
 	// imageTaskID is non-zero only for a screenshot task. It lets a completed
 	// background task update the card that is already showing that task without
@@ -730,10 +739,11 @@ func (s *State) scheduleTranslationClose(window cardWindow) {
 	if s.translation.pinned {
 		return
 	}
-	settings, err := s.translate.Settings()
 	delay := translate.DefaultCloseDelay
-	if err == nil {
-		delay = settings.CloseDelayOr()
+	if s.translate != nil {
+		if settings, err := s.translate.Settings(); err == nil {
+			delay = settings.CloseDelayOr()
+		}
 	}
 	s.cancelTranslationClose()
 	// The timer only asks for the close; the state it reads is touched on
