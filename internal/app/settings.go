@@ -261,7 +261,7 @@ func (s *State) animeSection(c *ui.Context, head *ui.Handle) {
 				cardHint(c, "Bangumi 仅提供放送日期；请求带应用名与联系方式。")
 			})
 			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-				if button := designButton(c, "保存并刷新", buttonSecondary).Shrink(0); button.Clicked() {
+				if button := designButton(c, "保存", buttonSecondary).Shrink(0); button.Clicked() {
 					s.saveAnime(on)
 				}
 			})
