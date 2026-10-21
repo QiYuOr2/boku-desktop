@@ -31,6 +31,17 @@ func TestQuickWindowHeightForTasksKeepsTheFlyoutWithinHalfTheWorkArea(t *testing
 	}
 }
 
+func TestQuickWindowHeightForContentReservesTheSameRoomForEnabledAnime(t *testing.T) {
+	const workHeight = 1080
+	want := quickWindowHeightForTasks(1, workHeight)
+	if got := quickWindowHeightForContent(0, true, workHeight); got != want {
+		t.Errorf("enabled anime height = %d, want the one-task height %d", got, want)
+	}
+	if got := quickWindowHeightForContent(4, true, workHeight); got != workHeight/2 {
+		t.Errorf("enabled anime height = %d, want half the work area %d", got, workHeight/2)
+	}
+}
+
 func TestACompletedImageTaskKeepsItsResultForTheQuickWindow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	state := &State{imageTasks: []imageTranslationTask{{id: 7, status: imageTaskRunning, image: []byte("private screenshot"), cancel: cancel}}}

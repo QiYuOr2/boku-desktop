@@ -2,6 +2,7 @@ package app
 
 import (
 	"testing"
+	"time"
 
 	"boku/internal/translate"
 )
@@ -110,6 +111,42 @@ func TestAddingAnOwnServiceDoesNotCrashTheField(t *testing.T) {
 	if state.form.input != "" {
 		t.Errorf("the field still holds %q", state.form.input)
 	}
+}
+
+func TestNewCustomServiceInputIsSeparateFromDeepSeekInput(t *testing.T) {
+	state, _, _ := translateState(t)
+	state.form.inputCard = "deepseek"
+	state.form.input = "sk-deepseek-only"
+
+	state.showCardInput(newCustomServiceID)
+
+	if got := state.form.input; got != "" {
+		t.Errorf("custom API Key input = %q, want empty", got)
+	}
+	if got := state.form.keys["deepseek"]; got != "sk-deepseek-only" {
+		t.Errorf("DeepSeek API Key input = %q, want its own value", got)
+	}
+}
+
+func TestDeletingSelectedDeepSeekUsesTheFreeProvider(t *testing.T) {
+	state, fixture, _ := translateState(t)
+	if err := fixture.service.SetProvider(t.Context(), "deepseek"); err != nil {
+		t.Fatalf("SetProvider(deepseek) failed: %v", err)
+	}
+	state.deleteCredential(cardOf(t, state, "deepseek"))
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		settings, err := fixture.service.Settings()
+		if err != nil {
+			t.Fatalf("Settings failed: %v", err)
+		}
+		if settings.ProviderOr() == freeMicrosoftID {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Error("deleting the selected DeepSeek key did not select the free provider")
 }
 
 // The settings the card wrote are the ones the translator reads, so a saved

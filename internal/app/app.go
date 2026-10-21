@@ -837,18 +837,30 @@ func (s *State) Open() {
 // compact screens. The fallback keeps tests without a screen deterministic.
 func (s *State) quickWindowHeight() int {
 	work := s.screenNear(s.cursorPoint())
-	return quickWindowHeightForTasks(len(s.imageTasks), work.Height)
+	return quickWindowHeightForContent(len(s.imageTasks), s.animeService != nil && s.animeService.Enabled(), work.Height)
 }
 
-// quickWindowHeightForTasks is the pure sizing rule behind quickWindowHeight.
-// Keeping it independent of the desktop makes the half-screen guarantee
-// testable without a live tray or display.
+// quickWindowHeightForTasks is the image-task-only sizing rule. Keeping it
+// independent of the desktop makes the half-screen guarantee testable without
+// a live tray or display.
 func quickWindowHeightForTasks(tasks, workHeight int) int {
+	return quickWindowHeightForContent(tasks, false, workHeight)
+}
+
+// quickWindowHeightForContent reserves one task-row's worth of room for the
+// animation block when it is enabled. That makes the flyout grow by the same
+// predictable amount as it does for an image task, before either block has to
+// compete for its scroll body.
+func quickWindowHeightForContent(tasks int, animeEnabled bool, workHeight int) int {
 	maxHeight := workHeight / 2
 	if maxHeight <= 0 {
 		maxHeight = panelHeight
 	}
-	wanted := panelHeight + max(tasks, 0)*quickTaskRowHeight
+	rows := max(tasks, 0)
+	if animeEnabled {
+		rows++
+	}
+	wanted := panelHeight + rows*quickTaskRowHeight
 	return clampInt(wanted, min(panelHeight, maxHeight), maxHeight)
 }
 

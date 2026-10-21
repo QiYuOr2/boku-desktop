@@ -15,6 +15,7 @@ import (
 
 	"boku/internal/clipboard"
 	contractbangumi "boku/internal/contract/bangumi"
+	contractdeepseek "boku/internal/contract/deepseek"
 	contractfree "boku/internal/contract/freetranslate"
 	"boku/internal/credential"
 	"boku/internal/domain"
@@ -188,6 +189,7 @@ func (s *State) saveAnime(enabled bool) {
 				s.animeUsername = service.Username()
 				s.animeRefreshInput = strconv.Itoa(service.RefreshMinutes())
 				s.cacheAnimeCovers()
+				s.fitQuickWindow()
 				s.Refresh()
 			})
 		}
@@ -924,8 +926,8 @@ func (s *State) newServiceModelField(c *ui.Context) {
 // two different things — 保存 would say the service is already there.
 func (s *State) newServiceRow(c *ui.Context) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(6)).Children(func() {
-		field := ui.TextInput(c, &s.form.input)
 		s.showCardInput(newCustomServiceID)
+		field := ui.TextInput(c, &s.form.input)
 		field.Password().Placeholder("API Key（可选）").SingleLine()
 		field.Label("自定义服务 API Key")
 		field.Disabled(s.form.busy != "")
@@ -1003,6 +1005,7 @@ func (s *State) deleteCredential(card translateCard) {
 	secrets, window := s.secretService, s.settingsWindow
 	service := s.translate
 	id, key := card.id, card.credentialKey
+	useFreeAfterDeletion := shouldUseFreeProviderAfterCredentialDeletion(id, s.translateSettingsOr().ProviderOr())
 	s.form.busy, s.form.deleteArmed = card.id, ""
 	slog.Info("translator configuration deletion requested", "event", "translator_configuration_deletion_requested", "provider", card.id, "customService", ownService)
 	if ownService {
@@ -1035,6 +1038,9 @@ func (s *State) deleteCredential(card translateCard) {
 		} else {
 			err = secrets.Delete(ctx, id, key)
 		}
+		if err == nil && useFreeAfterDeletion {
+			err = service.SetProvider(ctx, translate.DefaultProvider)
+		}
 		if window == nil {
 			// No window: this state exists only while a test builds the
 			// view, and there is nothing to hand the answer to.
@@ -1045,7 +1051,7 @@ func (s *State) deleteCredential(card translateCard) {
 		} else {
 			slog.Info("translator configuration deleted", "event", "translator_configuration_deleted", "provider", id, "customService", ownService)
 		}
-		window.Update(func() { s.credentialForgotten(id, err) })
+		window.Update(func() { s.credentialForgotten(id, useFreeAfterDeletion, err) })
 	}()
 }
 
@@ -1071,14 +1077,25 @@ func forgetCredential(ctx context.Context, secrets *credential.Secrets, id, key 
 // credentialForgotten is what a card says once its credential is gone: what is
 // stored is read again, so the card stops calling itself configured and the
 // 删除 that had to be confirmed is not drawn any more.
-func (s *State) credentialForgotten(id string, err error) {
+func (s *State) credentialForgotten(id string, usedFreeProvider bool, err error) {
 	s.form.busy = ""
 	if err != nil {
 		s.setCardStatus(id, statusError, friendlyError(err))
 		return
 	}
 	s.reloadCredentialsAfterSave()
-	s.setCardStatus(id, statusOK, "已删除。")
+	message := "已删除。"
+	if usedFreeProvider {
+		message = "已删除，已切换到免费服务。"
+	}
+	s.setCardStatus(id, statusOK, message)
+}
+
+// shouldUseFreeProviderAfterCredentialDeletion keeps the one built-in paid
+// service from remaining selected after its only credential disappears. Own
+// services retain their explicit selection semantics when removed.
+func shouldUseFreeProviderAfterCredentialDeletion(removedID, selectedID string) bool {
+	return removedID == contractdeepseek.ProviderID && selectedID == contractdeepseek.ProviderID
 }
 
 // translateSection is the translation tool's own settings: whether it runs,
@@ -1244,12 +1261,13 @@ func pickerGroupLabel(c *ui.Context, label string) {
 // the user runs, and calling it 免费 would be telling them something about a
 // price Boku does not know.
 func (s *State) providerOption(c *ui.Context, card translateCard, settings translate.Settings) {
-	selected := settings.ProviderOr() == card.id
+	selected := settings.ProviderOr() == card.id && card.configured
 	row := ui.ButtonBase(c).Label("使用 "+card.displayName).
 		FillWidth().
 		Padding(float32(8), float32(12)).
 		Radius(radiusField).
-		Border(1, colorBorder)
+		Border(1, colorBorder).
+		Disabled(!card.configured)
 	switch {
 	case selected:
 		row.Background(colorBrandTint).Border(1, colorBrand)
