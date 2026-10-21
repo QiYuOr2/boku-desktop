@@ -26,7 +26,6 @@ func (s *State) bilibiliUpdates(c *ui.Context) {
 		return
 	}
 	items, _, loading, err := s.bilibiliService.View()
-	quickDivider(c)
 	quickBlock(c, func() {
 		ui.Column(c).FillWidth().Gap(float32(7)).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {

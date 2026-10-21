@@ -116,6 +116,9 @@ type Deps struct {
 	// AppearanceStore is the settings store the choice is written through.
 	// A state without one still changes the appearance for this run.
 	AppearanceStore AppearanceStore
+	// QuickWindowLayout stores the flyout's block order and visibility.
+	QuickWindowLayout      *QuickWindowLayout
+	QuickWindowLayoutStore LayoutStore
 	// ApplyAppearance gives the desktop the chosen appearance, so that the
 	// title bars, menus and system-drawn window chrome around Boku's own
 	// drawing match it. It is nil in a test that has no desktop.
@@ -202,6 +205,8 @@ type State struct {
 	// what the automatic mode follows.
 	appearance        *Appearance
 	appearanceStore   AppearanceStore
+	quickWindowLayout *QuickWindowLayout
+	quickLayoutStore  LayoutStore
 	applyAppearance   func(AppearanceMode)
 	popoverAppearance PopoverAppearance
 	// autostart is the platform's login start, or nil when there is none to
@@ -294,8 +299,12 @@ type State struct {
 	// (§2.1 of the design system) — and these are the two the page did not have
 	// before the sidebar named every section at once. They are parsed once
 	// at startup like every other mark.
-	keyMark  *ui.SVG
-	infoMark *ui.SVG
+	keyMark    *ui.SVG
+	infoMark   *ui.SVG
+	layoutMark *ui.SVG
+	eyeMark    *ui.SVG
+	eyeOffMark *ui.SVG
+	gripMark   *ui.SVG
 
 	tray *mygo.Tray
 	// panel is the open quick window; panelPopover records whether it was
@@ -332,6 +341,8 @@ type State struct {
 	// panelStatus is the last thing a panel switch said, shown under the
 	// switches in the general section.
 	panelStatus string
+	// layoutStatus is the last outcome of persisting the flyout layout.
+	layoutStatus string
 	// loginNotice is what the last attempt to start a credential's own login
 	// said. It belongs to the panel whose credential comes from a tool: the
 	// button is there, and failing to start the login has to be visible.
@@ -450,6 +461,10 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if appearance == nil {
 		appearance = NewAppearanceSection()
 	}
+	quickLayout := deps.QuickWindowLayout
+	if quickLayout == nil {
+		quickLayout = NewQuickWindowLayout()
+	}
 	trayIcon, err := assets.Icon(trayIconSize)
 	if err != nil {
 		return nil, err
@@ -547,6 +562,22 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the info mark: %w", err)
 	}
+	layoutMark, err := ui.ParseSVG(assets.Layout())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the layout mark: %w", err)
+	}
+	eyeMark, err := ui.ParseSVG(assets.Eye())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the eye mark: %w", err)
+	}
+	eyeOffMark, err := ui.ParseSVG(assets.EyeOff())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the hidden eye mark: %w", err)
+	}
+	gripMark, err := ui.ParseSVG(assets.Grip())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the drag handle mark: %w", err)
+	}
 	state := &State{
 		app:               app,
 		panelService:      deps.Panels,
@@ -566,6 +597,8 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		quit:              deps.Quit,
 		appearance:        appearance,
 		appearanceStore:   deps.AppearanceStore,
+		quickWindowLayout: quickLayout,
+		quickLayoutStore:  deps.QuickWindowLayoutStore,
 		applyAppearance:   deps.ApplyAppearance,
 		popoverAppearance: deps.PopoverAppearance,
 		autostart:         deps.Autostart,
@@ -595,6 +628,10 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		translationMark:   translationMark,
 		keyMark:           keyMark,
 		infoMark:          infoMark,
+		layoutMark:        layoutMark,
+		eyeMark:           eyeMark,
+		eyeOffMark:        eyeOffMark,
+		gripMark:          gripMark,
 	}
 	if deps.Anime != nil {
 		state.animeUsername = deps.Anime.Username()
@@ -996,9 +1033,7 @@ func (s *State) View(c *ui.Context) {
 			// Every block brings its own room with it, and the line between
 			// two of them is the window's: the design's blocks are the
 			// window, not rows inside one margin.
-			s.card(c)
-			s.animeUpdates(c)
-			s.bilibiliUpdates(c)
+			s.quickLayoutBlocks(c)
 			s.imageTranslationTasks(c)
 		})
 		// The clipboard row closes the content: it is about the desktop

@@ -95,7 +95,8 @@ func main() {
 		defer recordPanics()
 	}
 
-	panels, animeUpdates, bilibiliUpdates, secrets, clipboard, translate, own, appearance, prefs, err := services(userData, version)
+	quickWindowLayout := app.NewQuickWindowLayout()
+	panels, animeUpdates, bilibiliUpdates, secrets, clipboard, translate, own, appearance, prefs, err := services(userData, version, quickWindowLayout)
 	if err != nil {
 		log.Fatalf("boku: %v", err)
 	}
@@ -157,8 +158,10 @@ func main() {
 		Quit:                mygo.App.Quit,
 		// The theme is the presentation's own setting: it is stored with the
 		// features' keys, but only this window knows what the modes mean.
-		Appearance:      appearance,
-		AppearanceStore: prefs,
+		Appearance:             appearance,
+		AppearanceStore:        prefs,
+		QuickWindowLayout:      quickWindowLayout,
+		QuickWindowLayoutStore: prefs,
 		ApplyAppearance: func(mode app.AppearanceMode) {
 			mygo.Theme.SetSource(app.ThemeSource(mode))
 			// Forcing an appearance hides the desktop's own from Theme.IsDark,
@@ -276,7 +279,11 @@ func main() {
 // mismatched provider and adapter, or a panel that breaks its provider's
 // contract, is a startup error and worth catching without a graphical
 // session.
-func services(userData, version string) (*panel.Panels, *anime.Service, *bilibili.Service, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, *ownServices, *app.Appearance, *settings.Store, error) {
+func services(userData, version string, layouts ...*app.QuickWindowLayout) (*panel.Panels, *anime.Service, *bilibili.Service, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, *ownServices, *app.Appearance, *settings.Store, error) {
+	quickWindowLayout := app.NewQuickWindowLayout()
+	if len(layouts) > 0 && layouts[0] != nil {
+		quickWindowLayout = layouts[0]
+	}
 	// Credentials: a file of their own, never the database. The store is
 	// named here and nowhere else.
 	//
@@ -321,6 +328,7 @@ func services(userData, version string) (*panel.Panels, *anime.Service, *bilibil
 		animeSettings,
 		bilibiliSettings,
 		appearance,
+		quickWindowLayout,
 	)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
