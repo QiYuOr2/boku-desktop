@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -66,6 +67,8 @@ const (
 type Deps struct {
 	// Panels reads and refreshes the panels.
 	Panels *panel.Panels
+	// Anime reads today's releases from the configured public watching list.
+	Anime AnimeService
 	// Secrets stores the credentials those panels need.
 	Secrets *credential.Secrets
 	// Clipboard reads and records the system clipboard. It is what the
@@ -128,11 +131,25 @@ type Deps struct {
 	Updates UpdateService
 }
 
+// AnimeService is the small presentation-facing contract of the animation
+// feature. Defining it here keeps app independent of the feature package.
+type AnimeService interface {
+	Enabled() bool
+	Username() string
+	RefreshMinutes() int
+	Configure(context.Context, bool, string, int) error
+	View() ([]domain.EpisodeRelease, time.Time, bool, error)
+	RefreshIfNeeded(context.Context) error
+	Cover(subjectID int64) []byte
+}
+
 // State is the whole presentation state. It is read and written on the main
 // thread only.
 type State struct {
 	app           *mygo.Application
 	panelService  *panel.Panels
+	animeService  AnimeService
+	animeCovers   map[int64]*ui.Bitmap
 	secretService *credential.Secrets
 	clipboard     *clipboard.Clipboard
 	translate     *translate.Translate
@@ -163,7 +180,10 @@ type State struct {
 	// updates is the update check, or nil in a build without one. The state
 	// it reports is read from it every frame rather than kept here, so that
 	// an answer arriving while no window is open is not lost.
-	updates UpdateService
+	updates           UpdateService
+	animeUsername     string
+	animeRefreshInput string
+	animeTokenInput   string
 	// notifier puts short, actionable notices on the desktop. Updates and
 	// completed image translations share it so notification behavior stays
 	// consistent across the application.
@@ -193,6 +213,9 @@ type State struct {
 	// no drawing of its provider yet. It is not a brand: it says "a measure"
 	// until the real mark arrives.
 	gaugeMark *ui.SVG
+	tvMark    *ui.SVG
+	// chevronRightMark shows that a compact animation card opens its subject.
+	chevronRightMark *ui.SVG
 	// clipboardMark labels the quick window's clipboard line, parsed for the
 	// same reason.
 	clipboardMark *ui.SVG
@@ -400,6 +423,14 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the placeholder mark: %w", err)
 	}
+	tvMark, err := ui.ParseSVG(assets.TV())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the TV mark: %w", err)
+	}
+	chevronRightMark, err := ui.ParseSVG(assets.ChevronRight())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the chevron-right mark: %w", err)
+	}
 	clipMark, err := ui.ParseSVG(assets.Clipboard())
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the clipboard mark: %w", err)
@@ -474,6 +505,8 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	state := &State{
 		app:               app,
 		panelService:      deps.Panels,
+		animeService:      deps.Anime,
+		animeCovers:       make(map[int64]*ui.Bitmap),
 		secretService:     deps.Secrets,
 		clipboard:         deps.Clipboard,
 		translate:         deps.Translate,
@@ -496,6 +529,8 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		trayIcon:          trayIcon,
 		deepseekMark:      deepseekMark,
 		gaugeMark:         gaugeMark,
+		tvMark:            tvMark,
+		chevronRightMark:  chevronRightMark,
 		clipboardMark:     clipMark,
 		refreshMark:       refreshMark,
 		historyText:       historyText,
@@ -512,6 +547,10 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		translationMark:   translationMark,
 		keyMark:           keyMark,
 		infoMark:          infoMark,
+	}
+	if deps.Anime != nil {
+		state.animeUsername = deps.Anime.Username()
+		state.animeRefreshInput = strconv.Itoa(deps.Anime.RefreshMinutes())
 	}
 	if state.regionCapture != nil {
 		state.screenshot = &nativeRegionScreenshot{state: state, capture: state.regionCapture}
@@ -858,6 +897,7 @@ func (s *State) View(c *ui.Context) {
 			// two of them is the window's: the design's blocks are the
 			// window, not rows inside one margin.
 			s.card(c)
+			s.animeUpdates(c)
 			s.imageTranslationTasks(c)
 		})
 		// The clipboard row closes the content: it is about the desktop
@@ -932,6 +972,17 @@ func (s *State) versionLine() string {
 func (s *State) refreshAsync(force bool) {
 	for _, panel := range s.panelService.List() {
 		s.refreshPanelAsync(panel.ID, force)
+	}
+	if s.animeService != nil {
+		anime, window := s.animeService, s.panel
+		go func() {
+			if err := anime.RefreshIfNeeded(context.Background()); err != nil {
+				slog.Warn("anime releases could not be refreshed", "error", err)
+			}
+			if window != nil {
+				window.Update(func() { s.cacheAnimeCovers() })
+			}
+		}()
 	}
 }
 

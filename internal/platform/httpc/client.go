@@ -116,6 +116,13 @@ func (c *Client) GetJSON(ctx context.Context, endpoint string, headers map[strin
 	return c.do(ctx, http.MethodGet, endpoint, headers, nil, RequestOptions{})
 }
 
+// GetBytes asks for a bounded binary response. It shares JSON requests' proxy,
+// deadline, status translation and credential redaction, but deliberately does
+// not validate the response as JSON (for example, a provider's cover image).
+func (c *Client) GetBytes(ctx context.Context, endpoint string, headers map[string]string) (domain.FetchResult, error) {
+	return c.doBytes(ctx, http.MethodGet, endpoint, headers, nil, RequestOptions{})
+}
+
 // PostJSON sends a JSON document and asks for one back.
 func (c *Client) PostJSON(ctx context.Context, endpoint string, headers map[string]string, body []byte) (domain.FetchResult, error) {
 	return c.do(ctx, http.MethodPost, endpoint, headers, body, RequestOptions{})
@@ -260,6 +267,48 @@ func (c *Client) do(ctx context.Context, method, endpoint string, headers map[st
 			Reason:     "the response is not JSON",
 			Snippet:    kit.RedactText(domain.Snippet(data)),
 		}
+	}
+	return result, nil
+}
+
+func (c *Client) doBytes(ctx context.Context, method, endpoint string, headers map[string]string, body []byte, opts RequestOptions) (domain.FetchResult, error) {
+	safe := kit.Redact(endpoint)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timeout := c.timeout
+	if opts.Timeout > 0 {
+		timeout = opts.Timeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	var payload io.Reader
+	if body != nil {
+		payload = bytes.NewReader(body)
+	}
+	request, err := http.NewRequestWithContext(ctx, method, endpoint, payload)
+	if err != nil {
+		return domain.FetchResult{Endpoint: safe}, fmt.Errorf("%w: %s: %v", domain.ErrInvalidArgument, safe, err)
+	}
+	request.Header.Set("User-Agent", c.userAgent)
+	request.Header.Set("Accept", "image/*")
+	for name, value := range headers {
+		request.Header.Set(name, value)
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return domain.FetchResult{Endpoint: safe}, transportError(err, safe)
+	}
+	defer response.Body.Close()
+	result := domain.FetchResult{Endpoint: safe, FetchedAt: time.Now().UTC(), HTTPStatus: response.StatusCode}
+	data, err := readLimited(response.Body, c.maxBytes)
+	if err != nil {
+		return result, err
+	}
+	result.Payload = data
+	if response.StatusCode < 200 || response.StatusCode > 299 {
+		return result, statusError(response.StatusCode, safe, data)
 	}
 	return result, nil
 }

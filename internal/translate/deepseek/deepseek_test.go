@@ -178,7 +178,7 @@ func TestTranslateImageUsesTheMultimodalModel(t *testing.T) {
 		model = request.Model
 		image = len(request.Messages) == 2 && strings.Contains(string(request.Messages[1].Content), "image_url")
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"sourceLang\\\":\\\"en\\\",\\\"sourceText\\\":\\\"Hello\\\",\\\"targetLang\\\":\\\"zh\\\",\\\"translatedText\\\":\\\"你好\\\"}\"}}]}\n\ndata: [DONE]\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"sourceLang\\\":\\\"en\\\",\\\"sourceText\\\":\\\"พระเจ้าลงโทษคน\\\",\\\"targetLang\\\":\\\"en\\\",\\\"translatedText\\\":\\\"上帝惩罚了人们\\\"}\"}}]}\n\ndata: [DONE]\n\n"))
 	}))
 	defer server.Close()
 
@@ -196,8 +196,11 @@ func TestTranslateImageUsesTheMultimodalModel(t *testing.T) {
 	if auth != "Bearer sk-test-0001" {
 		t.Errorf("authorization = %q", auth)
 	}
-	if result.SourceText != "Hello" || result.TranslatedText != "你好" {
+	if result.SourceText != "พระเจ้าลงโทษคน" || result.TranslatedText != "上帝惩罚了人们" {
 		t.Errorf("result = %+v", result)
+	}
+	if result.SourceLang != domain.LangThai || result.TargetLang != domain.LangChinese {
+		t.Errorf("languages = %q -> %q, want th -> zh", result.SourceLang, result.TargetLang)
 	}
 	if !translated.Descriptor().SupportsImage {
 		t.Error("DeepSeek must advertise image support")
