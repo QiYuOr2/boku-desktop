@@ -591,7 +591,7 @@ func TestImageRequestIsNotCappedByTheOrdinaryTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"sourceLang\\\":\\\"en\\\",\\\"sourceText\\\":\\\"Hello\\\",\\\"targetLang\\\":\\\"zh\\\",\\\"translatedText\\\":\\\"你好\\\"}\"}}]}\n\ndata: [DONE]\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"status\\\":\\\"success\\\",\\\"sourceLang\\\":\\\"en\\\",\\\"sourceText\\\":\\\"Hello\\\",\\\"targetLang\\\":\\\"zh\\\",\\\"translatedText\\\":\\\"你好\\\",\\\"failure\\\":null}\"}}]}\n\ndata: [DONE]\n\n"))
 	}))
 	defer server.Close()
 

@@ -232,6 +232,46 @@ type ImageOptions struct {
 	Timeout time.Duration
 }
 
+// ImageResponse is the complete, structured answer requested from a vision
+// model. A response is either a translation or a closed-set failure, never
+// both and never free-form error prose.
+type ImageResponse struct {
+	Status         string                `json:"status"`
+	SourceLang     domain.Language       `json:"sourceLang"`
+	SourceText     string                `json:"sourceText"`
+	TargetLang     domain.Language       `json:"targetLang"`
+	TranslatedText string                `json:"translatedText"`
+	Failure        *imageResponseFailure `json:"failure"`
+}
+
+type imageResponseFailure struct {
+	Code domain.ImageTranslationFailureCode `json:"code"`
+}
+
+// ParseImageResponse enforces the image-model response contract. A declared
+// model failure is useful data, while a response outside this envelope remains
+// a provider bad response.
+func ParseImageResponse(content string) (ImageResponse, error) {
+	var answer ImageResponse
+	if err := json.Unmarshal([]byte(content), &answer); err != nil {
+		return ImageResponse{}, fmt.Errorf("%w: image translator did not return structured JSON", domain.ErrProviderBadResponse)
+	}
+	switch answer.Status {
+	case "success":
+		if answer.Failure != nil {
+			return ImageResponse{}, fmt.Errorf("%w: successful image response includes a failure", domain.ErrProviderBadResponse)
+		}
+		return answer, nil
+	case "failure":
+		if answer.Failure == nil || !answer.Failure.Code.Valid() {
+			return ImageResponse{}, fmt.Errorf("%w: image translator returned an unknown failure code", domain.ErrProviderBadResponse)
+		}
+		return ImageResponse{}, &domain.ImageTranslationError{Code: answer.Failure.Code}
+	default:
+		return ImageResponse{}, fmt.Errorf("%w: image translator omitted a valid status", domain.ErrProviderBadResponse)
+	}
+}
+
 // chatResponse is as much of the answer as is read: the first choice's
 // message. Everything else a service may add is left alone.
 type chatResponse struct {
@@ -306,15 +346,16 @@ func readSSE(stream io.Reader) (string, error) {
 	scanner.Buffer(make([]byte, 8*1024), httpc.DefaultMaxBytes)
 	var answer strings.Builder
 	done := false
-	for scanner.Scan() {
-		line := scanner.Text()
-		if !strings.HasPrefix(line, "data:") {
-			continue
+	var dataLines []string
+	consume := func() error {
+		if len(dataLines) == 0 {
+			return nil
 		}
-		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		data := strings.TrimSpace(strings.Join(dataLines, "\n"))
+		dataLines = dataLines[:0]
 		if data == "[DONE]" {
 			done = true
-			continue
+			return nil
 		}
 		var event struct {
 			Choices []struct {
@@ -324,14 +365,31 @@ func readSSE(stream io.Reader) (string, error) {
 			} `json:"choices"`
 		}
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			return "", fmt.Errorf("%w: image stream contains an invalid event", domain.ErrProviderBadResponse)
+			return fmt.Errorf("%w: image stream contains an invalid event", domain.ErrProviderBadResponse)
 		}
 		for _, choice := range event.Choices {
 			answer.WriteString(choice.Delta.Content)
 		}
+		return nil
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			if err := consume(); err != nil {
+				return "", err
+			}
+			continue
+		}
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		dataLines = append(dataLines, strings.TrimPrefix(line, "data:"))
 	}
 	if err := scanner.Err(); err != nil {
 		return "", fmt.Errorf("%w: image stream stopped before completion", domain.ErrProviderTimeout)
+	}
+	if err := consume(); err != nil {
+		return "", err
 	}
 	if !done {
 		return "", fmt.Errorf("%w: image stream ended without completion", domain.ErrProviderBadResponse)

@@ -31,7 +31,7 @@ func TestChatCompletionsStreamsAValidImageTranslation(t *testing.T) {
 		t.Fatalf("content type = %q, want text/event-stream", got)
 	}
 	payload := recorder.Body.String()
-	if !strings.Contains(payload, "data: [DONE]") || !strings.Contains(payload, "Boku screenshot test") {
+	if !strings.Contains(payload, "data: [DONE]") || !strings.Contains(payload, "Boku screenshot test") || !strings.Contains(payload, `\"status\":\"success\"`) {
 		t.Fatalf("stream = %q, want a completed image translation", payload)
 	}
 }

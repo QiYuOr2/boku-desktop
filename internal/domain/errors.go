@@ -39,6 +39,10 @@ var (
 	ErrUnsupportedClipboardFormat = errors.New("unsupported clipboard format")
 	ErrTranslateUnavailable       = errors.New("translation unavailable")
 	ErrImageTranslateUnavailable  = errors.New("image translation unavailable")
+	// ErrImageTranslationFailed means the image model understood the request
+	// but could not translate this particular image. Unlike a bad response, its
+	// structured code gives the interface an actionable explanation.
+	ErrImageTranslationFailed = errors.New("image translation failed")
 	// ErrScreenRecordingDenied is macOS refusing to read the screen because
 	// the user has not allowed Boku to record it. It is not a translation
 	// failure and not a missing translator: the window sends the user to the
@@ -60,6 +64,38 @@ var (
 	ErrLoginCommandMissing = errors.New("login command missing")
 	ErrLoginUnsupported    = errors.New("login cannot be started here")
 )
+
+// ImageTranslationFailureCode is the closed set a vision model may use when
+// it cannot produce a translation. Keeping this small and machine-readable
+// avoids presenting a model's untrusted prose as an application error.
+type ImageTranslationFailureCode string
+
+const (
+	ImageFailureNoReadableText ImageTranslationFailureCode = "no_readable_text"
+	ImageFailureUnsupported    ImageTranslationFailureCode = "unsupported_image"
+	ImageFailureRefused        ImageTranslationFailureCode = "refused"
+)
+
+func (c ImageTranslationFailureCode) Valid() bool {
+	switch c {
+	case ImageFailureNoReadableText, ImageFailureUnsupported, ImageFailureRefused:
+		return true
+	default:
+		return false
+	}
+}
+
+// ImageTranslationError carries the model's structured failure code only.
+// It deliberately contains neither the image nor model-generated text.
+type ImageTranslationError struct {
+	Code ImageTranslationFailureCode
+}
+
+func (e *ImageTranslationError) Error() string {
+	return "image translation failed: " + string(e.Code)
+}
+
+func (e *ImageTranslationError) Unwrap() error { return ErrImageTranslationFailed }
 
 // MaxSnippetBytes is how much of a response an error carries: enough to see
 // a renamed field, short enough not to fill a log with a whole payload.

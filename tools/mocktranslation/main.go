@@ -193,7 +193,7 @@ func userContent(raw json.RawMessage) (string, bool) {
 }
 
 func imageAnswer() string {
-	return `{"sourceLang":"en","sourceText":"Boku screenshot test","targetLang":"zh","translatedText":"Boku 截图测试"}`
+	return `{"status":"success","sourceLang":"en","sourceText":"Boku screenshot test","targetLang":"zh","translatedText":"Boku 截图测试","failure":null}`
 }
 
 func writeImageStream(w http.ResponseWriter, model string) {

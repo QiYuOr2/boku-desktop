@@ -178,7 +178,7 @@ func TestTranslateImageUsesTheMultimodalModel(t *testing.T) {
 		model = request.Model
 		image = len(request.Messages) == 2 && strings.Contains(string(request.Messages[1].Content), "image_url")
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"sourceLang\\\":\\\"en\\\",\\\"sourceText\\\":\\\"พระเจ้าลงโทษคน\\\",\\\"targetLang\\\":\\\"en\\\",\\\"translatedText\\\":\\\"上帝惩罚了人们\\\"}\"}}]}\n\ndata: [DONE]\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"status\\\":\\\"success\\\",\\\"sourceLang\\\":\\\"en\\\",\\\"sourceText\\\":\\\"พระเจ้าลงโทษคน\\\",\\\"targetLang\\\":\\\"en\\\",\\\"translatedText\\\":\\\"上帝惩罚了人们\\\",\\\"failure\\\":null}\"}}]}\n\ndata: [DONE]\n\n"))
 	}))
 	defer server.Close()
 
