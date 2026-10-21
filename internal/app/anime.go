@@ -24,14 +24,16 @@ type animeSubjectUpdate struct {
 	Episodes    []domain.EpisodeRelease
 }
 
-// animeUpdates is absent when disabled, unconfigured, or there is no release:
-// a zero-result day must not leave an empty section in the compact flyout.
+// animeUpdates is absent when disabled, unconfigured, or there is no release.
+// Once a request has settled, an empty today stays absent even when the
+// request failed: an optional schedule must not leave an error-shaped blank
+// region in the compact flyout.
 func (s *State) animeUpdates(c *ui.Context) {
 	if s.animeService == nil || !s.animeService.Enabled() || s.animeService.Username() == "" {
 		return
 	}
 	items, _, loading, err := s.animeService.View()
-	if len(items) == 0 && !loading && err == nil {
+	if len(items) == 0 && !loading {
 		return
 	}
 	quickDivider(c)
@@ -51,10 +53,12 @@ func (s *State) animeUpdates(c *ui.Context) {
 						ui.Text(c, fmt.Sprintf("%d", len(updates))).FontSize(sizeQuickTiny).FontWeight(600).TextColor(ui.Hex(animePrimary)).SingleLine()
 					})
 				}
+				if button := s.refreshButton(c, loading, err != nil && len(items) > 0); button.Clicked() && !loading {
+					s.refreshAnimeAsync(true)
+				}
 			})
 			if err != nil {
 				notice(c, noteDanger, friendlyError(err))
-				return
 			}
 			for _, update := range updates {
 				row := ui.ButtonBase(c).Label(update.SubjectName).FillWidth().Cursor(ui.CursorPointer).Radius(radiusTile).Padding(float32(6), float32(8)).Background(ui.Hex(animeTint)).Border(1, ui.Hex(animeBorder))
