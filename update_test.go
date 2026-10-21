@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -110,5 +111,66 @@ func TestLatestManifestUsesPrereleaseWhenNoStableReleaseExists(t *testing.T) {
 	}
 	if want := server.URL + "/beta.json"; got != want {
 		t.Errorf("latestManifest = %q, want %q", got, want)
+	}
+}
+
+// serveManifest answers with one signed manifest naming version.
+func serveManifest(t *testing.T, version string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"version":%q,"notes":"n","url":%q,"size":1234,"signature":"c2ln"}`,
+			version, "https://example.invalid/boku.tar.gz")
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// The bug this pins down: the newest published release is usually the version
+// the user already runs, and reading its manifest back used to be reported as
+// "an update is ready" for that same version. Being current is up to date.
+func TestReleaseOfTheRunningVersionIsUpToDate(t *testing.T) {
+	for _, c := range []struct{ current, feed string }{
+		{"0.1.1", "0.1.1"},
+		{"0.1.1", "v0.1.1"},
+		{"0.1.0-beta.5", "0.1.0-beta.5"},
+		// A build ahead of the feed is not offered a downgrade.
+		{"0.1.2", "0.1.1"},
+	} {
+		server := serveManifest(t, c.feed)
+		u := &mygoUpdater{client: server.Client()}
+		got, err := u.release(context.Background(), server.URL, c.current)
+		if err != nil {
+			t.Fatalf("release(%s, feed %s): %v", c.current, c.feed, err)
+		}
+		if got != nil {
+			t.Errorf("running %s against feed %s offered %q, want no release", c.current, c.feed, got.Version)
+		}
+	}
+}
+
+// A feed that is genuinely newer is still a release: the fix must not turn
+// every check into "up to date".
+func TestReleaseOfANewerVersionIsOffered(t *testing.T) {
+	for _, c := range []struct{ current, feed string }{
+		{"0.1.0", "0.1.1"},
+		{"0.1.0", "v0.1.1"},
+		{"0.1.1", "0.1.2"},
+		{"0.1.0-beta.5", "0.1.0"},
+		{"0.1.1", "0.1.2-beta.1"},
+	} {
+		server := serveManifest(t, c.feed)
+		u := &mygoUpdater{client: server.Client()}
+		got, err := u.release(context.Background(), server.URL, c.current)
+		if err != nil {
+			t.Fatalf("release(%s, feed %s): %v", c.current, c.feed, err)
+		}
+		if got == nil {
+			t.Fatalf("running %s against feed %s offered no release", c.current, c.feed)
+		}
+		// The release carries the version without the tag's "v", because
+		// that is what the interface writes.
+		if want := strings.TrimPrefix(c.feed, "v"); got.Version != want {
+			t.Errorf("the offered version = %q, want %q", got.Version, want)
+		}
 	}
 }

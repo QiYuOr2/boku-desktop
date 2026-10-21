@@ -149,6 +149,16 @@ func (u *mygoUpdater) release(ctx context.Context, feed, current string) (*updat
 		return nil, err
 	}
 	slog.Debug("the release feed answered", "version", release.Version, "current", current)
+	// The version in the feed is the newest one published, not the newest
+	// one this build can use: a build running the newest version reads its
+	// own manifest back. Handing that over would offer the user "restart to
+	// update to the version you are running", so the comparison the framework
+	// makes in its own Check is made here too — this path reads the manifest
+	// itself and never reaches that Check before deciding.
+	if update.Compare(release.Version, current) <= 0 {
+		slog.Info("the application is up to date", "version", current, "newest", release.Version)
+		return nil, nil
+	}
 	return release, nil
 }
 
