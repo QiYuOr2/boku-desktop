@@ -69,6 +69,8 @@ type Deps struct {
 	Panels *panel.Panels
 	// Anime reads today's releases from the configured public watching list.
 	Anime AnimeService
+	// Bilibili reads public activity and live state for explicitly followed UPs.
+	Bilibili BilibiliService
 	// Secrets stores the credentials those panels need.
 	Secrets *credential.Secrets
 	// Clipboard reads and records the system clipboard. It is what the
@@ -139,23 +141,36 @@ type AnimeService interface {
 	RefreshMinutes() int
 	Configure(context.Context, bool, string, int) error
 	View() ([]domain.EpisodeRelease, time.Time, bool, error)
-	Refresh(context.Context) error
 	RefreshIfNeeded(context.Context) error
 	Cover(subjectID int64) []byte
+}
+
+// BilibiliService is the small presentation-facing contract of the UP
+// monitoring feature. It keeps app independent of the feature package.
+type BilibiliService interface {
+	Enabled() bool
+	UIDs() []int64
+	RefreshMinutes() int
+	DynamicCount() int
+	Notifications() (live, dynamic bool)
+	Configure(context.Context, bool, []int64, int, int, bool, bool) error
+	View() ([]domain.FollowedUpdate, time.Time, bool, error)
+	RefreshIfNeeded(context.Context) error
 }
 
 // State is the whole presentation state. It is read and written on the main
 // thread only.
 type State struct {
-	app           *mygo.Application
-	panelService  *panel.Panels
-	animeService  AnimeService
-	animeCovers   map[int64]*ui.Bitmap
-	secretService *credential.Secrets
-	clipboard     *clipboard.Clipboard
-	translate     *translate.Translate
-	screenshot    domain.ScreenshotDevice
-	regionCapture RegionCapture
+	app             *mygo.Application
+	panelService    *panel.Panels
+	animeService    AnimeService
+	bilibiliService BilibiliService
+	animeCovers     map[int64]*ui.Bitmap
+	secretService   *credential.Secrets
+	clipboard       *clipboard.Clipboard
+	translate       *translate.Translate
+	screenshot      domain.ScreenshotDevice
+	regionCapture   RegionCapture
 	// qrDecode reads the text a captured PNG holds. It is a field rather than
 	// a direct call so that the screenshot flow can be exercised without a
 	// real QR code in a fixture; New gives it the real decoder.
@@ -181,10 +196,15 @@ type State struct {
 	// updates is the update check, or nil in a build without one. The state
 	// it reports is read from it every frame rather than kept here, so that
 	// an answer arriving while no window is open is not lost.
-	updates           UpdateService
-	animeUsername     string
-	animeRefreshInput string
-	animeTokenInput   string
+	updates               UpdateService
+	animeUsername         string
+	animeRefreshInput     string
+	animeTokenInput       string
+	bilibiliUIDInput      string
+	bilibiliRefreshInput  string
+	bilibiliDynamicInput  string
+	bilibiliLiveNotice    bool
+	bilibiliDynamicNotice bool
 	// notifier puts short, actionable notices on the desktop. Updates and
 	// completed image translations share it so notification behavior stays
 	// consistent across the application.
@@ -507,6 +527,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		app:               app,
 		panelService:      deps.Panels,
 		animeService:      deps.Anime,
+		bilibiliService:   deps.Bilibili,
 		animeCovers:       make(map[int64]*ui.Bitmap),
 		secretService:     deps.Secrets,
 		clipboard:         deps.Clipboard,
@@ -552,6 +573,11 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if deps.Anime != nil {
 		state.animeUsername = deps.Anime.Username()
 		state.animeRefreshInput = strconv.Itoa(deps.Anime.RefreshMinutes())
+	}
+	if deps.Bilibili != nil {
+		state.bilibiliRefreshInput = strconv.Itoa(deps.Bilibili.RefreshMinutes())
+		state.bilibiliDynamicInput = strconv.Itoa(deps.Bilibili.DynamicCount())
+		state.bilibiliLiveNotice, state.bilibiliDynamicNotice = deps.Bilibili.Notifications()
 	}
 	if state.regionCapture != nil {
 		state.screenshot = &nativeRegionScreenshot{state: state, capture: state.regionCapture}
@@ -911,6 +937,7 @@ func (s *State) View(c *ui.Context) {
 			// window, not rows inside one margin.
 			s.card(c)
 			s.animeUpdates(c)
+			s.bilibiliUpdates(c)
 			s.imageTranslationTasks(c)
 		})
 		// The clipboard row closes the content: it is about the desktop
@@ -986,38 +1013,27 @@ func (s *State) refreshAsync(force bool) {
 	for _, panel := range s.panelService.List() {
 		s.refreshPanelAsync(panel.ID, force)
 	}
-	s.refreshAnimeAsync(false)
-}
-
-// refreshAnimeAsync fetches today's animation releases away from the UI
-// thread. force is for the flyout's refresh mark; normal openings obey the
-// user's configured refresh interval.
-func (s *State) refreshAnimeAsync(force bool) {
-	if s.animeService == nil {
-		return
+	if s.animeService != nil {
+		anime, window := s.animeService, s.panel
+		go func() {
+			if err := anime.RefreshIfNeeded(context.Background()); err != nil {
+				slog.Warn("anime releases could not be refreshed", "error", err)
+			}
+			if window != nil {
+				window.Update(func() { s.cacheAnimeCovers() })
+			}
+		}()
 	}
-	anime, window := s.animeService, s.panel
-	go func() {
-		var err error
-		if force {
-			err = anime.Refresh(context.Background())
-		} else {
-			err = anime.RefreshIfNeeded(context.Background())
-		}
-		if err != nil {
-			slog.Warn("anime releases could not be refreshed", "error", err)
-		}
-		if window != nil {
-			window.Update(func() {
-				s.cacheAnimeCovers()
-				s.fitQuickWindow()
-			})
-		}
-	}()
-	if window != nil {
-		// Ask for the loading frame immediately; Refresh itself is still on a
-		// background goroutine, so the tray callback returns at once.
-		window.Update(func() {})
+	if s.bilibiliService != nil {
+		service, window := s.bilibiliService, s.panel
+		go func() {
+			if err := service.RefreshIfNeeded(context.Background()); err != nil {
+				slog.Warn("Bilibili UPs could not be refreshed", "error", err)
+			}
+			if window != nil {
+				window.Update(func() {})
+			}
+		}()
 	}
 }
 

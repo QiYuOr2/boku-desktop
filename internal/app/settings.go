@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"runtime"
@@ -59,6 +60,7 @@ const (
 	sectionTranslate
 	sectionClipboard
 	sectionAnime
+	sectionBilibili
 	sectionGeneral
 	sectionAbout
 )
@@ -86,9 +88,133 @@ func (s *State) settingsPages() []*settingsPage {
 		{kind: sectionTranslate, name: "划词翻译", mark: s.translationMark, build: s.translateSection},
 		{kind: sectionClipboard, name: "剪贴板", mark: s.clipboardMark, build: s.clipboardSection},
 		{kind: sectionAnime, name: "动画", mark: s.tvMark, build: s.animeSection},
+		{kind: sectionBilibili, name: "B站", mark: s.tvMark, build: s.bilibiliSection},
 		{kind: sectionGeneral, name: "通用", mark: s.settingsMark, build: s.generalSection},
 		{kind: sectionAbout, name: "关于", mark: s.infoMark, build: s.aboutSection},
 	}
+}
+
+func (s *State) bilibiliSection(c *ui.Context, head *ui.Handle) {
+	if s.bilibiliService == nil {
+		return
+	}
+	inset(c, func() {
+		stacked(c, float32(16), func() {
+			sectionHead(c, head, s.tvMark, ui.Hex(bilibiliPrimary), "B站 UP 监听", "指定主播最新动态 + 开播状态 · api.bilibili.com")
+			on := s.bilibiliService.Enabled()
+			ui.Checkbox(c, &on, "在悬浮窗显示关注的 UP").FontSize(sizeBody).OnClick(func() { s.saveBilibili(on, s.bilibiliService.UIDs()) })
+			notice(c, notePlain, "无配置时整区不渲染；直播中优先高亮置顶。")
+			stacked(c, float32(8), func() {
+				sectionLabel(c, "关注列表（最多 8 个）")
+				for _, id := range s.bilibiliService.UIDs() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+						ui.Text(c, fmt.Sprintf("UID %d", id)).FontSize(sizeSmall).TextColor(colorTextBody)
+						ui.Spacer(c)
+						if wordButton(c, "删除").Clicked() {
+							s.removeBilibiliUID(on, id)
+						}
+					})
+				}
+				ui.Row(c).FillWidth().Gap(float32(6)).Children(func() {
+					ui.TextInput(c, &s.bilibiliUIDInput).Placeholder("UID 或空间链接，如 672328094").Grow(1).Height(heightControl)
+					if designButton(c, "添加", buttonPrimary).Clicked() {
+						s.addBilibiliUID(on)
+					}
+				})
+				cardHint(c, "支持粘贴 space.bilibili.com/xxx 链接，自动解析 UID。")
+			})
+			stacked(c, float32(8), func() {
+				sectionLabel(c, "刷新间隔（分钟）")
+				ui.TextInput(c, &s.bilibiliRefreshInput).FillWidth().Height(heightControl)
+				cardHint(c, "直播状态建议 ≤5 分钟")
+			})
+			stacked(c, float32(8), func() {
+				sectionLabel(c, "动态拉取条数")
+				ui.TextInput(c, &s.bilibiliDynamicInput).FillWidth().Height(heightControl)
+				cardHint(c, "每位 UP 展示最新 1–5 条动态")
+			})
+			ui.Checkbox(c, &s.bilibiliLiveNotice, "开播时系统通知").FontSize(sizeBody).OnClick(func() { s.saveBilibili(on, s.bilibiliService.UIDs()) })
+			ui.Checkbox(c, &s.bilibiliDynamicNotice, "有新动态时系统通知").FontSize(sizeBody).OnClick(func() { s.saveBilibili(on, s.bilibiliService.UIDs()) })
+			ui.Column(c).FillWidth().Background(colorField).Border(1, colorBorder).Radius(radiusField).Padding(float32(12)).Children(func() {
+				ui.Text(c, "数据来源").FontSize(sizeSmall).FontWeight(600).TextColor(colorTextMuted)
+				cardHint(c, "直播：GET /room/v1/Room/getRoomInfoOld?mid=…")
+				cardHint(c, "最新动态：GET /x/polymer/web-dynamic/v1/feed/space?host_mid=…")
+				cardHint(c, "公开空间与直播状态不需要登录；请求带应用 User-Agent。")
+			})
+			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+				if designButton(c, "立即刷新", buttonSecondary).Clicked() {
+					s.refreshAsync(true)
+				}
+			})
+		})
+	})
+}
+
+func (s *State) addBilibiliUID(enabled bool) {
+	raw := strings.TrimSpace(s.bilibiliUIDInput)
+	for _, prefix := range []string{"https://", "http://"} {
+		raw = strings.TrimPrefix(raw, prefix)
+	}
+	raw = strings.TrimPrefix(raw, "space.bilibili.com/")
+	raw = strings.SplitN(strings.SplitN(raw, "?", 2)[0], "#", 2)[0]
+	raw = strings.TrimSuffix(raw, "/")
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		s.panelStatus = "B站设置未保存：请输入有效 UID 或空间链接。"
+		s.Refresh()
+		return
+	}
+	ids := s.bilibiliService.UIDs()
+	for _, old := range ids {
+		if old == id {
+			return
+		}
+	}
+	ids = append(ids, id)
+	s.bilibiliUIDInput = ""
+	s.saveBilibili(enabled, ids)
+}
+func (s *State) removeBilibiliUID(enabled bool, id int64) {
+	ids := make([]int64, 0)
+	for _, old := range s.bilibiliService.UIDs() {
+		if old != id {
+			ids = append(ids, old)
+		}
+	}
+	s.saveBilibili(enabled, ids)
+}
+func (s *State) saveBilibili(enabled bool, ids []int64) {
+	service, window := s.bilibiliService, s.settingsWindow
+	minutes, err := strconv.Atoi(strings.TrimSpace(s.bilibiliRefreshInput))
+	if err != nil || minutes < 1 || minutes > 60 {
+		s.panelStatus = "B站设置未保存：刷新间隔必须是 1–60 的整数。"
+		s.Refresh()
+		return
+	}
+	dynamics, err := strconv.Atoi(strings.TrimSpace(s.bilibiliDynamicInput))
+	if err != nil || dynamics < 1 || dynamics > 5 {
+		s.panelStatus = "B站设置未保存：动态条数必须是 1–5 的整数。"
+		s.Refresh()
+		return
+	}
+	liveNotice, dynamicNotice := s.bilibiliLiveNotice, s.bilibiliDynamicNotice
+	go func() {
+		err := service.Configure(context.Background(), enabled, ids, minutes, dynamics, liveNotice, dynamicNotice)
+		if err == nil && enabled && len(ids) > 0 {
+			err = service.RefreshIfNeeded(context.Background())
+		}
+		if window != nil {
+			window.Update(func() {
+				if err != nil {
+					s.panelStatus = "B站设置未保存：" + friendlyError(err)
+				}
+				s.bilibiliRefreshInput = strconv.Itoa(service.RefreshMinutes())
+				s.bilibiliDynamicInput = strconv.Itoa(service.DynamicCount())
+				s.fitQuickWindow()
+				s.Refresh()
+			})
+		}
+	}()
 }
 
 func (s *State) animeSection(c *ui.Context, head *ui.Handle) {
@@ -135,7 +261,7 @@ func (s *State) animeSection(c *ui.Context, head *ui.Handle) {
 				cardHint(c, "Bangumi 仅提供放送日期；请求带应用名与联系方式。")
 			})
 			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-				if button := designButton(c, "保存", buttonSecondary).Shrink(0); button.Clicked() {
+				if button := designButton(c, "保存并刷新", buttonSecondary).Shrink(0); button.Clicked() {
 					s.saveAnime(on)
 				}
 			})
