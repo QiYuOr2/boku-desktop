@@ -1,6 +1,7 @@
 package app
 
 import (
+	updateui "boku/internal/update/ui"
 	"context"
 	"fmt"
 	"sync"
@@ -111,6 +112,11 @@ func updateStateWith(t *testing.T, updates UpdateService, notifier desktopNotifi
 	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
 	state.notifier = notifier
 	state.AttachUpdates(updates)
+	if updates != nil {
+		host := state.featureHost()
+		host.RunOnMain = state.refresh
+		state.updateUI = updateui.New(updates, notifier, host, state.showUpdateSettings, state.version)
+	}
 	return state
 }
 
@@ -176,43 +182,43 @@ func TestUpdateDialogState(t *testing.T) {
 		name    string
 		state   domain.UpdateState
 		current string
-		want    updateDialogInfo
+		want    updateui.DialogInfo
 	}{
 		{
-			name:    "checking shows a loading latest version",
+			name:    "checking shows a Loading Latest version",
 			state:   domain.UpdateState{Status: domain.UpdateChecking},
 			current: "v0.1.0",
-			want:    updateDialogInfo{latest: "正在获取", status: "正在获取最新版本…", loading: true},
+			want:    updateui.DialogInfo{Latest: "正在获取", Status: "正在获取最新版本…", Loading: true},
 		},
 		{
 			name:    "up to date compares with the current version",
 			state:   domain.UpdateState{Status: domain.UpdateUpToDate},
 			current: "v0.1.0",
-			want:    updateDialogInfo{latest: "0.1.0", status: "已是最新版本"},
+			want:    updateui.DialogInfo{Latest: "0.1.0", Status: "已是最新版本"},
 		},
 		{
 			name:    "ready names the new version",
 			state:   domain.UpdateState{Status: domain.UpdateReady, Version: "v0.2.0"},
 			current: "0.1.0",
-			want:    updateDialogInfo{latest: "0.2.0", status: "新版本已准备就绪"},
+			want:    updateui.DialogInfo{Latest: "0.2.0", Status: "新版本已准备就绪"},
 		},
 		{
-			name:    "failure does not invent a latest version",
+			name:    "failure does not invent a Latest version",
 			state:   domain.UpdateState{Status: domain.UpdateFailed, Detail: "网络连接被拒绝。"},
 			current: "",
-			want:    updateDialogInfo{latest: "未能获取", status: "检查更新失败：网络连接被拒绝。"},
+			want:    updateui.DialogInfo{Latest: "未能获取", Status: "检查更新失败：网络连接被拒绝。"},
 		},
 		{
-			name:    "unsupported is settled instead of loading forever",
+			name:    "unsupported is settled instead of Loading forever",
 			state:   domain.UpdateState{Status: domain.UpdateUnsupported},
 			current: "0.1.0",
-			want:    updateDialogInfo{latest: "不可用", status: "当前构建不支持自动更新"},
+			want:    updateui.DialogInfo{Latest: "不可用", Status: "当前构建不支持自动更新"},
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := updateDialogState(c.state, c.current); got != c.want {
-				t.Errorf("updateDialogState(%+v, %q) = %+v, want %+v", c.state, c.current, got, c.want)
+			if got := updateui.DialogState(c.state, c.current); got != c.want {
+				t.Errorf("updateui.DialogState(%+v, %q) = %+v, want %+v", c.state, c.current, got, c.want)
 			}
 		})
 	}
@@ -329,8 +335,8 @@ func TestUpdateNoticeOncePerVersion(t *testing.T) {
 		t.Fatalf("the notice was shown %d times, want once", len(notifier.notices))
 	}
 	got := notifier.notices[0]
-	if got.id != updateNoticeID {
-		t.Errorf("the notice's id is %q, want %q", got.id, updateNoticeID)
+	if got.id != updateui.NoticeID {
+		t.Errorf("the notice's id is %q, want %q", got.id, updateui.NoticeID)
 	}
 	if got.title == "" || got.body == "" {
 		t.Errorf("the notice is %q / %q, want a title and a body", got.title, got.body)

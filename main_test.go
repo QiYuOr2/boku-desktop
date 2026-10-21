@@ -16,8 +16,47 @@ import (
 	"boku/internal/logging"
 	panelcodex "boku/internal/panel/codex"
 	paneldeepseek "boku/internal/panel/deepseek"
+	"boku/internal/preferences"
 	"boku/internal/translate"
 )
+
+func TestServicesLoadAndPersistQuickWindowLayout(t *testing.T) {
+	userData := t.TempDir()
+	path := filepath.Join(userData, "settings.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"tools":{"quickWindowLayout":{"order":["anime","codex","deepseek","bilibili"],"hidden":["bilibili"]},"customKey":"keep"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	layout := preferences.NewQuickWindowLayout()
+	_, _, _, _, _, _, _, appearance, prefs, err := services(userData, "test", layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layout.Order()[0] != "anime" || layout.Visible("bilibili") {
+		t.Fatalf("loaded layout=%v", layout.Order())
+	}
+	layout.MoveToEnd("anime")
+	layout.SetVisible("codex", false)
+	if err := layout.Save(context.Background(), prefs); err != nil {
+		t.Fatal(err)
+	}
+	if err := appearance.Save(context.Background(), prefs, preferences.AppearanceDark); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := preferences.NewQuickWindowLayout()
+	if _, _, _, _, _, _, _, _, _, err := services(userData, "test", reloaded); err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Order()[3] != "anime" || reloaded.Visible("codex") || reloaded.Visible("bilibili") {
+		t.Fatalf("saved layout=%v", reloaded.Order())
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contents), `"customKey": "keep"`) {
+		t.Fatalf("unowned setting lost: %s", contents)
+	}
+}
 
 // The assembly is the one place a provider and its adapter, or a panel and
 // its provider, can be paired wrongly. That is a startup error, and it can

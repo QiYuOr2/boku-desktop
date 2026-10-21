@@ -70,9 +70,8 @@ func releases(subjectID int64, subjectName, coverURL string, payload []byte, sta
 		if name == "" {
 			name = strings.TrimSpace(ep.Name)
 		}
-		if name == "" {
-			return nil, bad("episode has no name", payload)
-		}
+		// An announced episode may not have a title yet. Keep its schedule;
+		// presentation can identify it by its episode number alone.
 		items = append(items, domain.EpisodeRelease{SubjectID: subjectID, SubjectName: subjectName, CoverURL: coverURL, EpisodeID: ep.ID, EpisodeName: name, EpisodeSort: ep.Sort, AirDate: date.UTC()})
 	}
 	sort.Slice(items, func(i, j int) bool {

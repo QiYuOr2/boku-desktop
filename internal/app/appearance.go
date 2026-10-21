@@ -1,12 +1,10 @@
 package app
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"strings"
-
 	"github.com/egoist/mygo"
+
+	"boku/internal/preferences"
+	preferencesui "boku/internal/preferences/ui"
 )
 
 // This file is the appearance the user chose: light, dark, or following the
@@ -22,95 +20,21 @@ import (
 // it. "system" is the default, and what an absent or unreadable value means:
 // a user who never chose an appearance gets the one their computer is in.
 
-// AppearanceMode is what the user chose in Settings → 通用 → 主题.
-type AppearanceMode string
+type AppearanceMode = preferences.AppearanceMode
+type Appearance = preferences.Appearance
+type AppearanceStore = preferences.Store
 
-// The three choices, spelled as they are written in settings.json.
 const (
-	// AppearanceSystem follows the desktop, including a change while the
-	// application is running.
-	AppearanceSystem AppearanceMode = "system"
-	// AppearanceLight and AppearanceDark hold that appearance whatever the
-	// desktop is doing.
-	AppearanceLight AppearanceMode = "light"
-	AppearanceDark  AppearanceMode = "dark"
+	AppearanceSystem = preferences.AppearanceSystem
+	AppearanceLight  = preferences.AppearanceLight
+	AppearanceDark   = preferences.AppearanceDark
 )
 
-// The settings key the choice lives under. It is the file's spelling, not a
-// Go field name: the settings file is read by people.
-const appearanceThemeKey = "appearanceTheme"
+const appearanceThemeKey = preferences.ThemeKey
 
-// appearanceSectionName is what errors call this section.
-const appearanceSectionName = "appearance"
-
-// Appearance is the stored choice. It holds the mode rather than being it,
-// because the settings store hands a section to the file and takes it back.
-type Appearance struct {
-	mode AppearanceMode
-}
-
-// NewAppearanceSection returns the section at its default: follow the
-// desktop. A user who has never opened the settings window is in this state.
-func NewAppearanceSection() *Appearance { return &Appearance{mode: AppearanceSystem} }
-
-// Name is what errors call this section.
-func (a *Appearance) Name() string { return appearanceSectionName }
-
-// Mode is the appearance the user chose, normalized.
-func (a *Appearance) Mode() AppearanceMode { return a.mode.Normalize() }
-
-// Set replaces the choice. An unknown value falls back to following the
-// desktop rather than leaving the window without a palette.
-func (a *Appearance) Set(mode AppearanceMode) { a.mode = mode.Normalize() }
-
-// Dark reports whether the application is dark given what the desktop is
-// doing. A fixed choice wins over the desktop; the system mode is the
-// desktop's own answer.
-func (a *Appearance) Dark(systemDark bool) bool {
-	switch a.Mode() {
-	case AppearanceDark:
-		return true
-	case AppearanceLight:
-		return false
-	default:
-		return systemDark
-	}
-}
-
-// Decode reads the theme out of the file's flat settings object.
-//
-// A file without the key leaves the choice as it is — the default for a new
-// user, the previous value during a read-modify-write. A value this build
-// does not know follows the desktop: a settings file written by a newer build
-// must not stop this one from starting.
-func (a *Appearance) Decode(values map[string]json.RawMessage) error {
-	if raw, present := values[appearanceThemeKey]; present {
-		var mode string
-		if err := json.Unmarshal(raw, &mode); err != nil {
-			return fmt.Errorf("%s: %w", appearanceThemeKey, err)
-		}
-		a.mode = AppearanceMode(mode).Normalize()
-	}
-	return nil
-}
-
-// Encode hands the choice back to the store.
-func (a *Appearance) Encode() (map[string]any, error) {
-	return map[string]any{appearanceThemeKey: string(a.Mode())}, nil
-}
-
-// Normalize maps the file's spelling to one of the three choices. Empty —
-// which is what a zero value holds — is the system, the same as absent.
-func (m AppearanceMode) Normalize() AppearanceMode {
-	switch AppearanceMode(strings.TrimSpace(string(m))) {
-	case AppearanceLight:
-		return AppearanceLight
-	case AppearanceDark:
-		return AppearanceDark
-	default:
-		return AppearanceSystem
-	}
-}
+// NewAppearanceSection remains a compatibility constructor while callers
+// migrate to preferences.NewAppearanceSection.
+func NewAppearanceSection() *Appearance { return preferences.NewAppearanceSection() }
 
 // ThemeSource is the appearance to give the desktop. It is what makes the
 // title bar and the menus match the page: Boku draws its own colors, but the
@@ -126,33 +50,6 @@ func ThemeSource(mode AppearanceMode) mygo.ThemeSource {
 	default:
 		return mygo.ThemeSystem
 	}
-}
-
-// appearanceLabels and appearanceModes are the segmented control's own list:
-// the order the settings window shows, and the mode each segment stands for.
-// The user asked for light, dark, automatic, in that order.
-var (
-	appearanceLabels = []string{"浅色", "深色", "自动"}
-	appearanceModes  = []AppearanceMode{AppearanceLight, AppearanceDark, AppearanceSystem}
-)
-
-// appearanceIndex is the segment that is chosen for a mode.
-func appearanceIndex(mode AppearanceMode) int {
-	mode = mode.Normalize()
-	for index, choice := range appearanceModes {
-		if choice == mode {
-			return index
-		}
-	}
-	// Normalize falls back to the automatic mode, which is the last segment.
-	return len(appearanceModes) - 1
-}
-
-// AppearanceStore is the part of the settings store the choice is written
-// through. It is the same shape the features declare for themselves: this
-// package does not depend on the storage implementation.
-type AppearanceStore interface {
-	Update(ctx context.Context, section string, change func() error) error
 }
 
 // PopoverAppearance gives an already-created native popover the dark
@@ -234,27 +131,10 @@ func (s *State) syncPopoverAppearance() {
 // that ignored the click would be the worse answer.
 func (s *State) setAppearance(mode AppearanceMode) {
 	mode = mode.Normalize()
-	s.appearanceStatus = ""
-	// The choice is in memory before it is in the file: a write that fails
-	// still leaves this run on the appearance the user just picked, which is
-	// what the status line under the control then explains.
-	s.appearance.Set(mode)
-	if s.appearanceStore != nil {
-		err := s.appearanceStore.Update(backgroundContext(), s.appearance.Name(), func() error {
-			// The store reads the file before it runs this, and that read
-			// decoded the appearance that was on disk. The closure is where
-			// the new choice is made, so that what is written back is the
-			// user's click rather than the value the file already had.
-			s.appearance.Set(mode)
-			return nil
-		})
-		if err != nil {
-			s.appearanceStatus = "主题没能写进设置文件：" + friendlyError(err) + "（本次运行内已生效）"
-		}
-		// A failed read never ran the closure, and a failed write ran it. This
-		// leaves the run on the user's choice either way.
-		s.appearance.Set(mode)
+	if s.preferencesUI == nil {
+		s.preferencesUI = preferencesui.New(nil, s.featureHost())
 	}
+	s.preferencesUI.SaveAppearance(s.appearance, s.appearanceStore, mode)
 	// The fixed modes are known here; the automatic one is the desktop's
 	// answer, which the assembly re-reads after it has been told the new
 	// source (SyncAppearance). This is the answer for a state with nothing to
@@ -265,4 +145,11 @@ func (s *State) setAppearance(mode AppearanceMode) {
 		s.applyAppearance(mode)
 	}
 	s.Refresh()
+}
+
+func (s *State) appearanceStatusLine() string {
+	if s.preferencesUI == nil {
+		return ""
+	}
+	return s.preferencesUI.AppearanceStatus()
 }

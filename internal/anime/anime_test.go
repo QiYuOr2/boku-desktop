@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,6 +31,90 @@ func TestReleasesRejectsMalformedAirdate(t *testing.T) {
 	_, err := releases(1, "动画", "", []byte(`{"data":[{"id":2,"type":0,"name":"二","airdate":"nope"}]}`), time.Now(), time.Now().AddDate(0, 0, 1))
 	if !errors.Is(err, domain.ErrProviderBadResponse) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestReleasesAcceptsUntitledEpisodes(t *testing.T) {
+	start := time.Date(2026, 10, 20, 0, 0, 0, 0, shanghaiZone)
+	for _, tc := range []struct {
+		name, fields, want string
+	}{
+		{"translated", `"name":"Original","name_cn":" 中文 "`, "中文"},
+		{"original", `"name":" Original ","name_cn":" "`, "Original"},
+		{"empty", `"name":"","name_cn":""`, ""},
+		{"whitespace", `"name":" ","name_cn":"\t"`, ""},
+		{"missing", `"sort":3`, ""},
+		{"null", `"name":null,"name_cn":null`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := []byte(`{"data":[{"id":9,"type":0,"airdate":"2026-10-20",` + tc.fields + `}]}`)
+			items, err := releases(7, "动画", "", payload, start, start.AddDate(0, 0, 1))
+			if err != nil || len(items) != 1 {
+				t.Fatalf("releases = %#v, %v", items, err)
+			}
+			if items[0].EpisodeID != 9 || items[0].EpisodeName != tc.want {
+				t.Fatalf("release = %#v, want title %q", items[0], tc.want)
+			}
+		})
+	}
+}
+
+func TestReleasesRejectsMalformedUntitledEpisodes(t *testing.T) {
+	start := time.Date(2026, 10, 20, 0, 0, 0, 0, shanghaiZone)
+	for _, payload := range []string{
+		`{"data":[{"id":9,"type":0,"airdate":"nope"}]}`,
+		`{"data":[{"id":9,"type":0,"airdate":"2026-10-20","name":42}]}`,
+		`{"data":`,
+	} {
+		if _, err := releases(7, "动画", "", []byte(payload), start, start.AddDate(0, 0, 1)); !errors.Is(err, domain.ErrProviderBadResponse) {
+			t.Errorf("payload %s: error = %v", payload, err)
+		}
+	}
+}
+
+func TestServiceRefreshesUntitledEpisodes(t *testing.T) {
+	payload, err := os.ReadFile("../../testdata/providers/bangumi/episodes-untitled.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/users/sai/collections":
+			_, _ = w.Write([]byte(`{"total":1,"data":[{"subject_id":7,"subject":{"name_cn":"测试动画"}}]}`))
+		case "/v0/episodes":
+			_, _ = w.Write(payload)
+		default:
+			t.Errorf("unexpected path = %s", r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	old := bangumiAPIBaseURL
+	bangumiAPIBaseURL = server.URL
+	t.Cleanup(func() { bangumiAPIBaseURL = old })
+	section := NewSection()
+	section.Set(Settings{Enabled: true, Username: "sai"})
+	service, err := NewWithCache(httpc.New(httpc.Options{UserAgent: "Boku/test"}), section, nil, NewCache(filepath.Join(t.TempDir(), "anime_today.json")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC) }
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	items, fetchedAt, loading, err := service.View()
+	if err != nil || loading || fetchedAt.IsZero() || len(items) != 2 {
+		t.Fatalf("view = %#v, %s, %v, %v", items, fetchedAt, loading, err)
+	}
+	if items[0].EpisodeID != 9 || items[0].EpisodeName != "" || items[0].EpisodeSort != 3 || items[1].EpisodeID != 10 || items[1].EpisodeName != "下一集" {
+		t.Fatalf("releases = %#v", items)
+	}
+	items, _, _, ok, err := service.cache.Load("2026-10-20")
+	if err != nil || !ok {
+		t.Fatalf("cache load = %v, %v", ok, err)
+	}
+	if err != nil || len(items) != 2 || items[0].EpisodeID != 9 || items[0].EpisodeName != "" {
+		t.Fatalf("restored releases = %#v, %v", items, err)
 	}
 }
 

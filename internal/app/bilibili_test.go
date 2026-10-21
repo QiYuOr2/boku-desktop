@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	bilibiliui "boku/internal/bilibili/ui"
 	"boku/internal/domain"
 )
 
@@ -37,6 +38,10 @@ func (b testBilibili) Avatar(int64) []byte                   { return nil }
 func TestBilibiliNotificationSkipsInitialSnapshotAndNoticesLiveTransition(t *testing.T) {
 	notifier := &testNotifier{supported: true}
 	state := &State{bilibiliService: testBilibili{live: true}, notifier: notifier}
+	state.bilibiliUI = bilibiliui.New(state.bilibiliService)
+	host := state.featureHost()
+	host.RunOnMain = state.refresh
+	state.bilibiliUI.AttachHost(host)
 	current := domain.FollowedUpdate{CreatorID: 1, CreatorName: "UP", Live: true, LiveRoomID: 9, LiveTitle: "开播"}
 	state.NoteBilibiliChanges(nil, []domain.FollowedUpdate{current})
 	time.Sleep(20 * time.Millisecond)
