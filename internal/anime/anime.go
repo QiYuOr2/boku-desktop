@@ -9,6 +9,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"log/slog"
 	"net/url"
 	"sort"
 	"sync"
@@ -58,16 +59,29 @@ type Service struct {
 	err       error
 	loading   bool
 	covers    map[int64][]byte
+	cache     *Cache
 }
 
 func New(client *httpc.Client, section *Section, store StoreSettings, secrets ...domain.SecretStore) (*Service, error) {
+	return newService(client, section, store, nil, secrets...)
+}
+
+// NewWithCache creates the animation service with its daily local cache.
+// main supplies the user-data path; the feature package itself never chooses a
+// global filesystem location.
+func NewWithCache(client *httpc.Client, section *Section, store StoreSettings, cache *Cache, secrets ...domain.SecretStore) (*Service, error) {
+	return newService(client, section, store, cache, secrets...)
+}
+
+func newService(client *httpc.Client, section *Section, store StoreSettings, cache *Cache, secrets ...domain.SecretStore) (*Service, error) {
 	if client == nil || section == nil {
 		return nil, fmt.Errorf("%w: anime service needs client and settings", domain.ErrInvalidArgument)
 	}
-	service := &Service{client: client, section: section, store: store, now: time.Now, covers: make(map[int64][]byte)}
+	service := &Service{client: client, section: section, store: store, now: time.Now, covers: make(map[int64][]byte), cache: cache}
 	if len(secrets) > 0 {
 		service.secrets = secrets[0]
 	}
+	service.restoreToday()
 	return service, nil
 }
 func (s *Service) Cover(subjectID int64) []byte {
@@ -177,6 +191,28 @@ func (s *Service) Refresh(ctx context.Context) error {
 	return nil
 }
 
+func (s *Service) today() string {
+	return s.now().In(shanghai()).Format(time.DateOnly)
+}
+
+func (s *Service) restoreToday() {
+	if s.cache == nil {
+		return
+	}
+	items, fetchedAt, ok, err := s.cache.Load(s.today())
+	if err != nil {
+		slog.Warn("animation cache could not be read", "event", "anime_cache_unreadable", "error", err)
+		return
+	}
+	if !ok {
+		return
+	}
+	s.mu.Lock()
+	s.releases = items
+	s.fetchedAt = fetchedAt
+	s.mu.Unlock()
+}
+
 func (s *Service) refreshCovers(ctx context.Context, releases []domain.EpisodeRelease) {
 	urls := make(map[int64]string)
 	for _, release := range releases {
@@ -219,11 +255,29 @@ func (s *Service) headers(ctx context.Context) map[string]string {
 	return map[string]string{"Authorization": "Bearer " + string(secret.Value)}
 }
 func (s *Service) record(items []domain.EpisodeRelease, err error) {
+	day := s.today()
+	var (
+		cache     *Cache
+		fetchedAt time.Time
+		toSave    []domain.EpisodeRelease
+	)
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err == nil {
 		s.releases = append([]domain.EpisodeRelease(nil), items...)
 		s.fetchedAt = s.now().UTC()
+		cache = s.cache
+		fetchedAt = s.fetchedAt
+		toSave = append([]domain.EpisodeRelease(nil), s.releases...)
+	} else if s.fetchedAt.IsZero() || s.fetchedAt.In(shanghai()).Format(time.DateOnly) != day {
+		// A successful request from another day cannot answer for today.
+		s.releases = nil
+		s.fetchedAt = time.Time{}
 	}
 	s.err = err
+	s.mu.Unlock()
+	if cache != nil {
+		if saveErr := cache.Save(day, fetchedAt, toSave); saveErr != nil {
+			slog.Warn("animation cache could not be saved", "event", "anime_cache_unwritable", "error", saveErr)
+		}
+	}
 }

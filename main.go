@@ -331,7 +331,7 @@ func services(userData, version string) (*panel.Panels, *anime.Service, *credent
 	// project address in the common client also makes every other request
 	// traceable without leaking any user-specific value.
 	client := httpc.New(httpc.Options{UserAgent: "Boku/" + applicationVersion(version) + " (+https://github.com/QiYuOr2/boku)"})
-	animeService, err := anime.New(client, animeSettings, prefs, secretStore)
+	animeService, err := anime.NewWithCache(client, animeSettings, prefs, anime.NewCache(filepath.Join(userData, "anime_today.json")), secretStore)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare anime updates: %w", err)
 	}
