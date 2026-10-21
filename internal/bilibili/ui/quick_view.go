@@ -8,12 +8,6 @@ import (
 	"time"
 )
 
-const (
-	bilibiliPrimary = "#FB7299"
-	bilibiliTint    = "#FFF0F3"
-	bilibiliBorder  = "#FCD5E0"
-)
-
 // bilibiliUpdates is absent until at least one explicit UP is configured, and
 // the block is drawn even when no answer is on screen yet: a creator list is
 // something the user configured, so it has a shape before the first reply.
@@ -33,10 +27,10 @@ func (s *ViewModel) QuickView(c *ui.Context, design presentation.ReadingDesign) 
 				// The count belongs to the title, so it sits beside it rather
 				// than being pushed to the right edge by the actions.
 				ui.Row(c).AlignItems(ui.Center).Gap(float32(8)).Children(func() {
-					s.design.QuickTile(c, s.design.Mark, ui.Hex(bilibiliTint), ui.Hex(bilibiliPrimary))
+					s.design.QuickTile(c, s.design.Mark, presentation.BilibiliAccent.Tile, presentation.BilibiliAccent.TileInk)
 					ui.Text(c, "关注的 UP").FontSize(s.design.SizeQuickName).FontWeight(600).TextColor(s.design.PanelInk).SingleLine()
-					ui.Box(c).Background(ui.Hex(bilibiliTint)).Radius(float32(10)).Padding(float32(2), float32(6)).Children(func() {
-						ui.Text(c, fmt.Sprint(len(uids))).FontSize(s.design.SizeQuickTiny).FontWeight(600).TextColor(ui.Hex(bilibiliPrimary)).SingleLine()
+					ui.Box(c).Background(presentation.BilibiliAccent.Tint).Radius(float32(10)).Padding(float32(2), float32(6)).Children(func() {
+						ui.Text(c, fmt.Sprint(len(uids))).FontSize(s.design.SizeQuickTiny).FontWeight(600).TextColor(presentation.BilibiliAccent.Ink).SingleLine()
 					})
 				})
 				ui.Spacer(c)
@@ -71,7 +65,7 @@ func (s *ViewModel) QuickView(c *ui.Context, design presentation.ReadingDesign) 
 // is anything to say about them: a portrait if one was fetched, the UID as the
 // name, and a placeholder line where the post will go.
 func (s *ViewModel) bilibiliPlaceholderRow(c *ui.Context, uid int64) {
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Radius(s.design.RadiusTile).Padding(float32(6), float32(8)).Background(s.design.PanelField).Border(1, ui.Hex("#F1F0EF")).Children(func() {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Radius(s.design.RadiusTile).Padding(float32(6), float32(8)).Background(s.design.PanelField).Border(1, presentation.PanelBorder).Children(func() {
 		s.bilibiliPortrait(c, s.bilibiliAvatar(uid))
 		ui.Column(c).Grow(1).Gap(float32(4)).Children(func() {
 			ui.Text(c, fmt.Sprintf("UID %d", uid)).FontSize(s.design.SizeQuickFine).FontWeight(600).TextColor(s.design.PanelFaint).SingleLine()
@@ -83,23 +77,23 @@ func (s *ViewModel) bilibiliPlaceholderRow(c *ui.Context, uid int64) {
 // bilibiliPortrait is one creator's round avatar, falling back to the block's
 // own mark when the image is missing or could not be decoded.
 func (s *ViewModel) bilibiliPortrait(c *ui.Context, avatar *ui.Bitmap) {
-	ui.Box(c).Size(float32(32), float32(32)).Shrink(0).Radius(float32(16)).Background(ui.Hex(bilibiliTint)).Border(1, ui.Hex(bilibiliBorder)).Center().Children(func() {
+	ui.Box(c).Size(float32(32), float32(32)).Shrink(0).Radius(float32(16)).Background(presentation.BilibiliAccent.Tint).Border(1, presentation.BilibiliAccent.Border).Center().Children(func() {
 		if avatar != nil {
 			ui.Image(c, avatar).Fill().Fit(ui.Cover).Radius(float32(16))
 			return
 		}
-		ui.Icon(c, s.design.Mark).Size(float32(14), float32(14)).TextColor(ui.Hex(bilibiliPrimary))
+		ui.Icon(c, s.design.Mark).Size(float32(14), float32(14)).TextColor(presentation.BilibiliAccent.Ink)
 	})
 }
 
 func (s *ViewModel) bilibiliRow(c *ui.Context, item domain.FollowedUpdate) {
-	background, border := s.design.PanelField, ui.Hex("#F1F0EF")
+	background, border := s.design.PanelField, presentation.PanelBorder
 	if item.Live {
-		background, border = ui.Hex(bilibiliTint), ui.Hex(bilibiliBorder)
+		background, border = presentation.BilibiliAccent.Tint, presentation.BilibiliAccent.Border
 	}
 	row := ui.ButtonBase(c).Label(item.CreatorName).FillWidth().Cursor(ui.CursorPointer).Radius(s.design.RadiusTile).Padding(float32(6), float32(8)).Background(background).Border(1, border)
 	if row.Hovered() || row.Focused() {
-		row = row.Background(ui.Hex("#FFE8EF"))
+		row = row.Background(presentation.BilibiliAccent.Hover).Border(1, presentation.BilibiliAccent.HoverBorder)
 	}
 	row.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
@@ -109,12 +103,12 @@ func (s *ViewModel) bilibiliRow(c *ui.Context, item domain.FollowedUpdate) {
 					ui.Text(c, item.CreatorName).FontSize(s.design.SizeQuickFine).FontWeight(600).TextColor(s.design.PanelInk).SingleLine()
 					ui.Text(c, item.Kind).FontSize(s.design.SizeQuickTiny).TextColor(func() ui.Color {
 						if item.Live {
-							return s.design.ColorOnMark
+							return presentation.BilibiliAccent.BadgeInk
 						}
 						return s.design.PanelFaint
 					}()).Background(func() ui.Color {
 						if item.Live {
-							return ui.Hex(bilibiliPrimary)
+							return presentation.BilibiliAccent.BadgeFill
 						}
 						return s.design.PanelLine
 					}()).Radius(float32(3)).Padding(float32(1), float32(4)).SingleLine()
@@ -124,7 +118,7 @@ func (s *ViewModel) bilibiliRow(c *ui.Context, item domain.FollowedUpdate) {
 			})
 			ui.Icon(c, s.design.Chevron).Size(float32(14), float32(14)).Shrink(0).TextColor(func() ui.Color {
 				if item.Live {
-					return ui.Hex(bilibiliPrimary)
+					return presentation.BilibiliAccent.Ink
 				}
 				return s.design.ColorTextMuted
 			}())

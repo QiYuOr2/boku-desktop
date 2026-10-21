@@ -7,13 +7,6 @@ import (
 	"log/slog"
 )
 
-const (
-	animePrimary = "#EA9199"
-	animeTint    = "#FFF5F6"
-	animeBorder  = "#F9DDE0"
-	animeHover   = "#FFECEF"
-)
-
 // animeUpdates draws today's releases. It is absent when disabled,
 // unconfigured, or there is no release. Once a request has settled, an empty
 // today stays absent even when the request failed: an optional schedule must
@@ -32,12 +25,12 @@ func (s *ViewModel) QuickView(c *ui.Context, design presentation.ReadingDesign) 
 		ui.Column(c).FillWidth().Gap(float32(7)).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 				ui.Row(c).AlignItems(ui.Center).Gap(float32(8)).Children(func() {
-					s.design.QuickTile(c, s.design.Mark, ui.Hex(animePrimary), s.design.ColorOnMark)
+					s.design.QuickTile(c, s.design.Mark, presentation.AnimeAccent.Tile, presentation.AnimeAccent.TileInk)
 					ui.Text(c, "今日动画更新").FontSize(s.design.SizeQuickName).FontWeight(600).TextColor(s.design.PanelInk).SingleLine()
 					// Keep the count with the thing it counts. The right edge is
 					// reserved for the refresh control, as it is on quota panels.
-					ui.Box(c).Background(ui.Hex(animeTint)).Radius(float32(10)).Padding(float32(2), float32(6)).Children(func() {
-						ui.Text(c, fmt.Sprintf("%d", len(updates))).FontSize(s.design.SizeQuickTiny).FontWeight(600).TextColor(ui.Hex(animePrimary)).SingleLine()
+					ui.Box(c).Background(presentation.AnimeAccent.Tint).Radius(float32(10)).Padding(float32(2), float32(6)).Children(func() {
+						ui.Text(c, fmt.Sprintf("%d", len(updates))).FontSize(s.design.SizeQuickTiny).FontWeight(600).TextColor(presentation.AnimeAccent.Ink).SingleLine()
 					})
 				})
 				ui.Spacer(c)
@@ -52,9 +45,9 @@ func (s *ViewModel) QuickView(c *ui.Context, design presentation.ReadingDesign) 
 				s.design.Notice(c, true, s.design.FriendlyError(err))
 			}
 			for _, update := range updates {
-				row := ui.ButtonBase(c).Label(update.SubjectName).FillWidth().Cursor(ui.CursorPointer).Radius(s.design.RadiusTile).Padding(float32(6), float32(8)).Background(ui.Hex(animeTint)).Border(1, ui.Hex(animeBorder))
+				row := ui.ButtonBase(c).Label(update.SubjectName).FillWidth().Cursor(ui.CursorPointer).Radius(s.design.RadiusTile).Padding(float32(6), float32(8)).Background(presentation.AnimeAccent.Tint).Border(1, presentation.AnimeAccent.Border)
 				if row.Hovered() || row.Focused() {
-					row = row.Background(ui.Hex(animeHover)).Border(1, ui.Hex("#F4B8BE"))
+					row = row.Background(presentation.AnimeAccent.Hover).Border(1, presentation.AnimeAccent.HoverBorder)
 				}
 				row.Children(func() {
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
@@ -62,13 +55,13 @@ func (s *ViewModel) QuickView(c *ui.Context, design presentation.ReadingDesign) 
 						if s != nil {
 							cover = s.Cover(update.SubjectID)
 						}
-						thumbnail := ui.Box(c).Size(float32(32), float32(32)).Shrink(0).Radius(s.design.RadiusField).Background(ui.Hex("#FCE7E9")).Border(1, ui.Hex(animeBorder)).Center()
+						thumbnail := ui.Box(c).Size(float32(32), float32(32)).Shrink(0).Radius(s.design.RadiusField).Background(presentation.AnimeAccent.Tint).Border(1, presentation.AnimeAccent.Border).Center()
 						thumbnail.Children(func() {
 							if cover != nil {
 								ui.Image(c, cover).Fill().Fit(ui.Cover).Radius(s.design.RadiusField)
 								return
 							}
-							ui.Icon(c, s.design.Mark).Size(float32(14), float32(14)).TextColor(ui.Hex(animePrimary))
+							ui.Icon(c, s.design.Mark).Size(float32(14), float32(14)).TextColor(presentation.AnimeAccent.Ink)
 						})
 						ui.Column(c).Grow(1).Gap(float32(2)).Children(func() {
 							ui.Text(c, update.SubjectName).FontSize(s.design.SizeQuickFine).FontWeight(600).TextColor(s.design.PanelInk).SingleLine()

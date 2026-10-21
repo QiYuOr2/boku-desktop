@@ -8,16 +8,16 @@ import (
 )
 
 type State struct {
-	panelService                         *panel.Panels
-	host                                 presentation.Host
-	openSettings                         func()
-	deepseekMark, gaugeMark, refreshMark *ui.SVG
-	dark, detailsOpen                    bool
-	loginNotice                          string
+	panelService                                    *panel.Panels
+	host                                            presentation.Host
+	openSettings                                    func()
+	deepseekMark, codexMark, gaugeMark, refreshMark *ui.SVG
+	dark, detailsOpen                               bool
+	loginNotice                                     string
 }
 
-func New(service *panel.Panels, host presentation.Host, open func(), deepseek, gauge, refresh *ui.SVG) *State {
-	return &State{panelService: service, host: host, openSettings: open, deepseekMark: deepseek, gaugeMark: gauge, refreshMark: refresh}
+func New(service *panel.Panels, host presentation.Host, open func(), deepseek, codex, gauge, refresh *ui.SVG) *State {
+	return &State{panelService: service, host: host, openSettings: open, deepseekMark: deepseek, codexMark: codex, gaugeMark: gauge, refreshMark: refresh}
 }
 
 func (s *State) Refresh() { s.host.Refresh() }

@@ -23,16 +23,26 @@ func TestBothPalettesChooseEveryColor(t *testing.T) {
 		{name: "dark", p: DarkPalette},
 	} {
 		value := reflect.ValueOf(test.p)
+		var checkColor func(reflect.Value, string)
+		checkColor = func(color reflect.Value, field string) {
+			if color.Type() == reflect.TypeFor[ReadingAccent]() {
+				for index := 0; index < color.NumField(); index++ {
+					checkColor(color.Field(index), field+"."+color.Type().Field(index).Name)
+				}
+				return
+			}
+			// ui.Color's fourth byte is its alpha. A color without one draws
+			// as nothing whatever its RGB says.
+			if alpha := color.Field(3).Uint(); alpha == 0 {
+				t.Errorf("%s palette: %s has no alpha", test.name, field)
+			}
+		}
 		for index := 0; index < value.NumField(); index++ {
 			field := value.Type().Field(index).Name
 			if field == test.clear {
 				continue
 			}
-			// ui.Color's fourth byte is its alpha. A color without one draws
-			// as nothing whatever its RGB says.
-			if alpha := value.Field(index).Field(3).Uint(); alpha == 0 {
-				t.Errorf("%s palette: %s has no alpha", test.name, field)
-			}
+			checkColor(value.Field(index), field)
 		}
 	}
 }
