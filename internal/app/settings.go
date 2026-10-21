@@ -2221,12 +2221,18 @@ func (s *State) addCustomService() {
 		// catalogue does not reliably advertise vision support, so test the
 		// exact endpoint with a tiny image after the key and translator exist.
 		// Failure does not undo the service: it can still be a useful text
-		// translator, and the stored capability remains false.
+		// translator, and the stored capability remains false. It is logged
+		// rather than dropped, because the card then tells the user the service
+		// is text-only and this line is what explains why.
 		imageSupported := false
 		if err == nil {
 			probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			imageSupported, _ = service.DetectCustomImageCapability(probeCtx, id)
+			supported, probeErr := service.DetectCustomImageCapability(probeCtx, id)
 			cancel()
+			if probeErr != nil {
+				slog.Warn("the image capability probe did not finish", "event", "image_probe_failed", "provider", id, "error", probeErr)
+			}
+			imageSupported = supported
 		}
 		if err != nil {
 			slog.Warn("custom translator creation failed", "event", "custom_translator_creation_failed", "duration", time.Since(startedAt), "error", err)

@@ -56,12 +56,31 @@ type SMAppService struct {
 
 // NewSMAppService returns the manager over the application's login item.
 func NewSMAppService() *SMAppService {
-	home, _ := os.UserHomeDir()
+	// A home directory that cannot be read leaves the legacy directory empty
+	// rather than joining onto nothing: filepath.Join("", "Library", ...) is a
+	// relative path, and a relative path is resolved against whatever working
+	// directory the application happens to have been started in — so the
+	// migration step would look for, and could delete, somebody else's files.
+	// Empty is the value the migration already checks for.
 	return &SMAppService{
 		service:   objcLoginItem{},
-		legacyDir: filepath.Join(home, "Library", "LaunchAgents"),
+		legacyDir: legacyLaunchAgentsDir(),
 		installed: requireInstalledApp,
 	}
+}
+
+// legacyLaunchAgentsDir is where the pre-SMAppService login agent lived, or ""
+// when the home directory cannot be read.
+func legacyLaunchAgentsDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		slog.Warn("the home directory could not be read; the old login item is left alone", "event", "autostart_home_unavailable", "error", err)
+		return ""
+	}
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, "Library", "LaunchAgents")
 }
 
 // Read reports whether the system has an enabled login item for this
@@ -179,8 +198,16 @@ func requireInstalledApp() error {
 	if bundle == "" {
 		return ErrNotInstalled
 	}
-	home, _ := os.UserHomeDir()
-	for _, root := range []string{"/Applications", filepath.Join(home, "Applications")} {
+	// Only the system Applications folder when the home directory cannot be
+	// read: joining onto an empty home would ask whether the bundle is inside
+	// a relative "Applications", which is not a place this check means.
+	roots := []string{"/Applications"}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		roots = append(roots, filepath.Join(home, "Applications"))
+	} else if err != nil {
+		slog.Warn("the home directory could not be read; only the system Applications folder is checked", "event", "autostart_home_unavailable", "error", err)
+	}
+	for _, root := range roots {
 		if inside(root, bundle) {
 			return nil
 		}

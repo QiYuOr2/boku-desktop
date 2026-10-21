@@ -34,10 +34,12 @@ package selection
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"time"
 
 	"boku/internal/domain"
+	"boku/internal/platform/logonce"
 )
 
 // DefaultTimeout bounds one reading of the selection, all attempts together. It
@@ -181,19 +183,38 @@ func putBackable(content domain.ClipContent) bool {
 }
 
 // putBack puts the clipboard back the way the copy found it.
+//
+// A write that fails is logged and not returned: the caller asked for the
+// selection, and the copy it made has already happened either way — there is
+// nothing it could do differently, and failing the reading over a clipboard
+// that would not take the old value back would turn a translation into an
+// error about something the user did not ask about. It is still worth a line:
+// the user's previous clipboard is gone at that point, and this is the only
+// record of why.
 func putBack(ctx context.Context, clipboard domain.ClipboardDevice, saved domain.ClipContent, savedErr error) {
 	if savedErr != nil {
 		// Nothing could be read, so there is nothing to put back: the copy was
 		// made over a clipboard this tool cannot describe.
 		return
 	}
+	var err error
 	switch saved.Kind {
 	case domain.ClipKindFile:
-		_ = clipboard.WriteFiles(ctx, saved.Files)
+		err = clipboard.WriteFiles(ctx, saved.Files)
 	case domain.ClipKindImage:
-		_ = clipboard.WriteImage(ctx, saved.Image)
+		err = clipboard.WriteImage(ctx, saved.Image)
 	default:
-		_ = clipboard.WriteText(ctx, saved.Text)
+		err = clipboard.WriteText(ctx, saved.Text)
+	}
+	// Deduplicated: this runs once per selection read, which is once per
+	// shortcut press or per screenshot tap — a user pressing the key again
+	// because nothing happened would otherwise write the same line each time,
+	// and the clipboard being unusable is not news after the first minute.
+	if err != nil && logonce.Should("selection-clipboard-restore", err.Error()) {
+		slog.Warn("the clipboard could not be put back after reading the selection", "event", "clipboard_restore_failed", "kind", saved.Kind, "error", err)
+	}
+	if err == nil {
+		logonce.Forget("selection-clipboard-restore")
 	}
 }
 

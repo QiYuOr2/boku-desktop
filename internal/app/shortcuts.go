@@ -191,10 +191,18 @@ func (s *State) onScreenshotShortcut() {
 
 // clearScreenshotShortcut persists the explicit disabled state and releases
 // both bindings before restoring the text shortcut alone.
+//
+// A write that fails is logged rather than swallowed: the window has already
+// said the shortcut is cleared, and a setting that did not reach the file
+// comes back at the next launch with nobody told why. The binding itself is
+// released either way — this run is what the user asked about, and the
+// remembered value is only about the next one.
 func (s *State) clearScreenshotShortcut() {
 	slog.Info("screenshot shortcut cleared", "event", "screenshot_shortcut_cleared")
 	if s.translate != nil {
-		_ = s.translate.SetScreenshotAccelerator(backgroundContext(), "")
+		if err := s.translate.SetScreenshotAccelerator(backgroundContext(), ""); err != nil {
+			slog.Warn("the cleared screenshot shortcut could not be remembered", "event", "screenshot_shortcut_clear_failed", "error", err)
+		}
 	}
 	s.screenshotShortcut = shortcutState{}
 	if s.translateSettingsOr().Enabled {

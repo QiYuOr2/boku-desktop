@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -353,7 +354,12 @@ func imageCapabilityProbePNG() []byte {
 		}
 	}
 	var encoded bytes.Buffer
-	_ = png.Encode(&encoded, canvas)
+	// Encoding into memory does not normally fail, and there is no error to
+	// return: this is a probe generator. A failure is still worth a line,
+	// because the empty result is sent to a model as if it were an image.
+	if err := png.Encode(&encoded, canvas); err != nil {
+		slog.Warn("the image capability probe could not be encoded", "event", "image_probe_encode_failed", "error", err)
+	}
 	return encoded.Bytes()
 }
 
