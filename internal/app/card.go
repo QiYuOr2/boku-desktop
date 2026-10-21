@@ -754,6 +754,8 @@ func friendlyError(err error) string {
 			return "服务返回了无法识别的数据：" + bad.Reason
 		}
 		return "服务返回了无法识别的数据。"
+	case errors.Is(err, domain.ErrProviderBadResponse):
+		return "服务返回了无法识别的数据。"
 	default:
 		return err.Error()
 	}

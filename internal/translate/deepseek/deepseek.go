@@ -101,7 +101,7 @@ func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credential
 		APIKey:  key,
 		Target:  target,
 		Image:   image,
-		System:  `You translate text visible in an image. Return exactly one JSON object and no Markdown: {"sourceLang":"ja","sourceText":"original visible text","targetLang":"zh","translatedText":"translation"}. Use only zh,en,ja,ko,ru,ar for language codes. Preserve line breaks. If no readable text exists, use empty strings.`,
+		System:  `You translate text visible in an image. Return exactly one JSON object and no Markdown: {"sourceLang":"ja","sourceText":"original visible text","targetLang":"zh","translatedText":"translation"}. Use only zh,en,ja,ko,ru,ar,th for language codes. Preserve line breaks. If no readable text exists, use empty strings.`,
 	})
 	if err != nil {
 		return domain.TranslationResult{}, err
@@ -115,16 +115,16 @@ func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credential
 	if err := json.Unmarshal([]byte(content), &answer); err != nil {
 		return domain.TranslationResult{}, fmt.Errorf("%w: image translator did not return the required JSON", domain.ErrProviderBadResponse)
 	}
-	if answer.TargetLang == "" {
-		answer.TargetLang = target
-	}
+	sourceText := strings.TrimSpace(answer.SourceText)
 	result := domain.TranslationResult{
-		SourceText:     strings.TrimSpace(answer.SourceText),
+		SourceText:     sourceText,
 		TranslatedText: strings.TrimSpace(answer.TranslatedText),
-		SourceLang:     answer.SourceLang,
-		TargetLang:     answer.TargetLang,
-		ProviderID:     ProviderID,
-		CreatedAt:      t.now(),
+		SourceLang:     kit.ImageSourceLanguage(answer.SourceLang, sourceText),
+		// The caller chose the target. Do not let an image model silently
+		// relabel a Chinese request as a different language.
+		TargetLang: target,
+		ProviderID: ProviderID,
+		CreatedAt:  t.now(),
 	}
 	if err := result.Validate(); err != nil {
 		return domain.TranslationResult{}, err
