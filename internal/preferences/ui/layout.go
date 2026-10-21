@@ -62,8 +62,17 @@ func (s *LayoutState) quickLayoutCard(c *ui.Context, entry quickLayoutEntry) {
 	}
 	row.Children(func() {
 		ui.Icon(c, s.gripMark).Size(float32(16), float32(16)).Shrink(0).TextColor(presentation.ColorTextFaint)
-		ui.Box(c).Size(float32(28), float32(28)).Shrink(0).Radius(float32(6)).Background(entry.mark.Tile).Center().Children(func() {
-			ui.Icon(c, entry.mark.SVG).Size(float32(14), float32(14)).TextColor(entry.mark.Ink)
+		tile := ui.Box(c).Size(float32(28), float32(28)).Shrink(0).Radius(float32(6)).Background(entry.mark.Tile).Center()
+		if entry.id == "codex" {
+			tile.Border(1, presentation.ColorBorder)
+		}
+		tile.Children(func() {
+			scale := entry.mark.Scale
+			if scale <= 0 {
+				scale = 1
+			}
+			size := min(float32(14)*scale, float32(22))
+			ui.Icon(c, entry.mark.SVG).Size(size, size).TextColor(entry.mark.Ink)
 		})
 		ui.Column(c).Grow(1).Gap(float32(1)).Children(func() {
 			ink := presentation.ColorTextSoft
@@ -132,17 +141,21 @@ func (s *LayoutState) entries() []quickLayoutEntry {
 	entries := make([]quickLayoutEntry, 0, 4)
 	for _, id := range s.layout.Order() {
 		var title, subtitle string
+		mark := s.marks[id]
 		switch id {
 		case "deepseek":
 			title, subtitle = "DeepSeek 额度", "API 余额"
 		case "codex":
 			title, subtitle = "Codex 额度", "本机账号用量"
+			mark.Tile, mark.Ink = presentation.CodexTile, presentation.CodexInk
 		case "anime":
 			title, subtitle = "动画更新", "Bangumi 今日放送"
+			mark.Tile, mark.Ink = presentation.AnimeAccent.Tile, presentation.AnimeAccent.TileInk
 		case "bilibili":
 			title, subtitle = "B站 UP 监听", "关注主播动态 / 开播"
+			mark.Tile, mark.Ink = presentation.BilibiliAccent.Tile, presentation.BilibiliAccent.TileInk
 		}
-		entries = append(entries, quickLayoutEntry{id: id, title: title, subtitle: subtitle, mark: s.marks[id]})
+		entries = append(entries, quickLayoutEntry{id: id, title: title, subtitle: subtitle, mark: mark})
 	}
 	return entries
 }

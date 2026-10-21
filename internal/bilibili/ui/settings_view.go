@@ -13,7 +13,7 @@ func (s *ViewModel) SettingsView(c *ui.Context, head *ui.Handle, design presenta
 	}
 	s.design.Inset(c, func() {
 		s.design.Stacked(c, float32(16), func() {
-			s.design.SectionHead(c, head, s.design.Mark, ui.Hex(bilibiliPrimary), "B站 UP 监听", "指定主播最新动态 + 开播状态")
+			s.design.SectionHead(c, head, s.design.Mark, presentation.BilibiliAccent.Ink, "B站 UP 监听", "指定主播最新动态 + 开播状态")
 			on := s.service.Enabled()
 			ui.Checkbox(c, &on, "在悬浮窗显示关注的 UP").FontSize(s.design.SizeBody).OnClick(func() { s.saveBilibili(on, s.service.UIDs()) })
 			s.design.Notice(c, false, "无配置时整区不渲染；直播中优先高亮置顶。")

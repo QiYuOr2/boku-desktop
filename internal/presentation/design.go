@@ -40,6 +40,8 @@ import (
 // which one is installed; they ask for a name, and design.go decides what
 // that name is worth in the appearance the user chose.
 type Palette struct {
+	Anime, Bilibili     ReadingAccent
+	CodexTile, CodexInk ui.Color
 	// Faces.
 	surface, sidebar, field, muted, hover, active, rowAlt ui.Color
 	border, Hairline                                      ui.Color
@@ -85,6 +87,17 @@ type Palette struct {
 // lightPalette is the design as its own classes write it: white pages, slate
 // borders, stone inks and the brand green on top.
 var LightPalette = Palette{
+	CodexTile: ui.Hex("#111111"), CodexInk: ui.Hex("#FFFFFF"),
+	Anime: ReadingAccent{
+		Ink: ui.Hex("#B74F5B"), Tint: ui.Hex("#FFF5F6"), Border: ui.Hex("#F9DDE0"),
+		Hover: ui.Hex("#FFECEF"), HoverBorder: ui.Hex("#F4B8BE"),
+		Tile: ui.Hex("#EA9199"), TileInk: ui.Hex("#FFFFFF"), BadgeFill: ui.Hex("#B74F5B"), BadgeInk: ui.Hex("#FFFFFF"),
+	},
+	Bilibili: ReadingAccent{
+		Ink: ui.Hex("#BF315C"), Tint: ui.Hex("#FFF0F3"), Border: ui.Hex("#FCD5E0"),
+		Hover: ui.Hex("#FFE8EF"), HoverBorder: ui.Hex("#F4B0C5"),
+		Tile: ui.Hex("#FFF0F3"), TileInk: ui.Hex("#BF315C"), BadgeFill: ui.Hex("#C93666"), BadgeInk: ui.Hex("#FFFFFF"),
+	},
 	surface: ui.Hex("#FFFFFF"),
 	sidebar: ui.Hex("#FAFAF9"),
 	field:   ui.Hex("#FAFAF9"),
@@ -178,6 +191,17 @@ var LightPalette = Palette{
 // at their 950 end, and their inks at the 300 end, so a recorded copy keeps
 // the color that says what it is without lighting up the list.
 var DarkPalette = Palette{
+	CodexTile: ui.Hex("#E7E5E4"), CodexInk: ui.Hex("#18181B"),
+	Anime: ReadingAccent{
+		Ink: ui.Hex("#F0A9B2"), Tint: ui.Hex("#2B2228"), Border: ui.Hex("#49313B"),
+		Hover: ui.Hex("#392932"), HoverBorder: ui.Hex("#80505E"),
+		Tile: ui.Hex("#49313B"), TileInk: ui.Hex("#F0A9B2"), BadgeFill: ui.Hex("#713444"), BadgeInk: ui.Hex("#FFE4E9"),
+	},
+	Bilibili: ReadingAccent{
+		Ink: ui.Hex("#F694B2"), Tint: ui.Hex("#2C2128"), Border: ui.Hex("#50313F"),
+		Hover: ui.Hex("#3B2631"), HoverBorder: ui.Hex("#91516B"),
+		Tile: ui.Hex("#50313F"), TileInk: ui.Hex("#F694B2"), BadgeFill: ui.Hex("#81304D"), BadgeInk: ui.Hex("#FFE4EC"),
+	},
 	surface: ui.Hex("#18181B"),
 	sidebar: ui.Hex("#1E1E22"),
 	field:   ui.Hex("#202024"),
@@ -407,6 +431,8 @@ func ApplyDesign(dark bool) {
 		p = DarkPalette
 	}
 	ColorSurface = p.surface
+	AnimeAccent, BilibiliAccent = p.Anime, p.Bilibili
+	CodexTile, CodexInk = p.CodexTile, p.CodexInk
 	ColorSidebar = p.sidebar
 	ColorField = p.field
 	ColorMuted = p.muted
@@ -1332,6 +1358,9 @@ type PanelMark struct {
 	Tile ui.Color
 	Ink  ui.Color
 	Bar  ui.Color
+	// Scale enlarges detailed product marks without changing the tile size.
+	// Zero uses the standard size.
+	Scale float32
 }
 
 // quickBlock is one block of the quick window: the design's own room around
@@ -1370,7 +1399,12 @@ func QuickTile(c *ui.Context, mark PanelMark) {
 		if mark.SVG == nil {
 			return
 		}
-		ui.Icon(c, mark.SVG).Size(QuickMarkSize, QuickMarkSize).Shrink(0).TextColor(mark.Ink)
+		scale := mark.Scale
+		if scale <= 0 {
+			scale = 1
+		}
+		size := min(float32(QuickMarkSize)*scale, float32(QuickTileSize)-4)
+		ui.Icon(c, mark.SVG).Size(size, size).Shrink(0).TextColor(mark.Ink)
 	})
 }
 

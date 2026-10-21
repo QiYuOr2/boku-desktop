@@ -141,10 +141,7 @@ var (
 // providers' own colors, which is what the design sheet draws a block's mark
 // on.
 //
-// A provider the repository has no drawing for — Codex today, whose owner's
-// mark is not in it — is drawn with the application's placeholder, so that its
-// block is still told apart by its color rather than by a logo that would be
-// somebody else's.
+// A provider without an asset uses the application's neutral gauge placeholder.
 func (s *State) providerMark(providerID string) presentation.PanelMark {
 	switch providerID {
 	case "deepseek":
@@ -154,16 +151,13 @@ func (s *State) providerMark(providerID string) presentation.PanelMark {
 		}
 		return presentation.PanelMark{SVG: s.deepseekMark, Tile: deepseekBlue, Ink: presentation.ColorOnMark, Bar: bar}
 	case "codex":
-		// The tile stays the provider's black; the bar cannot. A bar is
-		// drawn on the page rather than in the tile, and black on a dark
-		// page is not a bar at all. In the dark appearance it is drawn in
-		// the page's own light ink, which is the same mark the tile makes
-		// when the tile is black.
+		// The monochrome tile reverses with the theme. The bar is drawn on
+		// the page and keeps its own contrasting ink.
 		bar := codexBlack
 		if s.dark {
 			bar = presentation.ColorTextSoft
 		}
-		return presentation.PanelMark{SVG: s.gaugeMark, Tile: codexBlack, Ink: presentation.ColorOnMark, Bar: bar}
+		return presentation.PanelMark{SVG: s.codexMark, Tile: presentation.CodexTile, Ink: presentation.CodexInk, Bar: bar, Scale: 4.0 / 3.0}
 	default:
 		return presentation.PanelMark{SVG: s.gaugeMark, Tile: presentation.ColorMuted, Ink: presentation.ColorTextMuted, Bar: presentation.ColorTextMuted}
 	}

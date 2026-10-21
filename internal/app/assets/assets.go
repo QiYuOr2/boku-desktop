@@ -120,6 +120,9 @@ var (
 //go:embed gauge.svg
 var gaugeSVG []byte
 
+//go:embed codex.svg
+var codexSVG []byte
+
 //go:embed tv.svg
 var tvSVG []byte
 
@@ -165,6 +168,9 @@ func Grip() []byte   { return gripSVG }
 // Gauge returns the placeholder mark of a block whose provider has no drawing
 // of its own: a measure rather than a brand.
 func Gauge() []byte { return gaugeSVG }
+
+// Codex returns the Codex product mark, drawn in the caller's current color.
+func Codex() []byte { return codexSVG }
 
 // TV returns the small television mark used for scheduled animation updates.
 func TV() []byte { return tvSVG }

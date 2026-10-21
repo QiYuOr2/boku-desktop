@@ -12,7 +12,7 @@ func (s *ViewModel) SettingsView(c *ui.Context, head *ui.Handle, design presenta
 	}
 	s.design.Inset(c, func() {
 		s.design.Stacked(c, float32(16), func() {
-			s.design.SectionHead(c, head, s.design.Mark, ui.Hex(animePrimary), "动画更新", "Bangumi「在看」今日放送")
+			s.design.SectionHead(c, head, s.design.Mark, presentation.AnimeAccent.Ink, "动画更新", "Bangumi「在看」今日放送")
 			on := s.service.Enabled()
 			ui.Checkbox(c, &on, "在悬浮窗显示今日动画更新").FontSize(s.design.SizeBody).OnClick(func() { s.saveAnime(on) })
 			s.design.Notice(c, false, "仅展示「在看」且今日有新集的动画；无更新时不占位。")
