@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -168,5 +169,56 @@ func TestRefreshKeepsTodayOnAFixedClock(t *testing.T) {
 	}
 	if got := items[0].AirDate.In(shanghai()).Format(time.DateOnly); got != "2026-10-20" {
 		t.Errorf("airdate = %s, want 2026-10-20", got)
+	}
+}
+
+func TestFailedRefreshRetainsTodayCachedReleases(t *testing.T) {
+	day := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	cache := NewCache(filepath.Join(t.TempDir(), "anime_today.json"))
+	items := []domain.EpisodeRelease{{
+		SubjectID: 7, SubjectName: "测试动画", EpisodeID: 9, EpisodeName: "第三集", AirDate: day,
+	}}
+	if err := cache.Save("2026-10-20", day, items); err != nil {
+		t.Fatal(err)
+	}
+	section := NewSection()
+	section.Set(Settings{Enabled: true, Username: "sai"})
+	service, err := New(httpc.New(httpc.Options{UserAgent: "Boku/test"}), section, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return day }
+	service.cache = cache
+	service.restoreToday()
+
+	requestErr := errors.New("offline")
+	service.record(nil, requestErr)
+	got, fetchedAt, _, viewErr := service.View()
+	if !errors.Is(viewErr, requestErr) {
+		t.Fatalf("view error = %v, want %v", viewErr, requestErr)
+	}
+	if len(got) != 1 || got[0].EpisodeID != 9 {
+		t.Fatalf("cached releases = %#v, want the today's release", got)
+	}
+	if fetchedAt.IsZero() {
+		t.Fatal("cached fetchedAt was lost after the failed refresh")
+	}
+}
+
+func TestFailedRefreshDropsYesterdayReleases(t *testing.T) {
+	section := NewSection()
+	section.Set(Settings{Enabled: true, Username: "sai"})
+	service, err := New(httpc.New(httpc.Options{UserAgent: "Boku/test"}), section, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return day }
+	service.record([]domain.EpisodeRelease{{SubjectID: 7, SubjectName: "昨天", EpisodeID: 9, EpisodeName: "第一集", AirDate: day}}, nil)
+	service.now = func() time.Time { return day.AddDate(0, 0, 1) }
+	service.record(nil, errors.New("offline"))
+	got, fetchedAt, _, _ := service.View()
+	if len(got) != 0 || !fetchedAt.IsZero() {
+		t.Fatalf("yesterday's releases survived: %#v, fetchedAt=%s", got, fetchedAt)
 	}
 }

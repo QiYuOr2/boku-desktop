@@ -139,6 +139,7 @@ type AnimeService interface {
 	RefreshMinutes() int
 	Configure(context.Context, bool, string, int) error
 	View() ([]domain.EpisodeRelease, time.Time, bool, error)
+	Refresh(context.Context) error
 	RefreshIfNeeded(context.Context) error
 	Cover(subjectID int64) []byte
 }
@@ -985,16 +986,38 @@ func (s *State) refreshAsync(force bool) {
 	for _, panel := range s.panelService.List() {
 		s.refreshPanelAsync(panel.ID, force)
 	}
-	if s.animeService != nil {
-		anime, window := s.animeService, s.panel
-		go func() {
-			if err := anime.RefreshIfNeeded(context.Background()); err != nil {
-				slog.Warn("anime releases could not be refreshed", "error", err)
-			}
-			if window != nil {
-				window.Update(func() { s.cacheAnimeCovers() })
-			}
-		}()
+	s.refreshAnimeAsync(false)
+}
+
+// refreshAnimeAsync fetches today's animation releases away from the UI
+// thread. force is for the flyout's refresh mark; normal openings obey the
+// user's configured refresh interval.
+func (s *State) refreshAnimeAsync(force bool) {
+	if s.animeService == nil {
+		return
+	}
+	anime, window := s.animeService, s.panel
+	go func() {
+		var err error
+		if force {
+			err = anime.Refresh(context.Background())
+		} else {
+			err = anime.RefreshIfNeeded(context.Background())
+		}
+		if err != nil {
+			slog.Warn("anime releases could not be refreshed", "error", err)
+		}
+		if window != nil {
+			window.Update(func() {
+				s.cacheAnimeCovers()
+				s.fitQuickWindow()
+			})
+		}
+	}()
+	if window != nil {
+		// Ask for the loading frame immediately; Refresh itself is still on a
+		// background goroutine, so the tray callback returns at once.
+		window.Update(func() {})
 	}
 }
 
