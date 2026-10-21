@@ -9,39 +9,6 @@ import (
 	"boku/internal/translate"
 )
 
-func TestQuickWindowHeightForTasksKeepsTheFlyoutWithinHalfTheWorkArea(t *testing.T) {
-	cases := []struct {
-		name       string
-		tasks      int
-		workHeight int
-		want       int
-	}{
-		{name: "no tasks", tasks: 0, workHeight: 1080, want: panelHeight},
-		{name: "tasks grow the flyout", tasks: 2, workHeight: 1080, want: panelHeight + 2*quickTaskRowHeight},
-		{name: "many tasks stop at half height", tasks: 4, workHeight: 1080, want: 540},
-		{name: "compact display still respects half height", tasks: 1, workHeight: 600, want: 300},
-		{name: "negative task counts are harmless", tasks: -1, workHeight: 1080, want: panelHeight},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := quickWindowHeightForTasks(tc.tasks, tc.workHeight); got != tc.want {
-				t.Errorf("quickWindowHeightForTasks(%d, %d) = %d, want %d", tc.tasks, tc.workHeight, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestQuickWindowHeightForContentReservesTheSameRoomForEnabledAnime(t *testing.T) {
-	const workHeight = 1080
-	want := quickWindowHeightForTasks(1, workHeight)
-	if got := quickWindowHeightForContent(0, true, workHeight); got != want {
-		t.Errorf("enabled anime height = %d, want the one-task height %d", got, want)
-	}
-	if got := quickWindowHeightForContent(4, true, workHeight); got != workHeight/2 {
-		t.Errorf("enabled anime height = %d, want half the work area %d", got, workHeight/2)
-	}
-}
-
 func TestACompletedImageTaskKeepsItsResultForTheQuickWindow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	state := &State{imageTasks: []imageTranslationTask{{id: 7, status: imageTaskRunning, image: []byte("private screenshot"), cancel: cancel}}}

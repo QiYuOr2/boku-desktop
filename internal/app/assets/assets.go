@@ -115,6 +115,9 @@ var gaugeSVG []byte
 //go:embed tv.svg
 var tvSVG []byte
 
+//go:embed tv-bilibili.svg
+var tvBilibiliSVG []byte
+
 //go:embed chevron-right.svg
 var chevronRightSVG []byte
 
@@ -152,6 +155,12 @@ func Gauge() []byte { return gaugeSVG }
 
 // TV returns the small television mark used for scheduled animation updates.
 func TV() []byte { return tvSVG }
+
+// TVBilibili returns the small television mark that heads the followed-UP
+// block: rounded set, two antennae, two eyes — the shape the service's own
+// logo is built from. It is a different drawing from TV so that the two
+// blocks sharing a colour family are still told apart at a glance.
+func TVBilibili() []byte { return tvBilibiliSVG }
 
 // ChevronRight returns the compact disclosure mark used by clickable rows.
 func ChevronRight() []byte { return chevronRightSVG }

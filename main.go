@@ -344,7 +344,7 @@ func services(userData, version string) (*panel.Panels, *anime.Service, *bilibil
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare anime updates: %w", err)
 	}
 
-	bilibiliService, err := bilibili.New(client, bilibiliSettings, prefs)
+	bilibiliService, err := bilibili.NewWithCache(client, bilibiliSettings, prefs, bilibili.NewCache(filepath.Join(userData, "bilibili_followed.json")))
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare Bilibili UP monitoring: %w", err)
 	}

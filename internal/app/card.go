@@ -26,20 +26,20 @@ import (
 // The panel is a section of the window, the same shape the settings window
 // gives each of its own: a title line, then what the panel knows.
 func (s *State) card(c *ui.Context) {
-	listed := s.panelService.List()
-	if len(listed) == 0 {
-		ui.Text(c, "还没有面板。").
-			FontSize(sizeBody).
-			TextColor(colorTextMuted)
+	panels := s.panelService.List()
+	if len(panels) == 0 {
+		quickBlock(c, func() {
+			ui.Text(c, "还没有面板。").FontSize(sizeBody).TextColor(colorTextMuted)
+		})
 		return
 	}
-	for index, panel := range listed {
+	for index, listed := range panels {
 		if index > 0 {
 			// Between two blocks, and only there: the line says where one
 			// panel ends, and it keeps the same edge the blocks keep.
 			quickDivider(c)
 		}
-		s.panelBlock(c, s.panelService.View(panel.ID))
+		s.panelBlock(c, s.panelService.View(listed.ID))
 	}
 }
 

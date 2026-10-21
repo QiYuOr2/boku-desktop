@@ -88,7 +88,7 @@ func (s *State) settingsPages() []*settingsPage {
 		{kind: sectionTranslate, name: "划词翻译", mark: s.translationMark, build: s.translateSection},
 		{kind: sectionClipboard, name: "剪贴板", mark: s.clipboardMark, build: s.clipboardSection},
 		{kind: sectionAnime, name: "动画", mark: s.tvMark, build: s.animeSection},
-		{kind: sectionBilibili, name: "B站", mark: s.tvMark, build: s.bilibiliSection},
+		{kind: sectionBilibili, name: "B站", mark: s.bilibiliMark, build: s.bilibiliSection},
 		{kind: sectionGeneral, name: "通用", mark: s.settingsMark, build: s.generalSection},
 		{kind: sectionAbout, name: "关于", mark: s.infoMark, build: s.aboutSection},
 	}
@@ -100,7 +100,7 @@ func (s *State) bilibiliSection(c *ui.Context, head *ui.Handle) {
 	}
 	inset(c, func() {
 		stacked(c, float32(16), func() {
-			sectionHead(c, head, s.tvMark, ui.Hex(bilibiliPrimary), "B站 UP 监听", "指定主播最新动态 + 开播状态 · api.bilibili.com")
+			sectionHead(c, head, s.bilibiliMark, ui.Hex(bilibiliPrimary), "B站 UP 监听", "指定主播最新动态 + 开播状态")
 			on := s.bilibiliService.Enabled()
 			ui.Checkbox(c, &on, "在悬浮窗显示关注的 UP").FontSize(sizeBody).OnClick(func() { s.saveBilibili(on, s.bilibiliService.UIDs()) })
 			notice(c, notePlain, "无配置时整区不渲染；直播中优先高亮置顶。")
@@ -135,17 +135,6 @@ func (s *State) bilibiliSection(c *ui.Context, head *ui.Handle) {
 			})
 			ui.Checkbox(c, &s.bilibiliLiveNotice, "开播时系统通知").FontSize(sizeBody).OnClick(func() { s.saveBilibili(on, s.bilibiliService.UIDs()) })
 			ui.Checkbox(c, &s.bilibiliDynamicNotice, "有新动态时系统通知").FontSize(sizeBody).OnClick(func() { s.saveBilibili(on, s.bilibiliService.UIDs()) })
-			ui.Column(c).FillWidth().Background(colorField).Border(1, colorBorder).Radius(radiusField).Padding(float32(12)).Children(func() {
-				ui.Text(c, "数据来源").FontSize(sizeSmall).FontWeight(600).TextColor(colorTextMuted)
-				cardHint(c, "直播：GET /room/v1/Room/getRoomInfoOld?mid=…")
-				cardHint(c, "最新动态：GET /x/polymer/web-dynamic/v1/feed/space?host_mid=…")
-				cardHint(c, "公开空间与直播状态不需要登录；请求带应用 User-Agent。")
-			})
-			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-				if designButton(c, "立即刷新", buttonSecondary).Clicked() {
-					s.refreshAsync(true)
-				}
-			})
 		})
 	})
 }
@@ -223,7 +212,7 @@ func (s *State) animeSection(c *ui.Context, head *ui.Handle) {
 	}
 	inset(c, func() {
 		stacked(c, float32(16), func() {
-			sectionHead(c, head, s.tvMark, ui.Hex(animePrimary), "动画更新", "Bangumi「在看」今日放送 · api.bgm.tv")
+			sectionHead(c, head, s.tvMark, ui.Hex(animePrimary), "动画更新", "Bangumi「在看」今日放送")
 			on := s.animeService.Enabled()
 			ui.Checkbox(c, &on, "在悬浮窗显示今日动画更新").FontSize(sizeBody).OnClick(func() { s.saveAnime(on) })
 			notice(c, notePlain, "仅展示「在看」且今日有新集的动画；无更新时不占位。")
@@ -253,12 +242,6 @@ func (s *State) animeSection(c *ui.Context, head *ui.Handle) {
 				sectionLabel(c, "刷新间隔（分钟）")
 				ui.TextInput(c, &s.animeRefreshInput).FillWidth().Height(heightControl)
 				cardHint(c, "后台轮询在看列表与章节放送日")
-			})
-			ui.Column(c).FillWidth().Background(colorField).Border(1, colorBorder).Radius(radiusField).Padding(float32(12)).Children(func() {
-				ui.Text(c, "数据来源说明").FontSize(sizeSmall).FontWeight(600).TextColor(colorTextMuted)
-				cardHint(c, "在看：GET /v0/users/…/collections?subject_type=2&type=3")
-				cardHint(c, "新集：GET /v0/episodes?subject_id=…，按 airdate 筛选上海今日")
-				cardHint(c, "Bangumi 仅提供放送日期；请求带应用名与联系方式。")
 			})
 			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
 				if button := designButton(c, "保存", buttonSecondary).Shrink(0); button.Clicked() {

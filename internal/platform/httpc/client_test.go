@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -123,6 +124,12 @@ func TestStatusMapping(t *testing.T) {
 				}
 				if bad.HTTPStatus != c.status {
 					t.Errorf("the error carries status %d, want %d", bad.HTTPStatus, c.status)
+				}
+				// The card shows the reason, not the status field, so the
+				// status has to survive inside it: a block (HTTP 412) and a
+				// shape change must not read the same.
+				if !strings.Contains(bad.Reason, strconv.Itoa(c.status)) {
+					t.Errorf("reason %q does not name the status", bad.Reason)
 				}
 			}
 		})
