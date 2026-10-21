@@ -54,7 +54,7 @@ func TestImageTranslationStreamsAndFollowsVerifiedCapability(t *testing.T) {
 		}
 		streamed = request.Stream
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"sourceLang\\\":\\\"en\\\",\\\"sourceText\\\":\\\"Hello\\\",\\\"targetLang\\\":\\\"zh\\\",\\\"translatedText\\\":\\\"你好\\\"}\"}}]}\n\ndata: [DONE]\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"sourceLang\\\":\\\"en\\\",\\\"sourceText\\\":\\\"พระเจ้าลงโทษคน\\\",\\\"targetLang\\\":\\\"en\\\",\\\"translatedText\\\":\\\"上帝惩罚了人们\\\"}\"}}]}\n\ndata: [DONE]\n\n")
 	}))
 	defer server.Close()
 	settings := openai.CustomService{BaseURL: server.URL, SupportsImage: true}
@@ -66,8 +66,11 @@ func TestImageTranslationStreamsAndFollowsVerifiedCapability(t *testing.T) {
 	if !streamed {
 		t.Error("image request did not ask for a stream")
 	}
-	if result.SourceText != "Hello" || result.TranslatedText != "你好" {
+	if result.SourceText != "พระเจ้าลงโทษคน" || result.TranslatedText != "上帝惩罚了人们" {
 		t.Fatalf("result = %+v", result)
+	}
+	if result.SourceLang != domain.LangThai || result.TargetLang != domain.LangChinese {
+		t.Errorf("languages = %q -> %q, want th -> zh", result.SourceLang, result.TargetLang)
 	}
 	if !reply.Descriptor().SupportsImage {
 		t.Error("verified capability is not exposed by the descriptor")

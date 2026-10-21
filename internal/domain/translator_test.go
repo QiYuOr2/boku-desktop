@@ -190,7 +190,7 @@ func TestTranslatorDescriptorNeedsCredential(t *testing.T) {
 }
 
 func TestLanguageNameAndValid(t *testing.T) {
-	if !LangChinese.Valid() || !LangJapanese.Valid() {
+	if !LangChinese.Valid() || !LangJapanese.Valid() || !LangThai.Valid() {
 		t.Error("a known language is not valid")
 	}
 	if Language("xx").Valid() {
@@ -201,6 +201,9 @@ func TestLanguageNameAndValid(t *testing.T) {
 	}
 	if got := LangChinese.Name(); got != "中文" {
 		t.Errorf("LangChinese.Name() = %q", got)
+	}
+	if got := LangThai.Name(); got != "ไทย" {
+		t.Errorf("LangThai.Name() = %q", got)
 	}
 	// A code this build has no word for is named by itself, so a translator
 	// may answer with one without the window going blank.

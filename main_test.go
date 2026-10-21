@@ -24,11 +24,11 @@ import (
 // be checked without a window.
 func TestServicesAssembleThePanels(t *testing.T) {
 	userData := t.TempDir()
-	panels, secrets, clip, translation, _, appearance, prefs, err := services(userData, "0.1.0")
+	panels, anime, secrets, clip, translation, _, appearance, prefs, err := services(userData, "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}
-	if panels == nil || secrets == nil || clip == nil || translation == nil {
+	if panels == nil || anime == nil || secrets == nil || clip == nil || translation == nil {
 		t.Fatal("services returned no services")
 	}
 	// The appearance is a section of the same settings file, registered with
@@ -247,7 +247,7 @@ func TestRecordPanicsWritesItDownAndRaisesItAgain(t *testing.T) {
 // a translator without a settings store, or one whose settings it cannot
 // read, is a startup mistake worth catching here.
 func TestServicesAssembleTheTranslators(t *testing.T) {
-	_, _, _, translation, own, _, _, err := services(t.TempDir(), "0.1.0")
+	_, _, _, _, translation, own, _, _, err := services(t.TempDir(), "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"boku/internal/clipboard"
+	contractbangumi "boku/internal/contract/bangumi"
 	contractfree "boku/internal/contract/freetranslate"
 	"boku/internal/credential"
 	"boku/internal/domain"
@@ -56,6 +57,7 @@ const (
 	sectionAPIKey settingsSectionKind = iota
 	sectionTranslate
 	sectionClipboard
+	sectionAnime
 	sectionGeneral
 	sectionAbout
 )
@@ -82,9 +84,114 @@ func (s *State) settingsPages() []*settingsPage {
 		{kind: sectionAPIKey, name: "API Key", mark: s.keyMark, build: s.apiKeySection},
 		{kind: sectionTranslate, name: "划词翻译", mark: s.translationMark, build: s.translateSection},
 		{kind: sectionClipboard, name: "剪贴板", mark: s.clipboardMark, build: s.clipboardSection},
+		{kind: sectionAnime, name: "动画", mark: s.tvMark, build: s.animeSection},
 		{kind: sectionGeneral, name: "通用", mark: s.settingsMark, build: s.generalSection},
 		{kind: sectionAbout, name: "关于", mark: s.infoMark, build: s.aboutSection},
 	}
+}
+
+func (s *State) animeSection(c *ui.Context, head *ui.Handle) {
+	if s.animeService == nil {
+		return
+	}
+	inset(c, func() {
+		stacked(c, float32(16), func() {
+			sectionHead(c, head, s.tvMark, ui.Hex(animePrimary), "动画更新", "Bangumi「在看」今日放送 · api.bgm.tv")
+			on := s.animeService.Enabled()
+			ui.Checkbox(c, &on, "在悬浮窗显示今日动画更新").FontSize(sizeBody).OnClick(func() { s.saveAnime(on) })
+			notice(c, notePlain, "仅展示「在看」且今日有新集的动画；无更新时不占位。")
+			stacked(c, float32(8), func() {
+				sectionLabel(c, "Bangumi 用户名")
+				field := ui.TextInput(c, &s.animeUsername).Placeholder("用户名或 UID，如 sai").FillWidth().Height(heightControl)
+				field.OnSubmit(func() { s.saveAnime(on) })
+				notice(c, notePlain, "读取公开「在看」列表；不会保存或请求 Bangumi 密码、Token。")
+			})
+			stacked(c, float32(8), func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+					sectionLabel(c, "Access Token（可选）")
+					ui.Spacer(c)
+					if link := wordButton(c, "获取 Token"); link.Clicked() {
+						c.OpenURL("https://next.bgm.tv/demo/access-token")
+					}
+				})
+				ui.Row(c).FillWidth().Gap(float32(6)).Children(func() {
+					ui.TextInput(c, &s.animeTokenInput).Placeholder("仅私有收藏或写接口时需要").FillWidth().Grow(1).Height(heightControl)
+					if button := designButton(c, "保存", buttonSecondary); button.Clicked() {
+						s.saveAnimeToken()
+					}
+				})
+				cardHint(c, "公开在看列表无需 Token；私有收藏会以 Authorization: Bearer 发送。")
+			})
+			stacked(c, float32(8), func() {
+				sectionLabel(c, "刷新间隔（分钟）")
+				ui.TextInput(c, &s.animeRefreshInput).FillWidth().Height(heightControl)
+				cardHint(c, "后台轮询在看列表与章节放送日")
+			})
+			ui.Column(c).FillWidth().Background(colorField).Border(1, colorBorder).Radius(radiusField).Padding(float32(12)).Children(func() {
+				ui.Text(c, "数据来源说明").FontSize(sizeSmall).FontWeight(600).TextColor(colorTextMuted)
+				cardHint(c, "在看：GET /v0/users/…/collections?subject_type=2&type=3")
+				cardHint(c, "新集：GET /v0/episodes?subject_id=…，按 airdate 筛选上海今日")
+				cardHint(c, "Bangumi 仅提供放送日期；请求带应用名与联系方式。")
+			})
+			ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+				if button := designButton(c, "保存并刷新", buttonSecondary).Shrink(0); button.Clicked() {
+					s.saveAnime(on)
+				}
+			})
+		})
+	})
+}
+
+func (s *State) saveAnimeToken() {
+	if s.secretService == nil || strings.TrimSpace(s.animeTokenInput) == "" {
+		return
+	}
+	token, window := strings.TrimSpace(s.animeTokenInput), s.settingsWindow
+	go func() {
+		err := s.secretService.Set(context.Background(), contractbangumi.ProviderID, "accessToken", token)
+		if window != nil {
+			window.Update(func() {
+				if err != nil {
+					s.panelStatus = "Bangumi Token 未保存：" + friendlyError(err)
+				} else {
+					s.animeTokenInput = ""
+					s.panelStatus = "Bangumi Access Token 已保存。"
+				}
+				s.Refresh()
+			})
+		}
+	}()
+}
+
+func (s *State) saveAnime(enabled bool) {
+	if s.animeService == nil {
+		return
+	}
+	minutes, minutesErr := strconv.Atoi(strings.TrimSpace(s.animeRefreshInput))
+	if minutesErr != nil {
+		s.panelStatus = "动画设置未保存：刷新间隔必须是数字。"
+		s.Refresh()
+		return
+	}
+	service, window := s.animeService, s.settingsWindow
+	username := s.animeUsername
+	go func() {
+		err := service.Configure(context.Background(), enabled, username, minutes)
+		if err == nil && enabled && strings.TrimSpace(username) != "" {
+			err = service.RefreshIfNeeded(context.Background())
+		}
+		if window != nil {
+			window.Update(func() {
+				if err != nil {
+					s.panelStatus = "动画设置未保存：" + friendlyError(err)
+				}
+				s.animeUsername = service.Username()
+				s.animeRefreshInput = strconv.Itoa(service.RefreshMinutes())
+				s.cacheAnimeCovers()
+				s.Refresh()
+			})
+		}
+	}()
 }
 
 // customTranslatorID is the translator whose settings the user fills in
@@ -1553,9 +1660,11 @@ func (s *State) clipboardSection(c *ui.Context, head *ui.Handle) {
 					}
 				})
 
-				if button := s.historyButton(c); button.Clicked() {
-					s.openHistory()
-				}
+				ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+					if button := s.historyButton(c); button.Clicked() {
+						s.openHistory()
+					}
+				})
 
 				if text := s.clipboardStatusLine(); text != "" {
 					notice(c, notePlain, text)
@@ -1565,13 +1674,11 @@ func (s *State) clipboardSection(c *ui.Context, head *ui.Handle) {
 	})
 }
 
-// historyButton is the way from the settings to the clipboard history: a
-// full-width secondary action with the clipboard's mark on it, because the
-// line it sits on is the section's own rather than a value's.
+// historyButton is the compact trailing action that opens clipboard history.
 func (s *State) historyButton(c *ui.Context) ui.Element {
 	b := ui.ButtonBase(c).Label("打开剪贴板历史").
-		FillWidth().
 		Height(heightControl).
+		Padding(0, float32(12)).
 		Radius(radiusField).
 		Background(colorSurface).
 		Border(1, colorBorder).
@@ -1583,14 +1690,12 @@ func (s *State) historyButton(c *ui.Context) ui.Element {
 		b = b.Background(colorHover)
 	}
 	b.Children(func() {
-		// The mark and the words are one thing at the middle of the button,
-		// not two things at its two ends.
-		ui.Row(c).FillWidth().Justify(ui.Center).AlignItems(ui.Center).Gap(float32(8)).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(float32(6)).Children(func() {
 			ui.Icon(c, s.clipboardMark).
-				Size(float32(16), float32(16)).
+				Size(float32(14), float32(14)).
 				Shrink(0).
 				TextColor(colorTextMuted)
-			ui.Text(c, "打开剪贴板历史").FontSize(sizeBody).FontWeight(500).SingleLine()
+			ui.Text(c, "打开剪贴板历史").FontSize(sizeFine).FontWeight(500).SingleLine()
 		})
 	})
 	return b
@@ -1652,15 +1757,18 @@ func (s *State) generalSection(c *ui.Context, head *ui.Handle) {
 			})
 
 			stacked(c, float32(8), func() {
-				sectionLabel(c, "数据目录")
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+					sectionLabel(c, "数据目录")
+					ui.Spacer(c)
+					if button := designButton(c, "在文件管理器中显示", buttonSecondary).Shrink(0); button.Clicked() {
+						s.revealDataPath()
+					}
+				})
 				ui.Text(c, s.dataPath()).
 					FontSize(sizeSmall).
 					TextColor(colorInputValue).
 					Font("monospace").
 					Wrap()
-				if button := designButton(c, "在文件管理器中显示", buttonSecondary); button.Clicked() {
-					s.revealDataPath()
-				}
 			})
 		})
 	})
