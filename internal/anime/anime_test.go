@@ -110,3 +110,63 @@ func TestServiceLoadsCollectionCoverWithoutFailingTheReleaseList(t *testing.T) {
 		t.Fatalf("cached cover is invalid: %v", err)
 	}
 }
+
+// TestShanghaiSurvivesAMissingTimeZoneDatabase is the regression for the crash
+// a packaged build had when the tray flyout opened: `mygo build` passes
+// -trimpath, so time.LoadLocation cannot find zoneinfo.zip and answers
+// (nil, error). Reading a nil location panicked with "time: missing Location
+// in call to Time.In" inside a Window.Update callback, which is the main
+// thread and has no recover around it — the process died.
+func TestShanghaiSurvivesAMissingTimeZoneDatabase(t *testing.T) {
+	loc := shanghai()
+	if loc == nil {
+		t.Fatal("shanghai() returned a nil location")
+	}
+	// The day it names is the Shanghai calendar day, whatever the machine's
+	// own zone is: 16:30 UTC is already the next day there.
+	at := time.Date(2026, 10, 19, 16, 30, 0, 0, time.UTC).In(loc)
+	if at.Year() != 2026 || at.Month() != time.October || at.Day() != 20 {
+		t.Errorf("Shanghai day = %s, want 2026-10-20", at.Format(time.DateOnly))
+	}
+	if _, offset := at.Zone(); offset != 8*60*60 {
+		t.Errorf("offset = %d, want 8h", offset)
+	}
+}
+
+// TestRefreshKeepsTodayOnAFixedClock checks the day a release is dated in
+// without asking the time zone database at all, as the packaged build must.
+func TestRefreshKeepsTodayOnAFixedClock(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/users/sai/collections":
+			_, _ = w.Write([]byte(`{"total":1,"data":[{"subject_id":7,"subject":{"name_cn":"测试动画"}}]}`))
+		case "/v0/episodes":
+			_, _ = w.Write([]byte(`{"data":[{"id":9,"type":0,"sort":3,"name_cn":"第三集","airdate":"2026-10-20"}]}`))
+		default:
+			t.Errorf("path = %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	old := bangumiAPIBaseURL
+	bangumiAPIBaseURL = server.URL
+	defer func() { bangumiAPIBaseURL = old }()
+	section := NewSection()
+	section.Set(Settings{Enabled: true, Username: "sai"})
+	service, err := New(httpc.New(httpc.Options{UserAgent: "Boku/test"}), section, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 21:00 in Shanghai on the 20th.
+	service.now = func() time.Time { return time.Date(2026, 10, 20, 13, 0, 0, 0, time.UTC) }
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	items, _, _, err := service.View()
+	if err != nil || len(items) != 1 {
+		t.Fatalf("view = %#v, %v", items, err)
+	}
+	if got := items[0].AirDate.In(shanghai()).Format(time.DateOnly); got != "2026-10-20" {
+		t.Errorf("airdate = %s, want 2026-10-20", got)
+	}
+}

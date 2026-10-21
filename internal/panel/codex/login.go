@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -234,7 +235,15 @@ func (l *Login) token(ctx context.Context, file authFile) (Token, error) {
 	access := strings.TrimSpace(file.Tokens.AccessToken)
 	refresh := strings.TrimSpace(file.Tokens.RefreshToken)
 	expiry := ExpiresAt(access)
-	lastRefresh, _ := time.Parse(time.RFC3339, strings.TrimSpace(file.LastRefresh))
+	// A timestamp the CLI wrote that cannot be read is treated as "not
+	// written": the token is sent as it is rather than refreshed on a
+	// schedule nobody can vouch for. It is still worth a line — a file that
+	// is not what this reader expects is the reason a stale token keeps being
+	// sent, and nothing else would say so.
+	lastRefresh, lastRefreshErr := time.Parse(time.RFC3339, strings.TrimSpace(file.LastRefresh))
+	if lastRefreshErr != nil && strings.TrimSpace(file.LastRefresh) != "" {
+		slog.Warn("the Codex login's last refresh time could not be read", "event", "codex_login_timestamp_unreadable", "error", lastRefreshErr)
+	}
 	now := l.now()
 
 	l.mu.Lock()

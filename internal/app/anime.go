@@ -2,9 +2,12 @@ package app
 
 import (
 	"fmt"
+	"log/slog"
+	"strconv"
 	"strings"
 
 	"boku/internal/domain"
+	"boku/internal/platform/logonce"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -87,11 +90,24 @@ func (s *State) animeUpdates(c *ui.Context) {
 // cacheAnimeCovers converts the feature's already-fetched image bytes into
 // MyGo bitmaps on the presentation thread. It is called after a refresh, never
 // from the view, so drawing remains I/O- and decoding-free.
+//
+// A cover that cannot be turned into a bitmap is not a failed refresh: the
+// release list is what the user came for, and the row falls back to its mark.
+// It is logged because a cover that never appears is otherwise unexplained —
+// the view draws the same fallback whether the bytes were missing, not an
+// image, or a format this build cannot decode.
 func (s *State) cacheAnimeCovers() {
 	if s.animeService == nil {
 		return
 	}
-	items, _, _, _ := s.animeService.View()
+	// A failed refresh still answers with the releases of the last one that
+	// worked, and those covers are worth caching: the view keeps drawing them.
+	// The error is logged because the covers of what is on screen will not
+	// change until a refresh succeeds, which is otherwise unexplained.
+	items, _, _, viewErr := s.animeService.View()
+	if viewErr != nil {
+		slog.Warn("the animation releases could not be re-read; their covers are unchanged", "event", "anime_covers_unreadable", "error", viewErr)
+	}
 	for _, item := range items {
 		if _, exists := s.animeCovers[item.SubjectID]; exists {
 			continue
@@ -101,9 +117,16 @@ func (s *State) cacheAnimeCovers() {
 			continue
 		}
 		cover, err := ui.DecodeBitmap(data)
-		if err == nil {
-			s.animeCovers[item.SubjectID] = cover
+		if err != nil {
+			// Deduplicated by subject: the same cover is retried after every
+			// refresh, and a host that keeps serving a format this build
+			// cannot read would otherwise write the line on every poll.
+			if key := "anime-cover-" + strconv.FormatInt(item.SubjectID, 10); logonce.Should(key, err.Error()) {
+				slog.Warn("an animation cover could not be decoded", "event", "anime_cover_undecodable", "subject", item.SubjectID, "bytes", len(data), "error", err)
+			}
+			continue
 		}
+		s.animeCovers[item.SubjectID] = cover
 	}
 }
 

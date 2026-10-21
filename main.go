@@ -76,7 +76,17 @@ func main() {
 		// stderr, which is where they went before there was a file.
 		log.Printf("boku: %v; this run is not being recorded", err)
 	} else {
-		defer func() { _ = logFile.Close() }()
+		// A failed flush is reported on the sink rather than dropped: it is
+		// the reason the last lines of a run — the ones a crash is about —
+		// would be missing from the file somebody is about to read. Nothing
+		// is logged through slog here, because the log is what failed; the
+		// record goes straight to stderr, which is where a failure with
+		// nowhere else to go has always gone in this file.
+		defer func() {
+			if err := logFile.Close(); err != nil {
+				fmt.Fprintf(os.Stderr, "boku: the log could not be flushed: %v\n", err)
+			}
+		}()
 		// A tray application has no console: a panic that is only printed
 		// is a crash nobody can explain. It is recorded, and then raised
 		// again unchanged — how the process ends is not this defer's

@@ -23,6 +23,29 @@ import (
 // production value comes from the vendor contract and is never user input.
 var bangumiAPIBaseURL = bangumi.APIBaseURL
 
+// shanghaiZone is the fixed offset the provider's calendar is read in. The
+// provider names a day rather than an instant, and that day is the Shanghai
+// one; the offset has been constant since 1991, so a fixed zone gives the same
+// answer the database does and it cannot be missing.
+var shanghaiZone = time.FixedZone("CST", 8*60*60)
+
+// shanghai is the location a release is dated in.
+//
+// It asks the time zone database first, and falls back to the fixed offset
+// when the database is not there. That fallback is what a packaged build
+// needs: `mygo build` passes -trimpath, which drops the GOROOT path baked into
+// the binary, so time.LoadLocation finds neither $GOROOT/lib/time/zoneinfo.zip
+// nor a system database on Windows and answers (nil, error). Using the nil
+// location panicked with "time: missing Location in call to Time.In" inside
+// the Window.Update callback that follows a refresh — the main thread, with no
+// recover around it — and killed the process.
+func shanghai() *time.Location {
+	if loc, err := time.LoadLocation("Asia/Shanghai"); err == nil {
+		return loc
+	}
+	return shanghaiZone
+}
+
 type Service struct {
 	client    *httpc.Client
 	section   *Section
@@ -102,7 +125,7 @@ func (s *Service) Refresh(ctx context.Context) error {
 	s.loading = true
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); s.loading = false; s.mu.Unlock() }()
-	loc, _ := time.LoadLocation("Asia/Shanghai")
+	loc := shanghai()
 	now := s.now().In(loc)
 	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
 	end := start.AddDate(0, 0, 1)
