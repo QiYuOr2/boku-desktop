@@ -103,6 +103,14 @@ var (
 	keySVG []byte
 	//go:embed info.svg
 	infoSVG []byte
+	//go:embed layout.svg
+	layoutSVG []byte
+	//go:embed eye.svg
+	eyeSVG []byte
+	//go:embed eye-off.svg
+	eyeOffSVG []byte
+	//go:embed grip.svg
+	gripSVG []byte
 )
 
 // gaugeSVG is the placeholder mark of a block whose provider has no drawing of
@@ -148,6 +156,11 @@ func Key() []byte { return keySVG }
 
 // Info returns the mark of the application itself, drawn beside 关于.
 func Info() []byte { return infoSVG }
+
+func Layout() []byte { return layoutSVG }
+func Eye() []byte    { return eyeSVG }
+func EyeOff() []byte { return eyeOffSVG }
+func Grip() []byte   { return gripSVG }
 
 // Gauge returns the placeholder mark of a block whose provider has no drawing
 // of its own: a measure rather than a brand.

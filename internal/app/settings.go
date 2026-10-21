@@ -61,6 +61,7 @@ const (
 	sectionClipboard
 	sectionAnime
 	sectionBilibili
+	sectionQuickLayout
 	sectionGeneral
 	sectionAbout
 )
@@ -89,6 +90,7 @@ func (s *State) settingsPages() []*settingsPage {
 		{kind: sectionClipboard, name: "剪贴板", mark: s.clipboardMark, build: s.clipboardSection},
 		{kind: sectionAnime, name: "动画", mark: s.tvMark, build: s.animeSection},
 		{kind: sectionBilibili, name: "B站", mark: s.bilibiliMark, build: s.bilibiliSection},
+		{kind: sectionQuickLayout, name: "面板布局", mark: s.layoutMark, build: s.quickLayoutSection},
 		{kind: sectionGeneral, name: "通用", mark: s.settingsMark, build: s.generalSection},
 		{kind: sectionAbout, name: "关于", mark: s.infoMark, build: s.aboutSection},
 	}

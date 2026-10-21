@@ -36,7 +36,6 @@ func (s *State) animeUpdates(c *ui.Context) {
 	if len(items) == 0 && !loading {
 		return
 	}
-	quickDivider(c)
 	updates := groupAnimeUpdates(items)
 	quickBlock(c, func() {
 		ui.Column(c).FillWidth().Gap(float32(7)).Children(func() {
