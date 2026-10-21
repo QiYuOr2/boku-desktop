@@ -79,7 +79,7 @@ func (s *State) panelHead(c *ui.Context, view panel.View) {
 			})
 			ui.Spacer(c)
 			freshness(c, view)
-			if button := s.refreshButton(c, view); button.Clicked() && !view.Loading {
+			if button := s.refreshButton(c, view.Loading, view.Err != nil && view.HasSnapshot); button.Clicked() && !view.Loading {
 				s.refreshPanelAsync(view.Panel.ID, true)
 			}
 		})
@@ -401,9 +401,9 @@ const (
 // click answers with: the numbers stay as they are until an answer arrives,
 // and a still mark beside them would leave the user wondering whether the
 // click landed.
-func (s *State) refreshButton(c *ui.Context, view panel.View) ui.Element {
+func (s *State) refreshButton(c *ui.Context, loading, retry bool) ui.Element {
 	label := "刷新"
-	if view.Err != nil && view.HasSnapshot {
+	if retry {
 		// One action, two situations: the reason the last attempt failed is
 		// written under the numbers, and this is what trying again is
 		// called when there is something to try again about.
@@ -435,7 +435,7 @@ func (s *State) refreshButton(c *ui.Context, view panel.View) ui.Element {
 	// Turning the mark is what the click answers while a fetch runs: a still
 	// mark beside unchanged numbers would leave the user wondering whether
 	// the click landed.
-	if view.Loading && mark.Valid() {
+	if loading && mark.Valid() {
 		mark.Rotate(mark.Loop(spinKey, spinPeriod, ui.Linear) * 360)
 	}
 	return button

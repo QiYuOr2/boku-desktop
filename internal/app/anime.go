@@ -24,14 +24,16 @@ type animeSubjectUpdate struct {
 	Episodes    []domain.EpisodeRelease
 }
 
-// animeUpdates is absent when disabled, unconfigured, or there is no release:
-// a zero-result day must not leave an empty section in the compact flyout.
+// animeUpdates is absent when disabled, unconfigured, or there is no release.
+// Once a request has settled, an empty today stays absent even when the
+// request failed: an optional schedule must not leave an error-shaped blank
+// region in the compact flyout.
 func (s *State) animeUpdates(c *ui.Context) {
 	if s.animeService == nil || !s.animeService.Enabled() || s.animeService.Username() == "" {
 		return
 	}
 	items, _, loading, err := s.animeService.View()
-	if len(items) == 0 && !loading && err == nil {
+	if len(items) == 0 && !loading {
 		return
 	}
 	quickDivider(c)
@@ -42,19 +44,22 @@ func (s *State) animeUpdates(c *ui.Context) {
 				ui.Row(c).AlignItems(ui.Center).Gap(float32(8)).Children(func() {
 					quickTile(c, panelMark{svg: s.tvMark, tile: ui.Hex(animePrimary), ink: colorOnMark})
 					ui.Text(c, "今日动画更新").FontSize(sizeQuickName).FontWeight(600).TextColor(panelInk).SingleLine()
-				})
-				ui.Spacer(c)
-				if loading {
-					ui.Spinner(c)
-				} else {
+					// Keep the count with the thing it counts. The right edge is
+					// reserved for the refresh control, as it is on quota panels.
 					ui.Box(c).Background(ui.Hex(animeTint)).Radius(float32(10)).Padding(float32(2), float32(6)).Children(func() {
 						ui.Text(c, fmt.Sprintf("%d", len(updates))).FontSize(sizeQuickTiny).FontWeight(600).TextColor(ui.Hex(animePrimary)).SingleLine()
 					})
+				})
+				ui.Spacer(c)
+				// The refresh mark is the only loading indicator in this compact
+				// header. It already turns while a request is in flight; a second
+				// spinner beside it only makes the state look duplicated.
+				if button := s.refreshButton(c, loading, err != nil && len(items) > 0); button.Clicked() && !loading {
+					s.refreshAnimeAsync(true)
 				}
 			})
 			if err != nil {
 				notice(c, noteDanger, friendlyError(err))
-				return
 			}
 			for _, update := range updates {
 				row := ui.ButtonBase(c).Label(update.SubjectName).FillWidth().Cursor(ui.CursorPointer).Radius(radiusTile).Padding(float32(6), float32(8)).Background(ui.Hex(animeTint)).Border(1, ui.Hex(animeBorder))

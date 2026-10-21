@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -96,7 +97,8 @@ func TestServiceLoadsCollectionCoverWithoutFailingTheReleaseList(t *testing.T) {
 	defer func() { bangumiAPIBaseURL = old }()
 	section := NewSection()
 	section.Set(Settings{Enabled: true, Username: "sai"})
-	service, err := New(httpc.New(httpc.Options{UserAgent: "Boku/test"}), section, nil)
+	cache := NewCache(filepath.Join(t.TempDir(), "anime_today.json"))
+	service, err := NewWithCache(httpc.New(httpc.Options{UserAgent: "Boku/test"}), section, nil, cache)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,6 +110,13 @@ func TestServiceLoadsCollectionCoverWithoutFailingTheReleaseList(t *testing.T) {
 		t.Fatal("cover was not cached")
 	} else if _, err := png.Decode(bytes.NewReader(cover)); err != nil {
 		t.Fatalf("cached cover is invalid: %v", err)
+	}
+	_, cachedCovers, _, ok, err := cache.Load("2026-10-20")
+	if err != nil || !ok {
+		t.Fatalf("cache load = ok:%v err:%v", ok, err)
+	}
+	if cover := cachedCovers[7]; len(cover) == 0 {
+		t.Fatal("cover was not persisted with the daily releases")
 	}
 }
 
@@ -168,5 +177,66 @@ func TestRefreshKeepsTodayOnAFixedClock(t *testing.T) {
 	}
 	if got := items[0].AirDate.In(shanghai()).Format(time.DateOnly); got != "2026-10-20" {
 		t.Errorf("airdate = %s, want 2026-10-20", got)
+	}
+}
+
+func TestFailedRefreshRetainsTodayCachedReleases(t *testing.T) {
+	day := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	cache := NewCache(filepath.Join(t.TempDir(), "anime_today.json"))
+	items := []domain.EpisodeRelease{{
+		SubjectID: 7, SubjectName: "测试动画", EpisodeID: 9, EpisodeName: "第三集", AirDate: day,
+	}}
+	coverImage := image.NewNRGBA(image.Rect(0, 0, 1, 1))
+	coverImage.Set(0, 0, color.NRGBA{R: 234, G: 145, B: 153, A: 255})
+	var encodedCover bytes.Buffer
+	if err := png.Encode(&encodedCover, coverImage); err != nil {
+		t.Fatal(err)
+	}
+	coverBytes := encodedCover.Bytes()
+	if err := cache.Save("2026-10-20", day, items, map[int64][]byte{7: coverBytes}); err != nil {
+		t.Fatal(err)
+	}
+	section := NewSection()
+	section.Set(Settings{Enabled: true, Username: "sai"})
+	service, err := New(httpc.New(httpc.Options{UserAgent: "Boku/test"}), section, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return day }
+	service.cache = cache
+	service.restoreToday()
+
+	requestErr := errors.New("offline")
+	service.record(nil, requestErr)
+	got, fetchedAt, _, viewErr := service.View()
+	if !errors.Is(viewErr, requestErr) {
+		t.Fatalf("view error = %v, want %v", viewErr, requestErr)
+	}
+	if len(got) != 1 || got[0].EpisodeID != 9 {
+		t.Fatalf("cached releases = %#v, want the today's release", got)
+	}
+	if fetchedAt.IsZero() {
+		t.Fatal("cached fetchedAt was lost after the failed refresh")
+	}
+	if got := service.Cover(7); !bytes.Equal(got, coverBytes) {
+		t.Fatalf("cached cover = %d bytes, want saved cover", len(got))
+	}
+}
+
+func TestFailedRefreshDropsYesterdayReleases(t *testing.T) {
+	section := NewSection()
+	section.Set(Settings{Enabled: true, Username: "sai"})
+	service, err := New(httpc.New(httpc.Options{UserAgent: "Boku/test"}), section, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	day := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return day }
+	service.record([]domain.EpisodeRelease{{SubjectID: 7, SubjectName: "昨天", EpisodeID: 9, EpisodeName: "第一集", AirDate: day}}, nil)
+	service.now = func() time.Time { return day.AddDate(0, 0, 1) }
+	service.record(nil, errors.New("offline"))
+	got, fetchedAt, _, _ := service.View()
+	if len(got) != 0 || !fetchedAt.IsZero() {
+		t.Fatalf("yesterday's releases survived: %#v, fetchedAt=%s", got, fetchedAt)
 	}
 }
