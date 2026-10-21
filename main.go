@@ -23,6 +23,7 @@ import (
 
 	"boku/internal/anime"
 	"boku/internal/app"
+	"boku/internal/bilibili"
 	"boku/internal/clipboard"
 	"boku/internal/credential"
 	"boku/internal/domain"
@@ -94,7 +95,7 @@ func main() {
 		defer recordPanics()
 	}
 
-	panels, animeUpdates, secrets, clipboard, translate, own, appearance, prefs, err := services(userData, version)
+	panels, animeUpdates, bilibiliUpdates, secrets, clipboard, translate, own, appearance, prefs, err := services(userData, version)
 	if err != nil {
 		log.Fatalf("boku: %v", err)
 	}
@@ -142,6 +143,7 @@ func main() {
 	state, err = app.New(mygo.App, app.Deps{
 		Panels:        panels,
 		Anime:         animeUpdates,
+		Bilibili:      bilibiliUpdates,
 		Secrets:       secrets,
 		Clipboard:     clipboard,
 		Translate:     translate,
@@ -176,6 +178,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	bilibiliUpdates.SetEmit(state.NoteBilibiliChanges)
 
 	// A launch that reached the running instance is the user asking for the
 	// window, not for a second application: the tray is already there, so
@@ -225,6 +228,7 @@ func main() {
 			updates.Stop()
 		}
 	}
+	quitBilibili := func() { bilibiliUpdates.Stop() }
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
 		slog.Info("boku is quitting")
 		// The clipboard poll is a goroutine, and it ends before the
@@ -232,6 +236,7 @@ func main() {
 		// away is a read nobody asked for.
 		clipboard.Stop()
 		quitUpdates()
+		quitBilibili()
 		// A shortcut left bound belongs to a process that no longer exists:
 		// the next launch would find it taken by itself.
 		state.UnregisterShortcuts()
@@ -248,6 +253,7 @@ func main() {
 		// only if the user turned it on.
 		state.RegisterShortcuts()
 		clipboard.Start(nil)
+		bilibiliUpdates.Start(context.Background())
 		// The update check starts last: its first look at the feed is a
 		// minute away, and the tray is what a launch is for. A build that
 		// cannot update itself gets no timer from here — the service knows,
@@ -270,7 +276,7 @@ func main() {
 // mismatched provider and adapter, or a panel that breaks its provider's
 // contract, is a startup error and worth catching without a graphical
 // session.
-func services(userData, version string) (*panel.Panels, *anime.Service, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, *ownServices, *app.Appearance, *settings.Store, error) {
+func services(userData, version string) (*panel.Panels, *anime.Service, *bilibili.Service, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, *ownServices, *app.Appearance, *settings.Store, error) {
 	// Credentials: a file of their own, never the database. The store is
 	// named here and nowhere else.
 	//
@@ -283,11 +289,11 @@ func services(userData, version string) (*panel.Panels, *anime.Service, *credent
 	// in a log or an error, and a window that says plainly what the file is.
 	secretStore, err := credential.Open(filepath.Join(userData, credential.FileName))
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
 	}
 	secrets, err := credential.NewSecrets(secretStore)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the credential store: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the credential store: %w", err)
 	}
 
 	// The application's own settings and the clipboard history, next to the
@@ -302,6 +308,7 @@ func services(userData, version string) (*panel.Panels, *anime.Service, *credent
 	translateSettings := translate.NewSection()
 	panelSettings := panel.NewSection()
 	animeSettings := anime.NewSection()
+	bilibiliSettings := bilibili.NewSection()
 	// The appearance is the presentation's choice rather than a feature's,
 	// but it is stored the same way: a section of its own in the same file,
 	// written through the same store.
@@ -312,28 +319,34 @@ func services(userData, version string) (*panel.Panels, *anime.Service, *credent
 		translateSettings,
 		panelSettings,
 		animeSettings,
+		bilibiliSettings,
 		appearance,
 	)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
 	}
 	// The file is read once, here: a frame must not read it, and neither
 	// must a service that already has its settings in memory.
 	if err := prefs.Load(context.Background()); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the settings: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the settings: %w", err)
 	}
 	history, err := clipboard.NewHistory(filepath.Join(userData, "clipboard_history.json"))
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the clipboard history: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the clipboard history: %w", err)
 	}
 
 	// Public Bangumi requests require an identifiable User-Agent. Keeping the
 	// project address in the common client also makes every other request
 	// traceable without leaking any user-specific value.
 	client := httpc.New(httpc.Options{UserAgent: "Boku/" + applicationVersion(version) + " (+https://github.com/QiYuOr2/boku)"})
-	animeService, err := anime.NewWithCache(client, animeSettings, prefs, anime.NewCache(filepath.Join(userData, "anime_today.json")), secretStore)
+	animeService, err := anime.New(client, animeSettings, prefs, secretStore)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare anime updates: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare anime updates: %w", err)
+	}
+
+	bilibiliService, err := bilibili.New(client, bilibiliSettings, prefs)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare Bilibili UP monitoring: %w", err)
 	}
 
 	// Providers and their adapters are registered in pairs: a provider
@@ -343,16 +356,16 @@ func services(userData, version string) (*panel.Panels, *anime.Service, *credent
 		deepseekpanel.New(client),
 		deepseekpanel.NewAdapter(),
 	); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
 	}
 	if err := registry.Register(
 		codexpanel.New(client),
 		codexpanel.NewAdapter(),
 	); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the codex provider: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the codex provider: %w", err)
 	}
 	if err := registry.Validate(); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
 	}
 
 	// The Codex quota's credential is not one of Boku's: it is the ChatGPT
@@ -379,11 +392,11 @@ func services(userData, version string) (*panel.Panels, *anime.Service, *credent
 		},
 	}, codexLogin)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
 	}
 	// The switches are read once, here: a frame must not read a file.
 	if err := panels.LoadChoices(context.Background()); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the panel switches: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the panel switches: %w", err)
 	}
 
 	// The clipboard reads and writes on the thread the platform owns, so
@@ -411,7 +424,7 @@ func services(userData, version string) (*panel.Panels, *anime.Service, *credent
 		Clock:    domain.SystemClock{},
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
 	}
 
 	// The translators the tool may ask. Like the panels, adding one means
@@ -420,7 +433,7 @@ func services(userData, version string) (*panel.Panels, *anime.Service, *credent
 	// pair it with.
 	translators := translate.NewRegistry()
 	if err := translators.Register(deepseektranslator.New(client)); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek translator: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek translator: %w", err)
 	}
 	// The free engines: no key, no account, and the reason a fresh
 	// installation can press the shortcut and get an answer instead of a page
@@ -428,10 +441,10 @@ func services(userData, version string) (*panel.Panels, *anime.Service, *credent
 	// because the settings window offers them as two choices — the user picks
 	// the engine, and that engine is the one asked.
 	if err := translators.Register(freetranslator.NewMicrosoft(client)); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free microsoft translator: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free microsoft translator: %w", err)
 	}
 	if err := translators.Register(freetranslator.NewBilibili(client)); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free bilibili translator: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free bilibili translator: %w", err)
 	}
 	// The services the user runs themselves: one translator per stored service,
 	// because each has its own id, its own address and its own name. Which ones
@@ -440,7 +453,7 @@ func services(userData, version string) (*panel.Panels, *anime.Service, *credent
 	// they added, rather than a set written down here.
 	own := newOwnServices(client, translators, translateSettings)
 	if err := own.registerAll(); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 	}
 	translation, err := translate.NewTranslate(translate.TranslateOptions{
 		Translators: translators,
@@ -466,9 +479,9 @@ func services(userData, version string) (*panel.Panels, *anime.Service, *credent
 		Clock:     domain.SystemClock{},
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the translation tool: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the translation tool: %w", err)
 	}
-	return panels, animeService, secrets, clip, translation, own, appearance, prefs, nil
+	return panels, animeService, bilibiliService, secrets, clip, translation, own, appearance, prefs, nil
 }
 
 // applicationVersion is the version to send as a user agent: a plain `go
