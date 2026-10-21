@@ -18,3 +18,10 @@ func TestFriendlyErrorHidesUnstructuredBadResponses(t *testing.T) {
 		t.Errorf("friendly error leaks implementation details: %q", got)
 	}
 }
+
+func TestFriendlyErrorExplainsStructuredImageFailures(t *testing.T) {
+	got := friendlyError(&domain.ImageTranslationError{Code: domain.ImageFailureNoReadableText})
+	if got != "图片中没有可识别的文字。" {
+		t.Errorf("friendlyError() = %q", got)
+	}
+}

@@ -732,6 +732,7 @@ func formatMetric(snapshot domain.Snapshot, metric domain.Metric) string {
 // errors themselves are built so that they never carry a credential.
 func friendlyError(err error) string {
 	var bad *domain.BadResponseError
+	var imageFailure *domain.ImageTranslationError
 	switch {
 	case err == nil:
 		return ""
@@ -749,6 +750,16 @@ func friendlyError(err error) string {
 		return "找不到这个数据源。"
 	case errors.Is(err, domain.ErrScreenRecordingDenied):
 		return "需要屏幕录制权限才能读取截图。"
+	case errors.As(err, &imageFailure):
+		switch imageFailure.Code {
+		case domain.ImageFailureNoReadableText:
+			return "图片中没有可识别的文字。"
+		case domain.ImageFailureUnsupported:
+			return "模型无法处理这张图片。"
+		case domain.ImageFailureRefused:
+			return "模型拒绝处理这张图片。"
+		}
+		return "模型无法完成这张图片的翻译。"
 	case errors.As(err, &bad):
 		if bad.Reason != "" {
 			return "服务返回了无法识别的数据：" + bad.Reason

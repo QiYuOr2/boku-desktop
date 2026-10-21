@@ -12,7 +12,6 @@ package custom
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -164,19 +163,14 @@ func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credential
 	content, err := openai.TranslateImage(ctx, openai.ImageOptions{
 		Client: t.client, BaseURL: service.BaseURL, Model: service.Model,
 		APIKey: strings.TrimSpace(creds.Secrets[APIKeyCredential]), Target: target, Image: image,
-		System: `You translate text visible in an image. Return exactly one JSON object and no Markdown: {"sourceLang":"ja","sourceText":"original visible text","targetLang":"zh","translatedText":"translation"}. Use only zh,en,ja,ko,ru,ar,th for language codes. Preserve line breaks. If no readable text exists, use empty strings.`,
+		System: `You translate text visible in an image. Return exactly one JSON object and no Markdown. For a translation return {"status":"success","sourceLang":"ja","sourceText":"original visible text","targetLang":"zh","translatedText":"translation","failure":null}. Use only zh,en,ja,ko,ru,ar,th for language codes and preserve line breaks. If the image has no readable text, is unsupported, or must be refused, return {"status":"failure","sourceLang":"","sourceText":"","targetLang":"","translatedText":"","failure":{"code":"no_readable_text"}}; code must be exactly one of no_readable_text, unsupported_image, refused.`,
 	})
 	if err != nil {
 		return domain.TranslationResult{}, err
 	}
-	var answer struct {
-		SourceLang     domain.Language `json:"sourceLang"`
-		SourceText     string          `json:"sourceText"`
-		TargetLang     domain.Language `json:"targetLang"`
-		TranslatedText string          `json:"translatedText"`
-	}
-	if err := json.Unmarshal([]byte(content), &answer); err != nil {
-		return domain.TranslationResult{}, fmt.Errorf("%w: image translator did not return the required JSON", domain.ErrProviderBadResponse)
+	answer, err := openai.ParseImageResponse(content)
+	if err != nil {
+		return domain.TranslationResult{}, err
 	}
 	sourceText := strings.TrimSpace(answer.SourceText)
 	result := domain.TranslationResult{
