@@ -1,6 +1,7 @@
 package app
 
 import (
+	credentialui "boku/internal/credential/ui"
 	"fmt"
 	"strconv"
 	"testing"
@@ -36,15 +37,15 @@ func aTranslationSettings(t *testing.T, state *State) translate.Settings {
 }
 
 // cardOf is one card of the window, by id.
-func cardOf(t *testing.T, state *State, id string) translateCard {
+func cardOf(t *testing.T, state *State, id string) credentialui.TranslateCard {
 	t.Helper()
-	for _, card := range state.translateCards() {
-		if card.id == id {
+	for _, card := range state.credentialUI.TranslateCards() {
+		if card.ID == id {
 			return card
 		}
 	}
 	t.Fatalf("the window has no card for %s", id)
-	return translateCard{}
+	return credentialui.TranslateCard{}
 }
 
 // The free engines as the settings window drives them: the two options the
@@ -60,29 +61,29 @@ func cardOf(t *testing.T, state *State, id string) translateCard {
 // installation starts on.
 func TestTheFreeEnginesAreTwoSeparateChoices(t *testing.T) {
 	state, _, _ := translateState(t)
-	cards := state.translateCards()
+	cards := state.credentialUI.TranslateCards()
 
-	byID := map[string]translateCard{}
+	byID := map[string]credentialui.TranslateCard{}
 	for _, card := range cards {
-		byID[card.id] = card
+		byID[card.ID] = card
 	}
 	for _, id := range []string{freeMicrosoftID, freeBilibiliID} {
 		card, ok := byID[id]
 		if !ok {
 			t.Fatalf("the picker has no row for %s: %+v", id, cards)
 		}
-		if card.needsCredential {
+		if card.NeedsCredential {
 			t.Errorf("%s is drawn as needing a key", id)
 		}
-		if !card.configured {
+		if !card.Configured {
 			t.Errorf("%s is not usable out of the box: %+v", id, card)
 		}
 	}
 	// The names are the design's own: the two free options the mock draws.
-	if got := byID[freeMicrosoftID].displayName; got != "微软 Edge 翻译" {
+	if got := byID[freeMicrosoftID].DisplayName; got != "微软 Edge 翻译" {
 		t.Errorf("the first free option is called %q", got)
 	}
-	if got := byID[freeBilibiliID].displayName; got != "B站 Index-Translate" {
+	if got := byID[freeBilibiliID].DisplayName; got != "B站 Index-Translate" {
 		t.Errorf("the second free option is called %q", got)
 	}
 	// A fresh installation translates with the Microsoft engine, which is one
@@ -103,18 +104,18 @@ func TestThePickerGroupsFreeEnginesSeparately(t *testing.T) {
 		DisplayName: "本地 Ollama",
 	})
 
-	free, keyed := splitTranslateCards(state.translateCards())
+	free, keyed := splitTranslateCards(state.credentialUI.TranslateCards())
 	if len(free) != 2 {
 		t.Fatalf("free = %+v, want the two free engines", free)
 	}
 	for _, card := range free {
-		if !isFreeTranslator(card.id) {
-			t.Errorf("%s is in the free group and is not a free engine", card.id)
+		if !isFreeTranslator(card.ID) {
+			t.Errorf("%s is in the free group and is not a free engine", card.ID)
 		}
 	}
 	ids := map[string]bool{}
 	for _, card := range keyed {
-		ids[card.id] = true
+		ids[card.ID] = true
 	}
 	// DeepSeek needs a key, and the user's own service has an address it is
 	// asked at: both belong under the heading that says something has to be
@@ -141,15 +142,15 @@ func TestTheAPIKeySectionLeavesTheFreeEnginesOut(t *testing.T) {
 		DisplayName: "本地 Ollama",
 	})
 
-	keyed := keyedTranslateCards(state.translateCards())
+	keyed := credentialui.KeyedTranslateCards(state.credentialUI.TranslateCards())
 	for _, card := range keyed {
-		if isFreeTranslator(card.id) {
-			t.Errorf("the API Key section draws %s, a free engine", card.id)
+		if isFreeTranslator(card.ID) {
+			t.Errorf("the API Key section draws %s, a free engine", card.ID)
 		}
 	}
 	ids := map[string]bool{}
 	for _, card := range keyed {
-		ids[card.id] = true
+		ids[card.ID] = true
 	}
 	// The cards the design draws there: the services with a key, and the ones
 	// the user runs themselves.
@@ -175,12 +176,12 @@ func TestTheOwnServiceCardsComeLast(t *testing.T) {
 
 	// An unconfigured service is not a card: it has nothing to show and
 	// nothing to ask.
-	keyed := keyedTranslateCards(state.translateCards())
+	keyed := credentialui.KeyedTranslateCards(state.credentialUI.TranslateCards())
 	if len(keyed) == 0 {
 		t.Fatal("the API Key section has no cards")
 	}
 	for _, card := range keyed {
-		if translate.IsCustomService(card.id) {
+		if translate.IsCustomService(card.ID) {
 			t.Fatalf("an unconfigured own service is a card: %+v", keyed)
 		}
 	}
@@ -194,10 +195,10 @@ func TestTheOwnServiceCardsComeLast(t *testing.T) {
 		})
 		ids = append(ids, id)
 	}
-	keyed = keyedTranslateCards(state.translateCards())
+	keyed = credentialui.KeyedTranslateCards(state.credentialUI.TranslateCards())
 	ownFrom := -1
 	for i, card := range keyed {
-		if translate.IsCustomService(card.id) {
+		if translate.IsCustomService(card.ID) {
 			if ownFrom < 0 {
 				ownFrom = i
 			}
@@ -227,12 +228,12 @@ func TestAnAddedOwnServiceIsConfigured(t *testing.T) {
 		DisplayName: "本地 Ollama",
 	})
 	card := cardOf(t, state, id)
-	if !card.configured {
+	if !card.Configured {
 		t.Errorf("a service the user just added is not configured: %+v", card)
 	}
 	// Its name is the user's own, not this feature's word for a service.
-	if card.displayName != "本地 Ollama" {
-		t.Errorf("the card is called %q, want the name the user gave it", card.displayName)
+	if card.DisplayName != "本地 Ollama" {
+		t.Errorf("the card is called %q, want the name the user gave it", card.DisplayName)
 	}
 }
 
@@ -251,19 +252,19 @@ func TestDeleteIsOnEveryCardThatHasSomethingToRemove(t *testing.T) {
 		BaseURL:     "http://127.0.0.1:11434/v1",
 		DisplayName: "本地 Ollama",
 	})
-	if state.form.hasCredential[own] {
+	if state.credentialUI.Form.HasCredential[own] {
 		t.Fatal("the fixture stored a key this test is about not having")
 	}
-	if !cardCanBeRemoved(cardOf(t, state, own), state.form.hasCredential[own]) {
+	if !credentialui.CardCanBeRemoved(cardOf(t, state, own), state.credentialUI.Form.HasCredential[own]) {
 		t.Error("a keyless service of the user's own cannot be removed")
 	}
 
 	// A built-in service with no key stored has nothing for the word to do.
-	if cardCanBeRemoved(cardOf(t, state, "deepseek"), false) {
+	if credentialui.CardCanBeRemoved(cardOf(t, state, "deepseek"), false) {
 		t.Error("a card with nothing stored offers to remove something")
 	}
 	// Once it holds a key, it does.
-	if !cardCanBeRemoved(cardOf(t, state, "deepseek"), true) {
+	if !credentialui.CardCanBeRemoved(cardOf(t, state, "deepseek"), true) {
 		t.Error("a card holding a key cannot give it up")
 	}
 }
@@ -285,7 +286,7 @@ func TestRemovingAKeylessOwnServiceWorks(t *testing.T) {
 	if err := fixture.service.RemoveCustomTranslator(t.Context(), id); err != nil {
 		t.Fatalf("RemoveCustomTranslator failed: %v", err)
 	}
-	if err := forgetCredential(t.Context(), state.secretService, id, "apiKey", false); err != nil {
+	if err := credentialui.ForgetCredential(t.Context(), state.secretService, id, "apiKey", false); err != nil {
 		t.Fatalf("dropping a key that was never stored reported %v", err)
 	}
 	settings, err := fixture.service.Settings()
@@ -312,10 +313,10 @@ func TestARemovedServiceLeavesThePage(t *testing.T) {
 
 	// It is on the page in both places to begin with.
 	if !hasCard(state, id) {
-		t.Fatalf("the service that was just added is not a card: %+v", state.translateCards())
+		t.Fatalf("the service that was just added is not a card: %+v", state.credentialUI.TranslateCards())
 	}
 	if !hasPickerRow(state, id) {
-		t.Fatalf("the service that was just added is not a row: %+v", pickerTranslateCards(state.translateCards()))
+		t.Fatalf("the service that was just added is not a row: %+v", pickerTranslateCards(state.credentialUI.TranslateCards()))
 	}
 
 	// What the removal does on the goroutine, without the window handoff.
@@ -327,10 +328,10 @@ func TestARemovedServiceLeavesThePage(t *testing.T) {
 	}
 
 	if hasCard(state, id) {
-		t.Errorf("the removed service is still a card: %+v", state.translateCards())
+		t.Errorf("the removed service is still a card: %+v", state.credentialUI.TranslateCards())
 	}
 	if hasPickerRow(state, id) {
-		t.Errorf("the removed service is still a row: %+v", pickerTranslateCards(state.translateCards()))
+		t.Errorf("the removed service is still a row: %+v", pickerTranslateCards(state.credentialUI.TranslateCards()))
 	}
 	// The other cards are untouched: removing one service does not empty the
 	// section.
@@ -341,8 +342,8 @@ func TestARemovedServiceLeavesThePage(t *testing.T) {
 
 // hasCard reports whether the API Key section draws a card for an id.
 func hasCard(state *State, id string) bool {
-	for _, card := range keyedTranslateCards(state.translateCards()) {
-		if card.id == id {
+	for _, card := range credentialui.KeyedTranslateCards(state.credentialUI.TranslateCards()) {
+		if card.ID == id {
 			return true
 		}
 	}
@@ -351,8 +352,8 @@ func hasCard(state *State, id string) bool {
 
 // hasPickerRow reports whether the translation section offers an id.
 func hasPickerRow(state *State, id string) bool {
-	for _, card := range pickerTranslateCards(state.translateCards()) {
-		if card.id == id {
+	for _, card := range pickerTranslateCards(state.credentialUI.TranslateCards()) {
+		if card.ID == id {
 			return true
 		}
 	}
@@ -365,9 +366,9 @@ func TestAnUnaddedOwnServiceIsNotARow(t *testing.T) {
 	state, fixture, _ := translateState(t)
 
 	// Nothing added yet: no row of the user's own.
-	cards := pickerTranslateCards(state.translateCards())
+	cards := pickerTranslateCards(state.credentialUI.TranslateCards())
 	for _, card := range cards {
-		if translate.IsCustomService(card.id) {
+		if translate.IsCustomService(card.ID) {
 			t.Fatalf("a service that does not exist is a row: %+v", cards)
 		}
 	}
@@ -378,14 +379,14 @@ func TestAnUnaddedOwnServiceIsNotARow(t *testing.T) {
 		BaseURL:     "https://api.example.com/v1",
 		DisplayName: "本地 Ollama",
 	})
-	cards = pickerTranslateCards(state.translateCards())
+	cards = pickerTranslateCards(state.credentialUI.TranslateCards())
 	free, keyed := splitTranslateCards(cards)
 	if len(free) != 2 {
 		t.Errorf("free = %+v, want only the two free engines", free)
 	}
 	found := false
 	for _, card := range keyed {
-		if card.id == id {
+		if card.ID == id {
 			found = true
 		}
 	}
@@ -404,18 +405,18 @@ func TestOnlyTheFreeEnginesWearTheFreeChip(t *testing.T) {
 		DisplayName: "本地 Ollama",
 	})
 
-	for _, card := range state.translateCards() {
-		chipIsFree := isFreeTranslator(card.id)
-		switch card.id {
+	for _, card := range state.credentialUI.TranslateCards() {
+		chipIsFree := isFreeTranslator(card.ID)
+		switch card.ID {
 		case freeMicrosoftID, freeBilibiliID:
 			if !chipIsFree {
-				t.Errorf("%s does not wear the free chip", card.id)
+				t.Errorf("%s does not wear the free chip", card.ID)
 			}
 		case id:
 			if chipIsFree {
 				t.Error("the user's own service wears the free chip")
 			}
-			if card.needsCredential {
+			if card.NeedsCredential {
 				t.Error("the user's own service is drawn as needing a key")
 			}
 		}

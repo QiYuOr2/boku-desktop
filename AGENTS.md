@@ -18,7 +18,7 @@ Folder、Tag、Wiki Link、Backlinks、Markdown 笔记。
 ## Architecture Rules
 
 Desktop 是单个 Go 进程。顶层按**功能**分包：每个功能自己拥有它的服务、它的存储
-与它认识的厂商。跨功能共享的只有三样：领域契约、纯函数、外部世界适配。
+与它认识的厂商。业务共享领域契约、纯函数、外部世界适配；UI 共享 presentation。
 
 ```text
 internal/domain            实体、值对象、端口接口、错误码、Clock。零依赖
@@ -32,14 +32,20 @@ internal/translate         功能：划词翻译（openai 协议 + 各后端）
 internal/credential        功能：凭据（服务 + 存储）
 internal/settings          功能：应用设置的存储
         ↑
-internal/app               Presentation：视图、窗口、托盘、快捷键
+internal/<功能>/ui         功能专属视图、输入/操作状态与 UI 编排
+internal/presentation      共享设计系统、控件、Host 与展示契约
+internal/app               Shell：托盘、窗口壳、导航、功能 UI 装配与协调
 main.go                    唯一装配点
 ```
 
 规则：
 
-- 一个功能一个包；**功能之间不互相 import**。它们只在 `internal/domain` 的接口上
+- 一个功能一个目录；**业务功能根包之间不互相 import**。它们只在 `internal/domain` 的接口上
   相遇（`SecretStore`、`ClipboardDevice`…），由 `main.go` 注入实现。
+- 功能专属 UI 放在各自的 ui 子包，输入、展开、操作反馈等状态由该子包持有。
+  业务根包不得依赖 MyGo；功能 UI 不得 import internal/app 或其它功能 UI。
+  UI 可以引用业务服务的公开类型，通过 Shell 注入的接口/回调完成跨功能操作。
+  窗口壳、导航与 UI 装配放在 app；颜色、基础组件与宿主契约放在 presentation。
 - 功能可以依赖 `domain`、`kit`、`platform`、`contract`；反过来一律不许。
 - `domain`、`contract/*` 不 import 任何其它 internal 包；`kit` 只依赖 `domain`。
 - 有 I/O 的通用技术只写在 `internal/platform/*`；某个功能自己的存储写在它的包里。
@@ -48,7 +54,7 @@ main.go                    唯一装配点
   `internal/translate/<backend>`）引入 `net/http`。
 - 厂商身份（`providerId`、凭据 key 名）只写在 `internal/contract/<厂商>`；面板与
   翻译器都从那里读，不各写一份字符串。
-- `main.go` 是唯一装配点，也是唯一 import 所有功能包的文件。
+- `main.go` 是业务服务的装配点；`internal/app` 负责功能 UI 的装配与跨功能协调。
 
 ### Provider / Adapter 规则
 

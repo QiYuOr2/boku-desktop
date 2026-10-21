@@ -59,7 +59,7 @@ func (c *Cache) Load(day string) ([]domain.EpisodeRelease, map[int64][]byte, tim
 		return nil, nil, time.Time{}, false, fmt.Errorf("decode animation cache: missing fetchedAt")
 	}
 	for _, release := range saved.Releases {
-		if release.SubjectID <= 0 || release.EpisodeID <= 0 || strings.TrimSpace(release.SubjectName) == "" || strings.TrimSpace(release.EpisodeName) == "" || release.AirDate.In(shanghai()).Format(time.DateOnly) != day {
+		if release.SubjectID <= 0 || release.EpisodeID <= 0 || strings.TrimSpace(release.SubjectName) == "" || release.AirDate.In(shanghai()).Format(time.DateOnly) != day {
 			return nil, nil, time.Time{}, false, fmt.Errorf("decode animation cache: invalid release")
 		}
 	}

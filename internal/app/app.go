@@ -15,26 +15,33 @@ package app
 import (
 	"context"
 	"fmt"
-	"image"
 	"log"
 	"log/slog"
 	"os"
 	"runtime"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	animeui "boku/internal/anime/ui"
 	"boku/internal/app/assets"
+	bilibiliui "boku/internal/bilibili/ui"
 	"boku/internal/clipboard"
+	clipboardui "boku/internal/clipboard/ui"
 	"boku/internal/credential"
+	credentialui "boku/internal/credential/ui"
 	"boku/internal/domain"
-	"boku/internal/kit"
 	"boku/internal/panel"
+	panelui "boku/internal/panel/ui"
 	"boku/internal/platform/autostart"
+	"boku/internal/preferences"
+	preferencesui "boku/internal/preferences/ui"
+	"boku/internal/presentation"
 	"boku/internal/translate"
+	translateui "boku/internal/translate/ui"
+	updateui "boku/internal/update/ui"
 )
 
 const (
@@ -115,10 +122,9 @@ type Deps struct {
 	Appearance *Appearance
 	// AppearanceStore is the settings store the choice is written through.
 	// A state without one still changes the appearance for this run.
-	AppearanceStore AppearanceStore
-	// QuickWindowLayout stores the flyout's block order and visibility.
-	QuickWindowLayout      *QuickWindowLayout
-	QuickWindowLayoutStore LayoutStore
+	AppearanceStore        AppearanceStore
+	QuickWindowLayout      *preferences.QuickWindowLayout
+	QuickWindowLayoutStore preferences.LayoutStore
 	// ApplyAppearance gives the desktop the chosen appearance, so that the
 	// title bars, menus and system-drawn window chrome around Boku's own
 	// drawing match it. It is nil in a test that has no desktop.
@@ -177,270 +183,76 @@ type BilibiliService interface {
 // State is the whole presentation state. It is read and written on the main
 // thread only.
 type State struct {
-	app             *mygo.Application
-	panelService    *panel.Panels
-	animeService    AnimeService
-	bilibiliService BilibiliService
-	animeCovers     map[int64]*ui.Bitmap
-	// bilibiliAvatars holds each followed creator's avatar, keyed by UID. It is
-	// filled after a refresh, never from the view.
-	bilibiliAvatars map[int64]*ui.Bitmap
-	secretService   *credential.Secrets
-	clipboard       *clipboard.Clipboard
-	translate       *translate.Translate
-	screenshot      domain.ScreenshotDevice
-	regionCapture   RegionCapture
-	// qrDecode reads the text a captured PNG holds. It is a field rather than
-	// a direct call so that the screenshot flow can be exercised without a
-	// real QR code in a fixture; New gives it the real decoder.
-	qrDecode      func([]byte) (string, error)
-	regionSession *regionCaptureSession
-	shortcuts     ShortcutRegistrar
-	version       string
-	quit          func()
-
-	// appearance is the theme choice, and dark is what it resolves to right
-	// now: the views read the resolved answer rather than asking the desktop
-	// on every frame. systemDark is the desktop's last known answer, which is
-	// what the automatic mode follows.
+	app               *mygo.Application
+	panelService      *panel.Panels
+	panelUI           *panelui.State
+	animeService      AnimeService
+	bilibiliService   BilibiliService
+	animeUI           *animeui.ViewModel
+	bilibiliUI        *bilibiliui.ViewModel
+	secretService     *credential.Secrets
+	credentialUI      *credentialui.State
+	clipboard         *clipboard.Clipboard
+	clipboardUI       *clipboardui.State
+	translate         *translate.Translate
+	translationUI     *translateui.State
+	version           string
+	quit              func()
 	appearance        *Appearance
 	appearanceStore   AppearanceStore
-	quickWindowLayout *QuickWindowLayout
-	quickLayoutStore  LayoutStore
 	applyAppearance   func(AppearanceMode)
 	popoverAppearance PopoverAppearance
-	// autostart is the platform's login start, or nil when there is none to
-	// offer. The settings page's switch is drawn from it every frame, and it
-	// is the only writer: the system's own record is the one truth about
-	// whether Boku starts at login.
-	autostart autostart.Manager
-	// updates is the update check, or nil in a build without one. The state
-	// it reports is read from it every frame rather than kept here, so that
-	// an answer arriving while no window is open is not lost.
-	updates               UpdateService
-	animeUsername         string
-	animeRefreshInput     string
-	animeTokenInput       string
-	bilibiliUIDInput      string
-	bilibiliRefreshInput  string
-	bilibiliDynamicInput  string
-	bilibiliLiveNotice    bool
-	bilibiliDynamicNotice bool
-	// notifier puts short, actionable notices on the desktop. Updates and
-	// completed image translations share it so notification behavior stays
-	// consistent across the application.
-	notifier desktopNotifier
-	// updateNotified is the version whose notice has already been shown in
-	// this run, so that a state polled once a frame is announced once.
-	updateNotified string
-	// updateCheckDialog belongs to the explicit check from the About section.
-	// Scheduled checks still update the row, but do not interrupt the user with
-	// a dialog of their own.
-	updateCheckDialog bool
-	// autostartStatus is what the last press of that switch said, shown under
-	// it. The state itself is not kept here, only the answer to the press.
-	autostartStatus autostartStatus
-	// appearanceStatus is what the last attempt to save the theme said,
-	// shown under the control in the settings window.
-	appearanceStatus string
-	dark             bool
-	systemDark       bool
-
-	trayIcon []byte
-	// deepseekMark is the DeepSeek whale: the mark its block of the quick
-	// window carries. It is parsed once at startup, because a view is built
-	// several times per frame and parsing a document is not a view's work.
-	deepseekMark *ui.SVG
-	// gaugeMark is the placeholder a block carries when the application has
-	// no drawing of its provider yet. It is not a brand: it says "a measure"
-	// until the real mark arrives.
-	gaugeMark *ui.SVG
-	tvMark    *ui.SVG
-	// bilibiliMark heads the followed-UP block and its settings section: a
-	// small television with antennae and eyes, a different drawing from
-	// tvMark so the two broadcast-shaped blocks are told apart.
-	bilibiliMark *ui.SVG
-	// chevronRightMark shows that a compact animation card opens its subject.
-	chevronRightMark *ui.SVG
-	// clipboardMark labels the quick window's clipboard line, parsed for the
-	// same reason.
-	clipboardMark *ui.SVG
-	// refreshMark is the panel's refresh action. It is drawn instead of a
-	// word, and turned while a fetch runs, so it is parsed once at startup
-	// like the other marks.
-	refreshMark *ui.SVG
-	// The history's kind marks: what a recorded copy is drawn as, in the
-	// tile at the head of its row. They are parsed once for the same reason
-	// the panel's marks are.
-	historyText  *ui.SVG
-	historyImage *ui.SVG
-	historyLink  *ui.SVG
-	historyCode  *ui.SVG
-	// screenshotMark, settingsMark and quitMark are footer actions,
-	// parsed once like the rest: they are marks rather than words, and what
-	// they mean is their label.
-	settingsMark   *ui.SVG
-	quitMark       *ui.SVG
-	screenshotMark *ui.SVG
-	qrMark         *ui.SVG
-	// copyMark, pinMark and closeMark are the translation window's actions.
-	// They are parsed once for the same reason as the rest: a view is built
-	// several times per frame, and parsing a document is not a view's work.
-	copyMark  *ui.SVG
-	pinMark   *ui.SVG
-	closeMark *ui.SVG
-	// translationMark heads the settings window's translation section: the
-	// design gives it a mark of its own, and it is the application's own
-	// drawing rather than a brand's.
-	translationMark *ui.SVG
-	// keyMark and infoMark are the settings window's sidebar's other two
-	// marks. Every entry draws the mark its own section carries — the key,
-	// the translation mark, the clipboard, the gear, the info circle
-	// (§2.1 of the design system) — and these are the two the page did not have
-	// before the sidebar named every section at once. They are parsed once
-	// at startup like every other mark.
-	keyMark    *ui.SVG
-	infoMark   *ui.SVG
-	layoutMark *ui.SVG
-	eyeMark    *ui.SVG
-	eyeOffMark *ui.SVG
-	gripMark   *ui.SVG
-
-	tray *mygo.Tray
-	// panel is the open quick window; panelPopover records whether it was
-	// created as the system popover (自动) or as the application's own card
-	// (a fixed appearance), which is what tells a theme change whether the
-	// open window can be repainted or has to be closed.
+	preferencesUI     *preferencesui.State
+	layoutUI          *preferencesui.LayoutState
+	quickWindowLayout *preferences.QuickWindowLayout
+	layoutMark        *ui.SVG
+	updates           UpdateService
+	notifier          desktopNotifier
+	updateUI          *updateui.State
+	dark              bool
+	systemDark        bool
+	trayIcon          []byte
+	deepseekMark      *ui.SVG
+	gaugeMark         *ui.SVG
+	tvMark            *ui.SVG
+	bilibiliMark      *ui.SVG
+	chevronRightMark  *ui.SVG
+	clipboardMark     *ui.SVG
+	refreshMark       *ui.SVG
+	historyText       *ui.SVG
+	historyImage      *ui.SVG
+	historyLink       *ui.SVG
+	historyCode       *ui.SVG
+	settingsMark      *ui.SVG
+	quitMark          *ui.SVG
+	screenshotMark    *ui.SVG
+	qrMark            *ui.SVG
+	copyMark          *ui.SVG
+	pinMark           *ui.SVG
+	closeMark         *ui.SVG
+	translationMark   *ui.SVG
+	keyMark           *ui.SVG
+	infoMark          *ui.SVG
+	tray              *mygo.Tray
 	panel             *mygo.Window
 	panelPopover      bool
 	panelInjectedDark bool
-	settingsWindow    *mygo.Window // the open settings window, or nil
-	historyWindow     *mygo.Window // the open clipboard history window, or nil
-	// translateWindow is the translation card, created the first time the
-	// shortcut is pressed and hidden afterwards.
-	translateWindow cardWindow
-	// cardWindows builds the translation card. A test supplies its own, so
-	// that what the card does can be exercised without a window.
-	cardWindows func(onClosed, onBlur, onFocus func()) cardWindow
-
-	// form is the settings window's state, on the main thread like the
-	// rest.
-	form connectForm
-	// clipboardStatus is the last thing the clipboard switches said, shown
-	// under them.
-	clipboardStatus string
-	// translateNotice is the last thing the translation switches said,
-	// shown under them.
-	translateNotice string
-	// ownServices registers a translator for every service the user runs
-	// themselves, so that one they just added from this window is one the
-	// translation tool can ask. It is nil in a build with no assembly behind
-	// it, and a window that has nothing to register says so rather than
-	// panicking.
-	ownServices func() error
-	// panelStatus is the last thing a panel switch said, shown under the
-	// switches in the general section.
-	panelStatus string
-	// layoutStatus is the last outcome of persisting the flyout layout.
-	layoutStatus string
-	// loginNotice is what the last attempt to start a credential's own login
-	// said. It belongs to the panel whose credential comes from a tool: the
-	// button is there, and failing to start the login has to be visible.
-	loginNotice string
-	// delayInput is the close-delay field as typed. It is a string rather
-	// than a number because a field is built several times per frame, and
-	// what the user has typed is what it has to keep.
-	delayInput string
-	// settingsScroll is how far the settings page is scrolled. The sidebar
-	// owns it: clicking an entry moves it to that section, and reading it is
-	// what tells the sidebar which chapter the user is looking at. It is a
-	// ScrollState rather than a number because MyGo's scroll container keeps
-	// its place there.
-	settingsScroll ui.ScrollState
-	// settingsSection is the section the sidebar says is open: the last one
-	// an entry was clicked for, or the one the page is showing, whichever
-	// the frame can tell.
-	settingsSection settingsSectionKind
-	// settingsReveal is the section the sidebar asked for and the page has
-	// not reached yet, or nil when the sidebar is not the one moving the
-	// page. The entry the user clicked is the open one for the whole time the
-	// page is travelling, so that it does not flicker back to a section the
-	// page is passing on the way.
-	settingsReveal *settingsSectionKind
-	// settingsAiming says that the sidebar has sent the page somewhere and the
-	// scroll it was given has not stopped yet, which is what keeps the entry
-	// the user clicked the open one for the whole travel.
-	settingsAiming bool
-	// settingsAimAt is the section that travel is aimed at, so that a second
-	// click while the page is moving is a new destination rather than another
-	// aim at the same one.
-	settingsAimAt settingsSectionKind
-	// settingsRoom is how tall the room the page scrolls in is, as the last
-	// frame laid it out. The window is taller than that: the footer is under
-	// the page, and a section's heading is read against the middle of the
-	// room rather than the middle of the window.
-	settingsRoom float32
-	// translation is the translation card's state.
-	translation translationState
-	// translationHeight is how tall the card is, which is what it measured
-	// the last time it drew itself rather than a number chosen here.
-	translationHeight int
-	// cardHeight is what the card measured as it drew, in points.
-	cardHeight int
-	// cardMeasuring keeps the measurement from resizing the window from
-	// inside the frame that is being measured.
-	cardMeasuring bool
-	// cardSettle is how many more frames the card owes its own measurement.
-	// What a frame reads from the card is what the frame before it laid out
-	// (MyGo's Element.Bounds is the previous frame's box), so a card whose
-	// content has just changed needs a frame after the change to be measured
-	// as it now is, and one more after the window takes the size that
-	// measurement asked for. Without them the window keeps the height it had
-	// — the stale measurement is exactly that height — and never asks for
-	// another frame. See measureCard.
-	cardSettle int
-	// cursor and cursorSet are where the pointer was when the shortcut was
-	// pressed. A point given in advance stands in for the platform's own,
-	// which a test has no way to ask for: the screen module needs a running
-	// application.
-	cursor    mygo.Point
-	cursorSet bool
-	// translateCloseTimer is the close the card asked for and has not
-	// reached yet, or nil.
-	translateCloseTimer *time.Timer
-	// translationVisible distinguishes a reusable, hidden card window from a
-	// card the user can currently see. Image task completion uses it to decide
-	// whether a system notification is useful.
-	translationVisible bool
-	// shortcut is what became of the translation shortcut.
-	shortcut shortcutState
-	// screenshotShortcut is independent and may deliberately be unbound.
-	screenshotShortcut shortcutState
-	// imageTasks are transient screenshot translations. They deliberately stay
-	// in memory only: a screenshot must never be written to app storage.
-	imageTasks      []imageTranslationTask
-	nextImageTaskID uint64
-	// selectionGranted says macOS' Accessibility permission is already
-	// granted. The settings page hides the request note and button while it
-	// is true; it is refreshed when the app becomes active, when the settings
-	// window is focused or opened, and after a request.
-	selectionGranted bool
-	// copiedEntry is the row that was last clicked in the history, and
-	// copiedAt is when: the row says so for a moment.
-	copiedEntry string
-	copiedAt    time.Time
-	// detailsOpen is whether the quick window shows the panel's detail rows
-	// — the smaller numbers under the headline — which stay folded away
-	// until they are asked for.
-	detailsOpen bool
+	settingsWindow    *mygo.Window
+	historyWindow     *mygo.Window
+	ownServices       func() error
+	panelStatus       string
+	settingsScroll    ui.ScrollState
+	settingsSection   settingsSectionKind
+	settingsReveal    *settingsSectionKind
+	settingsAiming    bool
+	settingsAimAt     settingsSectionKind
+	settingsRoom      float32
 }
 
 // RegionCapture is the narrow platform boundary behind the app-owned region
 // picker. The rectangle is in the coordinate space the platform's reader
 // takes: screen points on macOS, physical virtual-desktop pixels on Windows.
-type RegionCapture interface {
-	Capture(context.Context, image.Rectangle) ([]byte, error)
-}
+type RegionCapture = translateui.RegionCapture
 
 // New builds the tray icon and the state of the application. The caller
 // must still run Setup from mygo.App.WhenReady, once MyGo's event loop is
@@ -460,10 +272,6 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	appearance := deps.Appearance
 	if appearance == nil {
 		appearance = NewAppearanceSection()
-	}
-	quickLayout := deps.QuickWindowLayout
-	if quickLayout == nil {
-		quickLayout = NewQuickWindowLayout()
 	}
 	trayIcon, err := assets.Icon(trayIconSize)
 	if err != nil {
@@ -576,36 +384,32 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	}
 	gripMark, err := ui.ParseSVG(assets.Grip())
 	if err != nil {
-		return nil, fmt.Errorf("app: parse the drag handle mark: %w", err)
+		return nil, fmt.Errorf("app: parse the drag mark: %w", err)
+	}
+	quickLayout := deps.QuickWindowLayout
+	if quickLayout == nil {
+		quickLayout = preferences.NewQuickWindowLayout()
 	}
 	state := &State{
 		app:               app,
 		panelService:      deps.Panels,
 		animeService:      deps.Anime,
 		bilibiliService:   deps.Bilibili,
-		animeCovers:       make(map[int64]*ui.Bitmap),
-		bilibiliAvatars:   make(map[int64]*ui.Bitmap),
+		animeUI:           animeui.New(deps.Anime),
+		bilibiliUI:        bilibiliui.New(deps.Bilibili),
 		secretService:     deps.Secrets,
 		clipboard:         deps.Clipboard,
 		translate:         deps.Translate,
-		screenshot:        deps.Screenshot,
-		regionCapture:     deps.RegionCapture,
-		qrDecode:          kit.DecodeQRCodePNG,
 		ownServices:       deps.RegisterOwnServices,
-		shortcuts:         deps.Shortcuts,
 		version:           deps.Version,
 		quit:              deps.Quit,
 		appearance:        appearance,
 		appearanceStore:   deps.AppearanceStore,
-		quickWindowLayout: quickLayout,
-		quickLayoutStore:  deps.QuickWindowLayoutStore,
 		applyAppearance:   deps.ApplyAppearance,
 		popoverAppearance: deps.PopoverAppearance,
-		autostart:         deps.Autostart,
 		updates:           deps.Updates,
 		notifier:          mygoNotifier{},
 		dark:              appearance.Dark(false),
-		selectionGranted:  true,
 		trayIcon:          trayIcon,
 		deepseekMark:      deepseekMark,
 		gaugeMark:         gaugeMark,
@@ -629,25 +433,33 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		keyMark:           keyMark,
 		infoMark:          infoMark,
 		layoutMark:        layoutMark,
-		eyeMark:           eyeMark,
-		eyeOffMark:        eyeOffMark,
-		gripMark:          gripMark,
-	}
-	if deps.Anime != nil {
-		state.animeUsername = deps.Anime.Username()
-		state.animeRefreshInput = strconv.Itoa(deps.Anime.RefreshMinutes())
-	}
-	if deps.Bilibili != nil {
-		state.bilibiliRefreshInput = strconv.Itoa(deps.Bilibili.RefreshMinutes())
-		state.bilibiliDynamicInput = strconv.Itoa(deps.Bilibili.DynamicCount())
-		state.bilibiliLiveNotice, state.bilibiliDynamicNotice = deps.Bilibili.Notifications()
-	}
-	if state.regionCapture != nil {
-		state.screenshot = &nativeRegionScreenshot{state: state, capture: state.regionCapture}
+		quickWindowLayout: quickLayout,
 	}
 	// The update service was built before the state, so its change listener
 	// is installed now, once, before anything can ask it for a check: a
 	// service without one is a row that never redraws.
+	var connections credentialui.Connections
+	if deps.Translate != nil {
+		connections = deps.Translate
+	}
+	state.credentialUI = credentialui.New(connections, deps.Secrets, state.featureHost(), func() error {
+		if state.ownServices != nil {
+			return state.ownServices()
+		}
+		return nil
+	}, func() { state.refreshAsync(true) }, keyMark)
+	state.translationUI = translateui.New(translateui.Config{Service: deps.Translate, Clipboard: deps.Clipboard, Screenshot: deps.Screenshot, RegionCapture: deps.RegionCapture, Shortcuts: deps.Shortcuts, Host: state.featureHost(), Dark: func() bool { return state.dark }, Notifier: state.notifier, ConnectionsBusy: func() bool { return state.credentialUI.Form.Busy != "" }, CopyMark: copyMark, PinMark: pinMark, CloseMark: closeMark, ScreenshotMark: screenshotMark, TranslationMark: translationMark})
+	state.panelUI = panelui.New(deps.Panels, state.featureHost(), state.openSettings, deepseekMark, gaugeMark, refreshMark)
+	state.preferencesUI = preferencesui.New(deps.Autostart, state.featureHost())
+	state.layoutUI = preferencesui.NewLayout(quickLayout, deps.QuickWindowLayoutStore, state.featureHost(), layoutMark, eyeMark, eyeOffMark, gripMark, map[string]presentation.PanelMark{
+		"deepseek": state.panelUI.ProviderMark("deepseek"),
+		"codex":    state.panelUI.ProviderMark("codex"),
+		"anime":    {SVG: tvMark, Tile: ui.Hex("#FFF5F6"), Ink: ui.Hex("#EA9199")},
+		"bilibili": {SVG: bilibiliMark, Tile: ui.Hex("#FFF0F3"), Ink: ui.Hex("#FB7299")},
+	})
+	state.clipboardUI = clipboardui.New(deps.Clipboard, state.featureHost(), state.openHistory)
+	state.bilibiliUI.AttachHost(state.featureHost())
+	state.animeUI.AttachHost(state.featureHost(), deps.Secrets)
 	state.prepareUpdates(deps.Updates)
 	return state, nil
 }
@@ -734,7 +546,22 @@ func (s *State) Destroy() {
 // safe to call from another goroutine: Window.Update carries it to the main
 // thread, which is the only thread that may touch this state.
 func (s *State) Refresh() {
-	s.refresh(nil)
+	s.featureHost().Refresh()
+}
+
+// featureHost is the Shell adapter used by feature UI packages. It is kept at
+// the edge of app so no feature needs to import app.State or MyGo windows.
+func (s *State) featureHost() presentation.Host {
+	return presentation.Host{
+		RequestRefresh: func() { s.refresh(nil) },
+		RunOnMain: func(fn func()) {
+			go mygo.RunOnMain(func() { fn(); s.Refresh() })
+		},
+		FitQuickWindow: s.fitQuickWindow,
+		SetStatus: func(text string) {
+			s.panelStatus = text
+		},
+	}
 }
 
 // refresh is Refresh with work of the caller's to run on the main thread
@@ -763,8 +590,7 @@ func (s *State) refresh(after func()) {
 		s.historyWindow.Update(refreshCallback(after))
 		after = nil
 	}
-	if s.translateWindow != nil {
-		s.translateWindow.Update(refreshCallback(after))
+	if s.translationUI != nil && s.translationUI.Repaint(refreshCallback(after)) {
 		after = nil
 	}
 	if after != nil {
@@ -937,7 +763,7 @@ func (s *State) Open() {
 // half-screen ceiling. The fallback keeps tests without a screen deterministic.
 func (s *State) quickWindowHeight() int {
 	work := s.screenNear(s.cursorPoint())
-	return quickWindowHeightForContent(len(s.imageTasks), s.readingBlocksOn(), work.Height)
+	return quickWindowHeightForContent(s.translationUI.ImageTaskCount(), s.readingBlocksOn(), work.Height)
 }
 
 // readingBlocksOn reports whether a block the user reads — today's animation
@@ -945,10 +771,10 @@ func (s *State) quickWindowHeight() int {
 // at quickEnabledHeightShare of the work area, tall enough to show it without
 // scrolling and without filling the screen.
 func (s *State) readingBlocksOn() bool {
-	if s.animeService != nil && s.animeService.Enabled() && s.animeService.Username() != "" {
+	if s.quickWindowLayout.Visible("anime") && s.animeService != nil && s.animeService.Enabled() && s.animeService.Username() != "" {
 		return true
 	}
-	return s.bilibiliService != nil && s.bilibiliService.Enabled() && len(s.bilibiliService.UIDs()) > 0
+	return s.quickWindowLayout.Visible("bilibili") && s.bilibiliService != nil && s.bilibiliService.Enabled() && len(s.bilibiliService.UIDs()) > 0
 }
 
 // quickWindowHeightForTasks is the image-task-only sizing rule. Keeping it
@@ -1018,14 +844,14 @@ func (s *State) View(c *ui.Context) {
 	switch {
 	case c.Vibrancy(): // over the popover's own material on macOS
 	case runtime.GOOS == "windows": // Windows 11 rounds and outlines the flyout
-		box.Background(colorSurface)
+		box.Background(presentation.ColorSurface)
 	case runtime.GOOS == "darwin":
 		// A fixed appearance draws the application's card on macOS: the
 		// system draws the shadow and outlines the card with a hairline, so
 		// it draws the face and its corner and no second border.
-		box.Background(colorSurface).Radius(radiusCard)
+		box.Background(presentation.ColorSurface).Radius(presentation.RadiusCard)
 	default:
-		box.Background(colorSurface).Radius(radiusCard).Border(1, colorBorder)
+		box.Background(presentation.ColorSurface).Radius(presentation.RadiusCard).Border(1, presentation.ColorBorder)
 	}
 	box.Children(func() {
 		body := ui.Scroll(c).FillWidth().Grow(1)
@@ -1034,7 +860,7 @@ func (s *State) View(c *ui.Context) {
 			// two of them is the window's: the design's blocks are the
 			// window, not rows inside one margin.
 			s.quickLayoutBlocks(c)
-			s.imageTranslationTasks(c)
+			s.translationUI.QuickView(c)
 		})
 		// The clipboard row closes the content: it is about the desktop
 		// rather than about a panel, and it belongs at the far end of the
@@ -1042,8 +868,8 @@ func (s *State) View(c *ui.Context) {
 		// it runs from edge to edge — and the footer keeps its own room
 		// inside that.
 		s.clipboardBottom(c)
-		quickEdgeLine(c)
-		quickWindowFooter(c, s.versionLine(), s.flyoutActions)
+		presentation.QuickEdgeLine(c)
+		presentation.QuickWindowFooter(c, s.versionLine(), s.flyoutActions)
 	})
 }
 
@@ -1067,21 +893,21 @@ func (s *State) clipboardBottom(c *ui.Context) {
 // pointer that rests on it and for assistive technology.
 func (s *State) flyoutActions(c *ui.Context) {
 	ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(4)).Children(func() {
-		if s.screenshot != nil {
-			if button := quietIconButton(c, s.qrMark, "识别二维码"); button.Clicked() {
+		if s.translationUI.HasScreenshot() {
+			if button := presentation.QuietIconButton(c, s.qrMark, "识别二维码"); button.Clicked() {
 				slog.Info("QR recognition button clicked", "event", "qr_recognition_requested", "source", "quick_window")
-				s.startQRRecognition()
+				s.translationUI.StartQRRecognition()
 			}
-			if button := quietIconButton(c, s.screenshotMark, "截图翻译"); button.Clicked() {
+			if button := presentation.QuietIconButton(c, s.screenshotMark, "截图翻译"); button.Clicked() {
 				slog.Info("screenshot translation button clicked", "event", "screenshot_translation_requested", "source", "quick_window")
-				s.startScreenshotTranslation()
+				s.translationUI.StartScreenshotTranslation()
 			}
 		}
-		if button := quietIconButton(c, s.settingsMark, "设置"); button.Clicked() {
+		if button := presentation.QuietIconButton(c, s.settingsMark, "设置"); button.Clicked() {
 			slog.Info("settings button clicked", "event", "settings_opened", "source", "quick_window")
 			s.openSettings()
 		}
-		if button := quietIconButton(c, s.quitMark, "退出"); button.Clicked() {
+		if button := presentation.QuietIconButton(c, s.quitMark, "退出"); button.Clicked() {
 			slog.Info("quit button clicked", "event", "quit_requested", "source", "quick_window")
 			s.quit()
 		}
@@ -1107,130 +933,8 @@ func (s *State) versionLine() string {
 // refresh that finishes while the window is closed loses nothing.
 func (s *State) refreshAsync(force bool) {
 	for _, panel := range s.panelService.List() {
-		s.refreshPanelAsync(panel.ID, force)
+		s.panelUI.RefreshPanelAsync(panel.ID, force)
 	}
-	s.refreshAnimeAsync(false)
-}
-
-// refreshAnimeAsync fetches today's animation releases away from the UI
-// thread. force is for the flyout's refresh mark; normal openings obey the
-// user's configured refresh interval.
-func (s *State) refreshAnimeAsync(force bool) {
-	if s.animeService == nil {
-		return
-	}
-	anime, window := s.animeService, s.panel
-	go func() {
-		var err error
-		if force {
-			err = anime.Refresh(context.Background())
-		} else {
-			err = anime.RefreshIfNeeded(context.Background())
-		}
-		if err != nil {
-			slog.Warn("anime releases could not be refreshed", "error", err)
-		}
-		if window != nil {
-			window.Update(func() {
-				s.cacheAnimeCovers()
-				s.fitQuickWindow()
-			})
-		}
-	}()
-	if window != nil {
-		// Ask for the loading frame immediately; Refresh itself is still on a
-		// background goroutine, so the tray callback returns at once.
-		window.Update(func() {})
-	}
-	if s.bilibiliService != nil {
-		service, window := s.bilibiliService, s.panel
-		go func() {
-			if err := service.RefreshIfNeeded(context.Background()); err != nil {
-				slog.Warn("Bilibili UPs could not be refreshed", "error", err)
-			}
-			if window != nil {
-				window.Update(func() {
-					s.cacheBilibiliAvatars()
-					s.fitQuickWindow()
-				})
-			}
-		}()
-	}
-}
-
-// refreshBilibiliAsync is what the block's own refresh action runs: the same
-// background work the periodic timer does, asked for now. The frame is
-// redrawn first so the action's mark turns while the request is in flight.
-func (s *State) refreshBilibiliAsync(force bool) {
-	if s.bilibiliService == nil {
-		return
-	}
-	service, window := s.bilibiliService, s.panel
-	go func() {
-		var err error
-		if force {
-			err = service.Refresh(context.Background())
-		} else {
-			err = service.RefreshIfNeeded(context.Background())
-		}
-		if err != nil {
-			slog.Warn("Bilibili UPs could not be refreshed", "error", err)
-		}
-		if window != nil {
-			window.Update(func() {
-				s.cacheBilibiliAvatars()
-				s.fitQuickWindow()
-			})
-		}
-	}()
-	if window != nil {
-		// Ask for the loading frame immediately; the request itself is still
-		// on a background goroutine, so the callback returns at once.
-		window.Update(func() {})
-	}
-}
-
-// refreshPanelAsync fetches one panel away from the main thread: the panel
-// whose own refresh action was pressed, and the panel whose block is showing
-// a failure.
-func (s *State) refreshPanelAsync(panelID string, force bool) {
-	panels := s.panelService
-	window := s.panel
-	if !force && !panels.NeedsRefresh(panelID) {
-		return
-	}
-	go func() {
-		ctx := context.Background()
-		// What a refresh found, and what it failed with, is written down
-		// here: a card can only say a little about a wrong key, a timeout or
-		// a service that answered something else, and it is gone when the
-		// window closes. The log keeps it.
-		var (
-			snapshot domain.Snapshot
-			asked    = true
-			err      error
-		)
-		if force {
-			snapshot, err = panels.Refresh(ctx, panelID)
-		} else {
-			snapshot, asked, err = panels.RefreshIfNeeded(ctx, panelID)
-		}
-		switch {
-		case err != nil:
-			slog.Warn("the panel could not be refreshed", "panel", panelID, "error", err)
-		case asked:
-			slog.Info("the panel was refreshed", "panel", panelID, "status", string(snapshot.Status))
-		}
-		if window != nil {
-			// Window.Update runs on the main thread; an empty one only
-			// asks for the frame that shows the new answer.
-			window.Update(func() {})
-		}
-	}()
-	// The frame the request needs while it is in flight, rather than only the
-	// one its answer lands in: the mark by the title turns for as long as a
-	// fetch runs, and nothing else would ask for the frames that turn it.
-	if window != nil {
-		window.Update(func() {})
-	}
+	s.animeUI.RefreshAsync(false)
+	s.bilibiliUI.RefreshAsync(false)
 }

@@ -127,21 +127,6 @@ func TestThemeSourceMatchesTheMode(t *testing.T) {
 	}
 }
 
-func TestAppearanceIndexIsTheSegmentsOrder(t *testing.T) {
-	if got := appearanceIndex(AppearanceLight); got != 0 {
-		t.Errorf("light is segment %d, want 0", got)
-	}
-	if got := appearanceIndex(AppearanceDark); got != 1 {
-		t.Errorf("dark is segment %d, want 1", got)
-	}
-	if got := appearanceIndex(AppearanceSystem); got != 2 {
-		t.Errorf("automatic is segment %d, want 2", got)
-	}
-	if got := appearanceIndex("sepia"); got != 2 {
-		t.Errorf("an unknown mode is segment %d, want the automatic segment", got)
-	}
-}
-
 // appearanceStore is a settings store that records what it was asked to do.
 type appearanceStore struct {
 	calls   int
@@ -190,8 +175,8 @@ func TestSetAppearanceWritesAppliesAndRepaints(t *testing.T) {
 	if len(applied) != 1 || applied[0] != AppearanceDark {
 		t.Errorf("applyAppearance got %v, want [dark]", applied)
 	}
-	if state.appearanceStatus != "" {
-		t.Errorf("a successful save said %q", state.appearanceStatus)
+	if state.appearanceStatusLine() != "" {
+		t.Errorf("a successful save said %q", state.appearanceStatusLine())
 	}
 }
 
@@ -218,8 +203,8 @@ func TestSetAppearanceSurvivesAFailedWrite(t *testing.T) {
 	if len(applied) != 1 || applied[0] != AppearanceLight {
 		t.Errorf("applyAppearance got %v, want [light]", applied)
 	}
-	if !strings.Contains(state.appearanceStatus, "本次运行内已生效") {
-		t.Errorf("the failure said %q, want it to say this run still uses the choice", state.appearanceStatus)
+	if !strings.Contains(state.appearanceStatusLine(), "本次运行内已生效") {
+		t.Errorf("the failure said %q, want it to say this run still uses the choice", state.appearanceStatusLine())
 	}
 }
 
@@ -242,8 +227,8 @@ func TestSetAppearanceSurvivesTheStoresRead(t *testing.T) {
 
 	state := &State{appearance: appearance, appearanceStore: store}
 	state.setAppearance(AppearanceDark)
-	if state.appearanceStatus != "" {
-		t.Fatalf("the save failed: %s", state.appearanceStatus)
+	if state.appearanceStatusLine() != "" {
+		t.Fatalf("the save failed: %s", state.appearanceStatusLine())
 	}
 
 	reloaded := NewAppearanceSection()

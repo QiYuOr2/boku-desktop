@@ -37,6 +37,7 @@ import (
 	"boku/internal/platform/regioncapture"
 	"boku/internal/platform/selection"
 	clipboarddevice "boku/internal/platform/sysclip"
+	"boku/internal/preferences"
 	"boku/internal/settings"
 	"boku/internal/translate"
 	deepseektranslator "boku/internal/translate/deepseek"
@@ -95,7 +96,7 @@ func main() {
 		defer recordPanics()
 	}
 
-	quickWindowLayout := app.NewQuickWindowLayout()
+	quickWindowLayout := preferences.NewQuickWindowLayout()
 	panels, animeUpdates, bilibiliUpdates, secrets, clipboard, translate, own, appearance, prefs, err := services(userData, version, quickWindowLayout)
 	if err != nil {
 		log.Fatalf("boku: %v", err)
@@ -279,8 +280,8 @@ func main() {
 // mismatched provider and adapter, or a panel that breaks its provider's
 // contract, is a startup error and worth catching without a graphical
 // session.
-func services(userData, version string, layouts ...*app.QuickWindowLayout) (*panel.Panels, *anime.Service, *bilibili.Service, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, *ownServices, *app.Appearance, *settings.Store, error) {
-	quickWindowLayout := app.NewQuickWindowLayout()
+func services(userData, version string, layouts ...*preferences.QuickWindowLayout) (*panel.Panels, *anime.Service, *bilibili.Service, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, *ownServices, *preferences.Appearance, *settings.Store, error) {
+	quickWindowLayout := preferences.NewQuickWindowLayout()
 	if len(layouts) > 0 && layouts[0] != nil {
 		quickWindowLayout = layouts[0]
 	}
@@ -319,7 +320,7 @@ func services(userData, version string, layouts ...*app.QuickWindowLayout) (*pan
 	// The appearance is the presentation's choice rather than a feature's,
 	// but it is stored the same way: a section of its own in the same file,
 	// written through the same store.
-	appearance := app.NewAppearanceSection()
+	appearance := preferences.NewAppearanceSection()
 	prefs, err := settings.New(
 		filepath.Join(userData, "settings.json"),
 		clipboardSettings,

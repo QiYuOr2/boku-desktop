@@ -1,5 +1,9 @@
 # Boku Desktop
 
+Desktop 按业务功能组织代码：每个功能目录包含自己的业务服务与 `ui/` 子包。
+`internal/app` 负责托盘、窗口壳、设置导航和功能 UI 装配；
+`internal/presentation` 提供共享设计系统、布局、基础控件与 Shell 宿主契约。
+
 [![CI](https://github.com/QiYuOr2/boku-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/QiYuOr2/boku-desktop/actions/workflows/ci.yml)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/QiYuOr2/boku-desktop)](https://github.com/QiYuOr2/boku-desktop/blob/main/go.mod)
 [![MyGo](https://img.shields.io/badge/MyGo-v0.5.1-00ADD8)](https://github.com/egoist/mygo)

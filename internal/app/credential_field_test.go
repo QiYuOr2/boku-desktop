@@ -1,6 +1,7 @@
 package app
 
 import (
+	credentialui "boku/internal/credential/ui"
 	"testing"
 	"time"
 
@@ -26,19 +27,19 @@ func TestSavingACardForgetsWhatWasTypedIntoIt(t *testing.T) {
 
 	// The user typed into DeepSeek's card, then moved to another card: the
 	// value is filed under DeepSeek and the field is bound to the other one.
-	state.form.keys = map[string]string{"deepseek": "sk-typed-0001"}
-	state.form.inputCard = freeMicrosoftID
-	state.form.input = ""
+	state.credentialUI.Form.Keys = map[string]string{"deepseek": "sk-typed-0001"}
+	state.credentialUI.Form.InputCard = freeMicrosoftID
+	state.credentialUI.Form.Input = ""
 
-	state.clearCardInput("deepseek")
+	state.credentialUI.ClearCardInput("deepseek")
 
-	if _, still := state.form.keys["deepseek"]; still {
+	if _, still := state.credentialUI.Form.Keys["deepseek"]; still {
 		t.Error("the saved value is still filed under its card")
 	}
 	// The field was bound to another card, so what is in it is untouched: the
 	// user is typing there.
-	if state.form.inputCard != freeMicrosoftID {
-		t.Errorf("the field moved to %q", state.form.inputCard)
+	if state.credentialUI.Form.InputCard != freeMicrosoftID {
+		t.Errorf("the field moved to %q", state.credentialUI.Form.InputCard)
 	}
 }
 
@@ -48,16 +49,16 @@ func TestSavingACardForgetsWhatWasTypedIntoIt(t *testing.T) {
 func TestSavingTheDisplayedCardEmptiesTheField(t *testing.T) {
 	state, _, _ := translateState(t)
 
-	state.form.keys = map[string]string{"deepseek": "sk-typed-0001"}
-	state.form.inputCard = "deepseek"
-	state.form.input = "sk-typed-0001"
+	state.credentialUI.Form.Keys = map[string]string{"deepseek": "sk-typed-0001"}
+	state.credentialUI.Form.InputCard = "deepseek"
+	state.credentialUI.Form.Input = "sk-typed-0001"
 
-	state.clearCardInput("deepseek")
+	state.credentialUI.ClearCardInput("deepseek")
 
-	if state.form.input != "" {
-		t.Errorf("the field still holds %q", state.form.input)
+	if state.credentialUI.Form.Input != "" {
+		t.Errorf("the field still holds %q", state.credentialUI.Form.Input)
 	}
-	if _, still := state.form.keys["deepseek"]; still {
+	if _, still := state.credentialUI.Form.Keys["deepseek"]; still {
 		t.Error("the value is still filed under the card it was typed into")
 	}
 }
@@ -66,15 +67,15 @@ func TestSavingTheDisplayedCardEmptiesTheField(t *testing.T) {
 // actions read the field whether or not the user has been there.
 func TestClearingACardWithNothingTypedIsHarmless(t *testing.T) {
 	state, _, _ := translateState(t)
-	state.form.keys = map[string]string{}
-	state.form.inputCard = ""
-	state.form.input = ""
+	state.credentialUI.Form.Keys = map[string]string{}
+	state.credentialUI.Form.InputCard = ""
+	state.credentialUI.Form.Input = ""
 
-	state.clearCardInput("deepseek")
-	state.clearCardInput("")
+	state.credentialUI.ClearCardInput("deepseek")
+	state.credentialUI.ClearCardInput("")
 
-	if len(state.form.keys) != 0 {
-		t.Errorf("keys = %+v, want none", state.form.keys)
+	if len(state.credentialUI.Form.Keys) != 0 {
+		t.Errorf("keys = %+v, want none", state.credentialUI.Form.Keys)
 	}
 }
 
@@ -91,15 +92,15 @@ func TestAddingAnOwnServiceDoesNotCrashTheField(t *testing.T) {
 	state, _, _ := translateState(t)
 
 	// What the user typed, in the two fields and the key box.
-	state.form.newName = "测试"
-	state.form.newURL = "127.0.0.1:11434/v1"
-	state.form.keys = map[string]string{newCustomServiceID: ""}
-	state.form.inputCard = newCustomServiceID
-	state.form.input = ""
+	state.credentialUI.Form.NewName = "测试"
+	state.credentialUI.Form.NewURL = "127.0.0.1:11434/v1"
+	state.credentialUI.Form.Keys = map[string]string{credentialui.NewCustomServiceID: ""}
+	state.credentialUI.Form.InputCard = credentialui.NewCustomServiceID
+	state.credentialUI.Form.Input = ""
 
 	// The guard clause the add runs before it writes anything: a service with
 	// no address is not a service.
-	address := translate.CustomSettings{BaseURL: state.form.newURL}.Normalize().BaseURL
+	address := translate.CustomSettings{BaseURL: state.credentialUI.Form.NewURL}.Normalize().BaseURL
 	if address == "" {
 		t.Fatal("the address the user typed was cleaned away")
 	}
@@ -107,23 +108,23 @@ func TestAddingAnOwnServiceDoesNotCrashTheField(t *testing.T) {
 		t.Errorf("address = %q, want the local service to be http", address)
 	}
 	// What the add does on the main thread once the write is done.
-	state.clearCardInput(newCustomServiceID)
-	if state.form.input != "" {
-		t.Errorf("the field still holds %q", state.form.input)
+	state.credentialUI.ClearCardInput(credentialui.NewCustomServiceID)
+	if state.credentialUI.Form.Input != "" {
+		t.Errorf("the field still holds %q", state.credentialUI.Form.Input)
 	}
 }
 
 func TestNewCustomServiceInputIsSeparateFromDeepSeekInput(t *testing.T) {
 	state, _, _ := translateState(t)
-	state.form.inputCard = "deepseek"
-	state.form.input = "sk-deepseek-only"
+	state.credentialUI.Form.InputCard = "deepseek"
+	state.credentialUI.Form.Input = "sk-deepseek-only"
 
-	state.showCardInput(newCustomServiceID)
+	state.credentialUI.ShowCardInput(credentialui.NewCustomServiceID)
 
-	if got := state.form.input; got != "" {
+	if got := state.credentialUI.Form.Input; got != "" {
 		t.Errorf("custom API Key input = %q, want empty", got)
 	}
-	if got := state.form.keys["deepseek"]; got != "sk-deepseek-only" {
+	if got := state.credentialUI.Form.Keys["deepseek"]; got != "sk-deepseek-only" {
 		t.Errorf("DeepSeek API Key input = %q, want its own value", got)
 	}
 }
@@ -133,7 +134,7 @@ func TestDeletingSelectedDeepSeekUsesTheFreeProvider(t *testing.T) {
 	if err := fixture.service.SetProvider(t.Context(), "deepseek"); err != nil {
 		t.Fatalf("SetProvider(deepseek) failed: %v", err)
 	}
-	state.deleteCredential(cardOf(t, state, "deepseek"))
+	state.credentialUI.DeleteCredential(cardOf(t, state, "deepseek"))
 
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {

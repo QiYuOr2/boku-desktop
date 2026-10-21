@@ -1,19 +1,6 @@
 package app
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"image"
-	"sort"
-	"strings"
-	"sync"
-	"testing"
-	"time"
-
-	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/ui"
-
 	"boku/internal/clipboard"
 	contractdeepseek "boku/internal/contract/deepseek"
 	"boku/internal/credential"
@@ -21,12 +8,16 @@ import (
 	"boku/internal/panel"
 	"boku/internal/panel/deepseek"
 	"boku/internal/translate"
+	"context"
+	"errors"
+	"fmt"
+	"github.com/egoist/mygo"
+	"sort"
+	"strings"
+	"sync"
+	"testing"
+	"time"
 )
-
-// The presentation layer is tested without a window and without a network:
-// a provider the test decides, an adapter that answers from it, and a
-// credential store in memory. Nothing here imports internal/data, which is
-// what keeps the layers honest.
 
 // testStore is a domain.SecretStore in memory.
 type testStore struct {
@@ -1073,83 +1064,6 @@ func withCredential(store *testStore) *testStore {
 	return store
 }
 
-// emptyPanelService is a service with no panels defined.
-func emptyPanelService(t *testing.T) *panel.Panels {
-	t.Helper()
-	provider := newTestProvider()
-	panels, err := panel.NewPanels(
-		testRegistry{provider: provider, adapter: testAdapter{provider: provider}},
-		newTestStore(),
-		panel.NewSection(),
-		nil,
-		nil,
-	)
-	if err != nil {
-		t.Fatalf("NewPanels failed: %v", err)
-	}
-	return panels
-}
-
-// loaded refreshes the panel once, so that the view has a snapshot to draw.
-func loaded(t testing.TB, state *State) {
-	t.Helper()
-	if _, err := state.panelService.Refresh(context.Background(), deepseek.PanelID); err != nil {
-		t.Fatalf("Refresh failed: %v", err)
-	}
-}
-
-// findText returns where one text of the frame sits. The tester matches a
-// text in full, so a label and the value beside it can both be found.
-func findText(t *testing.T, tt *ui.Tester, want string) ui.Rect {
-	t.Helper()
-	rect, ok := tt.Find(want)
-	if !ok {
-		t.Fatalf("no text is %q; the frame shows %q", want, tt.Texts())
-	}
-	return rect
-}
-
-// findTextPrefix returns where the text starting with prefix sits. It is for
-// the lines whose value the test does not decide, such as the clock.
-func findTextPrefix(t *testing.T, tt *ui.Tester, prefix string) ui.Rect {
-	t.Helper()
-	for _, text := range tt.Texts() {
-		if strings.HasPrefix(text, prefix) {
-			return findText(t, tt, text)
-		}
-	}
-	t.Fatalf("no text starts with %q; the frame shows %q", prefix, tt.Texts())
-	return ui.Rect{}
-}
-
-// textWithPrefix returns the whole of the text starting with prefix, for a
-// test that wants to read what a line says rather than where it is.
-func textWithPrefix(texts []string, prefix string) (string, bool) {
-	for _, text := range texts {
-		if strings.HasPrefix(text, prefix) {
-			return text, true
-		}
-	}
-	return "", false
-}
-
-// fetchedClock is the clock the quick window writes for its first panel: the
-// moment those numbers were taken, as the block shows it. The design writes
-// the clock alone beside the refresh action, so a test that looks for that
-// line has to know which moment it was.
-func fetchedClock(t *testing.T, state *State) string {
-	t.Helper()
-	listed := state.panelService.List()
-	if len(listed) == 0 {
-		t.Fatal("the state has no panel to take a clock from")
-	}
-	view := state.panelService.View(listed[0].ID)
-	if !view.HasSnapshot {
-		t.Fatal("the panel has no snapshot to take a clock from")
-	}
-	return clock(view.FetchedAt)
-}
-
 func contains(texts []string, want string) bool {
 	for _, text := range texts {
 		if strings.Contains(text, want) {
@@ -1159,60 +1073,12 @@ func contains(texts []string, want string) bool {
 	return false
 }
 
-// dividerRows returns the y of every row of the frame that is drawn edge to
-// edge in one color, which is how a divider looks in a rendered frame.
-func dividerRows(img *image.RGBA, c ui.Color, width int) []int {
-	var rows []int
-	for y := 0; y < img.Rect.Dy(); y++ {
-		row := 0
-		for x := 0; x < width; x++ {
-			i := img.PixOffset(x, y)
-			if img.Pix[i] == c.R && img.Pix[i+1] == c.G && img.Pix[i+2] == c.B {
-				row++
-			}
-		}
-		if row == width {
-			rows = append(rows, y)
-		}
-	}
-	return rows
-}
-
-// clipboardState is a state whose clipboard tool the test owns.
-func clipboardState(t testing.TB, device *testDevice, tools *testToolStore) *State {
-	t.Helper()
-	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	state.clipboard = testClipboard(t, device, tools)
-	loaded(t, state)
-	return state
-}
-
 // translateState is a state whose translation card is a fake, so that a test
 // can ask what the card was told without a window existing.
 func translateState(t testing.TB) (*State, *testTranslateFixture, *testCard) {
 	t.Helper()
-	state, translate, _ := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
-	card := &testCard{timeline: translate.timeline}
-	state.cardWindows = func(onClosed, onBlur, onFocus func()) cardWindow {
-		card.onClosed, card.onBlur, card.onFocus = onClosed, onBlur, onFocus
-		return card
-	}
-	state.cursor, state.cursorSet = mygo.Point{X: 400, Y: 300}, true
-	return state, translate, card
-}
-
-func start(t *testing.T, state *State) {
-	t.Helper()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		state.onTranslateShortcut()
-	}()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the shortcut callback did not return: something in it waits")
-	}
+	state, fixture, _ := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	return state, fixture, &testCard{timeline: fixture.timeline}
 }
 
 type testCard struct {
@@ -1248,17 +1114,24 @@ func (c *testCard) Focus() {
 		c.timeline.add("the card took the keyboard")
 	}
 }
+
 func (c *testCard) Hide() { c.mu.Lock(); c.hides++; c.shown = false; c.mu.Unlock() }
+
 func (c *testCard) Update(fn func()) {
 	// The card has no frame of its own, so the update runs where it is
 	// asked for: that is the state the next frame would draw.
 	fn()
 }
+
 func (c *testCard) SetContentBounds(r mygo.Rectangle) { c.mu.Lock(); c.bounds = r; c.mu.Unlock() }
-func (c *testCard) ContentBounds() mygo.Rectangle     { c.mu.Lock(); defer c.mu.Unlock(); return c.bounds }
-func (c *testCard) OnClosed(fn func()) func()         { c.onClosed = fn; return func() {} }
-func (c *testCard) OnBlur(fn func()) func()           { c.onBlur = fn; return func() {} }
-func (c *testCard) OnFocus(fn func()) func()          { c.onFocus = fn; return func() {} }
+
+func (c *testCard) ContentBounds() mygo.Rectangle { c.mu.Lock(); defer c.mu.Unlock(); return c.bounds }
+
+func (c *testCard) OnClosed(fn func()) func() { c.onClosed = fn; return func() {} }
+
+func (c *testCard) OnBlur(fn func()) func() { c.onBlur = fn; return func() {} }
+
+func (c *testCard) OnFocus(fn func()) func() { c.onFocus = fn; return func() {} }
 
 // visible is whether the card is on screen.
 func (c *testCard) visible() bool { c.mu.Lock(); defer c.mu.Unlock(); return c.shown }
