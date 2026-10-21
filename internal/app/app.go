@@ -57,6 +57,15 @@ const (
 	// the tray flyout. The actual rows are content-driven; this conservative
 	// estimate lets the flyout grow before its scroll body needs to scroll.
 	quickTaskRowHeight = 52
+	// quickEnabledHeightShare is how tall the flyout opens when a reading block
+	// — today's animation releases or the followed UPs — is switched on.
+	//
+	// The window is not resized to its content: measuring the content from the
+	// view turned out to follow the scroll offset, so dragging the scrollbar
+	// made the window change height under the pointer. A share of the work
+	// area is decided before anything is drawn, so it cannot move while the
+	// user is reading.
+	quickEnabledHeightShare = 0.30
 	// trayIconSize is the icon in device pixels: 16 points on a Retina
 	// display, which MyGo scales to the screen's density on Windows and
 	// Linux.
@@ -156,7 +165,10 @@ type BilibiliService interface {
 	Notifications() (live, dynamic bool)
 	Configure(context.Context, bool, []int64, int, int, bool, bool) error
 	View() ([]domain.FollowedUpdate, time.Time, bool, error)
+	Refresh(context.Context) error
 	RefreshIfNeeded(context.Context) error
+	// Avatar returns the fetched avatar bytes of one creator, or nil.
+	Avatar(int64) []byte
 }
 
 // State is the whole presentation state. It is read and written on the main
@@ -167,6 +179,9 @@ type State struct {
 	animeService    AnimeService
 	bilibiliService BilibiliService
 	animeCovers     map[int64]*ui.Bitmap
+	// bilibiliAvatars holds each followed creator's avatar, keyed by UID. It is
+	// filled after a refresh, never from the view.
+	bilibiliAvatars map[int64]*ui.Bitmap
 	secretService   *credential.Secrets
 	clipboard       *clipboard.Clipboard
 	translate       *translate.Translate
@@ -236,6 +251,10 @@ type State struct {
 	// until the real mark arrives.
 	gaugeMark *ui.SVG
 	tvMark    *ui.SVG
+	// bilibiliMark heads the followed-UP block and its settings section: a
+	// small television with antennae and eyes, a different drawing from
+	// tvMark so the two broadcast-shaped blocks are told apart.
+	bilibiliMark *ui.SVG
 	// chevronRightMark shows that a compact animation card opens its subject.
 	chevronRightMark *ui.SVG
 	// clipboardMark labels the quick window's clipboard line, parsed for the
@@ -449,6 +468,10 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the TV mark: %w", err)
 	}
+	bilibiliMark, err := ui.ParseSVG(assets.TVBilibili())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the Bilibili mark: %w", err)
+	}
 	chevronRightMark, err := ui.ParseSVG(assets.ChevronRight())
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the chevron-right mark: %w", err)
@@ -530,6 +553,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		animeService:      deps.Anime,
 		bilibiliService:   deps.Bilibili,
 		animeCovers:       make(map[int64]*ui.Bitmap),
+		bilibiliAvatars:   make(map[int64]*ui.Bitmap),
 		secretService:     deps.Secrets,
 		clipboard:         deps.Clipboard,
 		translate:         deps.Translate,
@@ -553,6 +577,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		deepseekMark:      deepseekMark,
 		gaugeMark:         gaugeMark,
 		tvMark:            tvMark,
+		bilibiliMark:      bilibiliMark,
 		chevronRightMark:  chevronRightMark,
 		clipboardMark:     clipMark,
 		refreshMark:       refreshMark,
@@ -862,16 +887,31 @@ func (s *State) Open() {
 	// opening does not flash placeholder marks while the network refresh is
 	// still in flight. This is presentation-thread image decoding, not I/O.
 	s.cacheAnimeCovers()
+	// The followed-UP block may already hold rows from the last refresh, and
+	// its avatars may already have been fetched. Turn them into bitmaps and
+	// size the flyout for them before the first frame, so an opening does not
+	// show placeholders that resolve a moment later.
+	s.cacheBilibiliAvatars()
+	s.fitQuickWindow()
 	s.refreshAsync(true)
 }
 
-// quickWindowHeight grows the tray flyout for image tasks before its scroll
-// body is forced to scroll. A flyout must never occupy more than half of the
-// display work area: the rest of the desktop remains reachable, including on
-// compact screens. The fallback keeps tests without a screen deterministic.
+// quickWindowHeight sizes the flyout from what is switched on, within the
+// half-screen ceiling. The fallback keeps tests without a screen deterministic.
 func (s *State) quickWindowHeight() int {
 	work := s.screenNear(s.cursorPoint())
-	return quickWindowHeightForContent(len(s.imageTasks), s.animeService != nil && s.animeService.Enabled(), work.Height)
+	return quickWindowHeightForContent(len(s.imageTasks), s.readingBlocksOn(), work.Height)
+}
+
+// readingBlocksOn reports whether a block the user reads — today's animation
+// releases, or the followed UPs — is switched on. Either one opens the flyout
+// at quickEnabledHeightShare of the work area, tall enough to show it without
+// scrolling and without filling the screen.
+func (s *State) readingBlocksOn() bool {
+	if s.animeService != nil && s.animeService.Enabled() && s.animeService.Username() != "" {
+		return true
+	}
+	return s.bilibiliService != nil && s.bilibiliService.Enabled() && len(s.bilibiliService.UIDs()) > 0
 }
 
 // quickWindowHeightForTasks is the image-task-only sizing rule. Keeping it
@@ -881,26 +921,40 @@ func quickWindowHeightForTasks(tasks, workHeight int) int {
 	return quickWindowHeightForContent(tasks, false, workHeight)
 }
 
-// quickWindowHeightForContent reserves one task-row's worth of room for the
-// animation block when it is enabled. That makes the flyout grow by the same
-// predictable amount as it does for an image task, before either block has to
-// compete for its scroll body.
-func quickWindowHeightForContent(tasks int, animeEnabled bool, workHeight int) int {
+// quickWindowHeightForContent is the whole sizing rule:
+//
+//   - a reading block is switched on: 30% of the work area, which shows a
+//     couple of rows under the panels;
+//   - otherwise: the base height, one row per image task;
+//
+// and never more than half the work area.
+//
+// The height is decided from settings and the task count alone — never from
+// measured content. Measuring was the previous attempt, and it went wrong in
+// the one way that matters: the boxes it read follow the scroll offset, so
+// dragging the scrollbar resized the window under the user's pointer.
+//
+// The price is that a flyout with a reading block on and little in it can be
+// taller than its rows. That is the trade the user asked for after seeing it:
+// a predictable height over a moving one.
+func quickWindowHeightForContent(tasks int, readingBlocks bool, workHeight int) int {
 	maxHeight := workHeight / 2
 	if maxHeight <= 0 {
 		maxHeight = panelHeight
 	}
-	rows := max(tasks, 0)
-	if animeEnabled {
-		rows++
+	wanted := panelHeight + max(tasks, 0)*quickTaskRowHeight
+	if readingBlocks {
+		// The share is a floor, not a target: on a short display 30% can be
+		// less than the base height, and a reading block must never make the
+		// flyout smaller than a flyout without one.
+		wanted = max(wanted, int(float64(workHeight)*quickEnabledHeightShare))
 	}
-	wanted := panelHeight + rows*quickTaskRowHeight
 	return clampInt(wanted, min(panelHeight, maxHeight), maxHeight)
 }
 
-// fitQuickWindow applies the same content-aware height after a task is
-// added, completed, retried, or removed. SetSize is the MyGo flyout API that
-// also re-places the window next to its tray anchor.
+// fitQuickWindow applies the height rule after a task is added, completed,
+// retried or removed, or after a block is switched on or off. SetSize is the
+// MyGo flyout API that also re-places the window next to its tray anchor.
 func (s *State) fitQuickWindow() {
 	if s.panel != nil {
 		s.panel.SetSize(panelWidth, s.quickWindowHeight())
@@ -1060,9 +1114,44 @@ func (s *State) refreshAnimeAsync(force bool) {
 				slog.Warn("Bilibili UPs could not be refreshed", "error", err)
 			}
 			if window != nil {
-				window.Update(func() {})
+				window.Update(func() {
+					s.cacheBilibiliAvatars()
+					s.fitQuickWindow()
+				})
 			}
 		}()
+	}
+}
+
+// refreshBilibiliAsync is what the block's own refresh action runs: the same
+// background work the periodic timer does, asked for now. The frame is
+// redrawn first so the action's mark turns while the request is in flight.
+func (s *State) refreshBilibiliAsync(force bool) {
+	if s.bilibiliService == nil {
+		return
+	}
+	service, window := s.bilibiliService, s.panel
+	go func() {
+		var err error
+		if force {
+			err = service.Refresh(context.Background())
+		} else {
+			err = service.RefreshIfNeeded(context.Background())
+		}
+		if err != nil {
+			slog.Warn("Bilibili UPs could not be refreshed", "error", err)
+		}
+		if window != nil {
+			window.Update(func() {
+				s.cacheBilibiliAvatars()
+				s.fitQuickWindow()
+			})
+		}
+	}()
+	if window != nil {
+		// Ask for the loading frame immediately; the request itself is still
+		// on a background goroutine, so the callback returns at once.
+		window.Update(func() {})
 	}
 }
 

@@ -8,10 +8,19 @@ import (
 	"boku/internal/domain"
 )
 
-type testBilibili struct{ live, dynamic bool }
+type testBilibili struct {
+	live, dynamic bool
+	// noUIDs answers with an empty followed list; otherwise one creator.
+	noUIDs bool
+}
 
-func (b testBilibili) Enabled() bool               { return true }
-func (b testBilibili) UIDs() []int64               { return []int64{1} }
+func (b testBilibili) Enabled() bool { return true }
+func (b testBilibili) UIDs() []int64 {
+	if b.noUIDs {
+		return nil
+	}
+	return []int64{1}
+}
 func (b testBilibili) RefreshMinutes() int         { return 5 }
 func (b testBilibili) DynamicCount() int           { return 1 }
 func (b testBilibili) Notifications() (bool, bool) { return b.live, b.dynamic }
@@ -22,6 +31,8 @@ func (b testBilibili) View() ([]domain.FollowedUpdate, time.Time, bool, error) {
 	return nil, time.Time{}, false, nil
 }
 func (b testBilibili) RefreshIfNeeded(context.Context) error { return nil }
+func (b testBilibili) Refresh(context.Context) error         { return nil }
+func (b testBilibili) Avatar(int64) []byte                   { return nil }
 
 func TestBilibiliNotificationSkipsInitialSnapshotAndNoticesLiveTransition(t *testing.T) {
 	notifier := &testNotifier{supported: true}

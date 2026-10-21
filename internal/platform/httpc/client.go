@@ -250,6 +250,7 @@ func (c *Client) do(ctx context.Context, method, endpoint string, headers map[st
 		Endpoint:   safe,
 		FetchedAt:  time.Now().UTC(),
 		HTTPStatus: response.StatusCode,
+		Cookies:    responseCookies(response),
 	}
 	data, err := readLimited(response.Body, c.maxBytes)
 	if err != nil {
@@ -301,7 +302,7 @@ func (c *Client) doBytes(ctx context.Context, method, endpoint string, headers m
 		return domain.FetchResult{Endpoint: safe}, transportError(err, safe)
 	}
 	defer response.Body.Close()
-	result := domain.FetchResult{Endpoint: safe, FetchedAt: time.Now().UTC(), HTTPStatus: response.StatusCode}
+	result := domain.FetchResult{Endpoint: safe, FetchedAt: time.Now().UTC(), HTTPStatus: response.StatusCode, Cookies: responseCookies(response)}
 	data, err := readLimited(response.Body, c.maxBytes)
 	if err != nil {
 		return result, err
@@ -311,6 +312,24 @@ func (c *Client) doBytes(ctx context.Context, method, endpoint string, headers m
 		return result, statusError(response.StatusCode, safe, data)
 	}
 	return result, nil
+}
+
+// responseCookies keeps the name=value of every Set-Cookie pair and drops the
+// attributes. Only the value is ever sent back, and only an anonymous identity
+// cookie is worth sending back; a session cookie is never forwarded.
+func responseCookies(response *http.Response) []string {
+	raw := response.Header.Values("Set-Cookie")
+	if len(raw) == 0 {
+		return nil
+	}
+	cookies := make([]string, 0, len(raw))
+	for _, line := range raw {
+		pair, _, _ := strings.Cut(line, ";")
+		if pair = strings.TrimSpace(pair); pair != "" {
+			cookies = append(cookies, pair)
+		}
+	}
+	return cookies
 }
 
 // readLimited reads at most max bytes and reports a longer answer rather
@@ -340,8 +359,11 @@ func statusError(status int, endpoint string, payload []byte) error {
 		return &domain.BadResponseError{
 			Endpoint:   endpoint,
 			HTTPStatus: status,
-			Reason:     "the request was rejected",
-			Snippet:    kit.RedactText(domain.Snippet(payload)),
+			// The status stays in the reason so that a card can tell a service
+			// blocking the request (Bilibili answers HTTP 412 to anonymous
+			// callers) from a response that made no sense.
+			Reason:  fmt.Sprintf("the request was rejected (HTTP %d)", status),
+			Snippet: kit.RedactText(domain.Snippet(payload)),
 		}
 	}
 }

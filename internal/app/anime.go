@@ -24,10 +24,10 @@ type animeSubjectUpdate struct {
 	Episodes    []domain.EpisodeRelease
 }
 
-// animeUpdates is absent when disabled, unconfigured, or there is no release.
-// Once a request has settled, an empty today stays absent even when the
-// request failed: an optional schedule must not leave an error-shaped blank
-// region in the compact flyout.
+// animeUpdates draws today's releases. It is absent when disabled,
+// unconfigured, or there is no release. Once a request has settled, an empty
+// today stays absent even when the request failed: an optional schedule must
+// not leave an error-shaped blank region in the compact flyout.
 func (s *State) animeUpdates(c *ui.Context) {
 	if s.animeService == nil || !s.animeService.Enabled() || s.animeService.Username() == "" {
 		return

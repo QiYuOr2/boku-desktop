@@ -115,9 +115,14 @@ type FetchResult struct {
 	ProviderID string
 	// Endpoint is the address actually asked, with anything sensitive in it
 	// already removed, for error messages and audit.
-	Endpoint   string
-	FetchedAt  time.Time
-	Payload    []byte
+	Endpoint  string
+	FetchedAt time.Time
+	Payload   []byte
+	// Cookies are the Set-Cookie pairs the answer carried, as name=value
+	// without attributes. A service that hands out an anonymous identity
+	// cookie needs them back on the next request; nothing here is a login
+	// credential, and callers must not assume they are.
+	Cookies    []string
 	HTTPStatus int
 }
 
