@@ -164,7 +164,7 @@ func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credential
 	content, err := openai.TranslateImage(ctx, openai.ImageOptions{
 		Client: t.client, BaseURL: service.BaseURL, Model: service.Model,
 		APIKey: strings.TrimSpace(creds.Secrets[APIKeyCredential]), Target: target, Image: image,
-		System: `You translate text visible in an image. Return exactly one JSON object and no Markdown: {"sourceLang":"ja","sourceText":"original visible text","targetLang":"zh","translatedText":"translation"}. Use only zh,en,ja,ko,ru,ar for language codes. Preserve line breaks. If no readable text exists, use empty strings.`,
+		System: `You translate text visible in an image. Return exactly one JSON object and no Markdown: {"sourceLang":"ja","sourceText":"original visible text","targetLang":"zh","translatedText":"translation"}. Use only zh,en,ja,ko,ru,ar,th for language codes. Preserve line breaks. If no readable text exists, use empty strings.`,
 	})
 	if err != nil {
 		return domain.TranslationResult{}, err
@@ -178,10 +178,15 @@ func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credential
 	if err := json.Unmarshal([]byte(content), &answer); err != nil {
 		return domain.TranslationResult{}, fmt.Errorf("%w: image translator did not return the required JSON", domain.ErrProviderBadResponse)
 	}
-	if answer.TargetLang == "" {
-		answer.TargetLang = target
+	sourceText := strings.TrimSpace(answer.SourceText)
+	result := domain.TranslationResult{
+		SourceText:     sourceText,
+		TranslatedText: strings.TrimSpace(answer.TranslatedText),
+		SourceLang:     kit.ImageSourceLanguage(answer.SourceLang, sourceText),
+		TargetLang:     target,
+		ProviderID:     t.id,
+		CreatedAt:      t.now(),
 	}
-	result := domain.TranslationResult{SourceText: strings.TrimSpace(answer.SourceText), TranslatedText: strings.TrimSpace(answer.TranslatedText), SourceLang: answer.SourceLang, TargetLang: answer.TargetLang, ProviderID: t.id, CreatedAt: t.now()}
 	if err := result.Validate(); err != nil {
 		return domain.TranslationResult{}, err
 	}

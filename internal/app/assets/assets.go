@@ -112,6 +112,12 @@ var (
 //go:embed gauge.svg
 var gaugeSVG []byte
 
+//go:embed tv.svg
+var tvSVG []byte
+
+//go:embed chevron-right.svg
+var chevronRightSVG []byte
+
 // DeepSeek returns the DeepSeek mark as the SVG document it is. The caller
 // parses it once and keeps the result: parsing belongs to the framework,
 // and this package depends on the standard library alone.
@@ -143,6 +149,12 @@ func Info() []byte { return infoSVG }
 // Gauge returns the placeholder mark of a block whose provider has no drawing
 // of its own: a measure rather than a brand.
 func Gauge() []byte { return gaugeSVG }
+
+// TV returns the small television mark used for scheduled animation updates.
+func TV() []byte { return tvSVG }
+
+// ChevronRight returns the compact disclosure mark used by clickable rows.
+func ChevronRight() []byte { return chevronRightSVG }
 
 // Refresh returns the refresh mark as the SVG document it is.
 func Refresh() []byte { return refreshSVG }

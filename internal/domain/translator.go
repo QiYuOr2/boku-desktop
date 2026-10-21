@@ -19,9 +19,9 @@ import (
 // about chat completions.
 
 // Language is a language the tool can name, as a two-letter code: "zh",
-// "ja", "en", "ko". An empty Language means "not known": a request without a
-// source language asks the translator to detect one, and a result that
-// names none has not been classified.
+// "ja", "en", "ko", "ru", "ar", "th". An empty Language means "not known":
+// a request without a source language asks the translator to detect one, and
+// a result that names none has not been classified.
 type Language string
 
 const (
@@ -32,6 +32,7 @@ const (
 	LangKorean   Language = "ko"
 	LangRussian  Language = "ru"
 	LangArabic   Language = "ar"
+	LangThai     Language = "th"
 )
 
 // translationLanguages is the set a stored or detected code may be, so that
@@ -43,6 +44,7 @@ var translationLanguages = map[Language]string{
 	LangKorean:   "한국어",
 	LangRussian:  "Русский",
 	LangArabic:   "العربية",
+	LangThai:     "ไทย",
 }
 
 // Valid reports whether the code is one the application knows.

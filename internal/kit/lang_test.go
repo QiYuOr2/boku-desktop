@@ -1,6 +1,10 @@
 package kit
 
-import "testing"
+import (
+	"testing"
+
+	"boku/internal/domain"
+)
 
 // The language guess is what lets the window name the source language and
 // pick a target before anything is sent anywhere. It reads scripts, so the
@@ -21,6 +25,7 @@ func TestDetectLanguage(t *testing.T) {
 		{"korean", "컴파일러는 소스 코드를 기계어로 변환하는 소프트웨어입니다.", "ko"},
 		{"russian", "Компилятор преобразует исходный код.", "ru"},
 		{"arabic", "المترجم يحول الكود المصدري.", "ar"},
+		{"thai", "พระเจ้าลงโทษคนสร้างหอคอยบาเบล", "th"},
 		{"empty", "", ""},
 		{"whitespace", "   \n\t ", ""},
 		{"numbers and punctuation", "42.10 % — (1,234)", ""},
@@ -40,6 +45,27 @@ func TestDetectLanguage(t *testing.T) {
 	}
 }
 
+func TestImageSourceLanguage(t *testing.T) {
+	cases := []struct {
+		name    string
+		claimed domain.Language
+		text    string
+		want    domain.Language
+	}{
+		{"recognized script corrects a model's wrong claim", domain.LangEnglish, "พระเจ้าลงโทษคน", domain.LangThai},
+		{"recognized script corrects an unknown claim", domain.Language("vi"), "พระเจ้าลงโทษคน", domain.LangThai},
+		{"valid claim remains when the script is unknown", domain.LangEnglish, "გამარჯობა", domain.LangEnglish},
+		{"unknown claim and script become unknown", domain.Language("ka"), "გამარჯობა", domain.LangUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ImageSourceLanguage(tc.claimed, tc.text); got != tc.want {
+				t.Errorf("ImageSourceLanguage(%q, %q) = %q, want %q", tc.claimed, tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLanguageName(t *testing.T) {
 	cases := map[string]string{
 		"zh":      "中文",
@@ -48,6 +74,7 @@ func TestLanguageName(t *testing.T) {
 		"ja":      "日本語",
 		"en":      "English",
 		"ko":      "한국어",
+		"th":      "ไทย",
 		"fr":      "Français",
 		"xx":      "xx",
 		"":        "",

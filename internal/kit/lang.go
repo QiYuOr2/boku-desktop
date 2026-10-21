@@ -5,6 +5,8 @@ package kit
 import (
 	"strings"
 	"unicode"
+
+	"boku/internal/domain"
 )
 
 // Language guesses which language a piece of text is written in, from the
@@ -22,7 +24,7 @@ import (
 // the language code the rest of the application uses; an empty string means
 // the text gave nothing to go on — numbers, punctuation, an empty string.
 func DetectLanguage(text string) string {
-	var han, kana, hangul, cyrillic, arabic, latin, other int
+	var han, kana, hangul, cyrillic, arabic, thai, latin, other int
 	for _, r := range text {
 		switch {
 		case unicode.In(r, unicode.Hiragana, unicode.Katakana):
@@ -35,6 +37,8 @@ func DetectLanguage(text string) string {
 			cyrillic++
 		case unicode.In(r, unicode.Arabic):
 			arabic++
+		case unicode.In(r, unicode.Thai):
+			thai++
 		case unicode.In(r, unicode.Latin):
 			latin++
 		case unicode.IsLetter(r):
@@ -55,6 +59,8 @@ func DetectLanguage(text string) string {
 		return "ru"
 	case arabic > 0:
 		return "ar"
+	case thai > 0:
+		return "th"
 	case latin > 0:
 		return "en"
 	case other > 0:
@@ -63,6 +69,22 @@ func DetectLanguage(text string) string {
 		return ""
 	}
 	return ""
+}
+
+// ImageSourceLanguage reconciles an image model's claimed source language
+// with the text it recognized. A model may return an unsupported code, or
+// label a script it visibly read as English. A local script match is the
+// stronger answer; an otherwise valid model answer remains useful for scripts
+// this build cannot recognize. Unknown is intentional and keeps a good
+// source/translation pair visible without a false language badge.
+func ImageSourceLanguage(claimed domain.Language, sourceText string) domain.Language {
+	if detected := domain.Language(DetectLanguage(sourceText)); detected.Valid() {
+		return detected
+	}
+	if claimed.Valid() {
+		return claimed
+	}
+	return domain.LangUnknown
 }
 
 // LanguageName is what the interface calls a language code, in the
@@ -81,6 +103,8 @@ func LanguageName(code string) string {
 		return "Русский"
 	case "ar":
 		return "العربية"
+	case "th":
+		return "ไทย"
 	case "fr":
 		return "Français"
 	case "de":
