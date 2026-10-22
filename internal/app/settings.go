@@ -275,7 +275,14 @@ func (s *State) sectionInView(c *ui.Context, sections []settingsSectionBox, body
 	if len(sections) == 0 {
 		return active
 	}
-	middle := body.Bounds().Y + body.Bounds().H/2
+	viewport := body.Bounds()
+	// A new window has no committed layout yet. Keep its current selection
+	// until there is a viewport to compare headings against; zero scroll
+	// limits at this point do not mean the reader reached the page's end.
+	if viewport.H <= 0 {
+		return s.settingsSection
+	}
+	middle := viewport.Y + viewport.H/2
 	atEnd := s.settingsScroll.Y >= s.settingsScroll.MaxY-1
 	last := len(sections) - 1
 	for _, section := range sections {
@@ -292,7 +299,8 @@ func (s *State) sectionInView(c *ui.Context, sections []settingsSectionBox, body
 		active = section.kind
 	}
 	if atEnd && active != sections[last].kind {
-		if head := c.Resolve(sections[last].head); head.Bounds().Y <= body.Bounds().H {
+		head := c.Resolve(sections[last].head).Bounds()
+		if head.H > 0 && head.Y <= viewport.Y+viewport.H {
 			active = sections[last].kind
 		}
 	}
