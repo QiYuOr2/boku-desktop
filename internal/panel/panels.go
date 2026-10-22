@@ -18,6 +18,9 @@ import (
 type PanelDef struct {
 	Panel   domain.Panel
 	Metrics []domain.Metric
+	// OptionalMetricKeys declares additional metrics whose observations may
+	// be absent. Panel.MetricKeys remains the set required in every snapshot.
+	OptionalMetricKeys []string
 	// UsageURL is where the provider keeps the account this panel reads, in
 	// full. It is left empty by an assembly that names none, and then the
 	// provider's own descriptor decides.
@@ -190,7 +193,17 @@ func (p *Panels) add(def PanelDef) error {
 			return fmt.Errorf("%w: panel %s lists metric %s, which it does not define", domain.ErrInvalidArgument, def.Panel.ID, key)
 		}
 	}
-	if len(def.Panel.MetricKeys) != len(byKey) {
+	listed := make(map[string]bool, len(byKey))
+	for _, key := range def.Panel.MetricKeys {
+		listed[key] = true
+	}
+	for _, key := range def.OptionalMetricKeys {
+		if _, ok := byKey[key]; !ok || listed[key] {
+			return fmt.Errorf("%w: panel %s has an undefined or repeated optional metric %s", domain.ErrInvalidArgument, def.Panel.ID, key)
+		}
+		listed[key] = true
+	}
+	if len(listed) != len(byKey) {
 		return fmt.Errorf("%w: panel %s defines %d metrics and lists %d", domain.ErrInvalidArgument, def.Panel.ID, len(byKey), len(def.Panel.MetricKeys))
 	}
 	if every := def.Panel.RefreshEvery; every > 0 {

@@ -844,6 +844,55 @@ func TestAnAdapterThatBreaksTheContractIsCaught(t *testing.T) {
 	}
 }
 
+func TestOptionalMetricsAreExplicitAndStillValidated(t *testing.T) {
+	def := testDef()
+	def.Panel.MetricKeys = def.Panel.MetricKeys[:1]
+	def.OptionalMetricKeys = []string{"toppedUpMinor"}
+	panels := newTestPanels(t, newFakeProvider(), nil, def)
+	if len(panels.View(def.Panel.ID).Metrics) != 2 {
+		t.Fatal("optional metric definition was lost")
+	}
+	for _, tc := range []struct {
+		name     string
+		optional []string
+		wantErr  bool
+	}{
+		{"declared", []string{"toppedUpMinor"}, false},
+		{"undeclared", nil, true},
+		{"undefined", []string{"ghost"}, true},
+		{"required overlap", []string{"balanceMinor"}, true},
+		{"duplicate", []string{"toppedUpMinor", "toppedUpMinor"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			candidate := def
+			candidate.OptionalMetricKeys = tc.optional
+			reg := newRegistry()
+			reg.add(newFakeProvider(), fakeAdapter{id: "fake"})
+			_, err := NewPanels(reg, newMemoryStore(), NewSection(), nil, []PanelDef{candidate})
+			if errors.Is(err, domain.ErrInvalidArgument) != tc.wantErr {
+				t.Fatalf("NewPanels = %v, want invalid argument = %v", err, tc.wantErr)
+			}
+		})
+	}
+	for _, tc := range []struct {
+		name         string
+		observations []domain.Observation
+		wantErr      bool
+	}{
+		{"optional absent", []domain.Observation{{MetricKey: "balanceMinor", Value: domain.NumberValue(10)}}, false},
+		{"optional present", []domain.Observation{{MetricKey: "balanceMinor", Value: domain.NumberValue(10)}, {MetricKey: "toppedUpMinor", Value: domain.NumberValue(5)}}, false},
+		{"optional wrong type", []domain.Observation{{MetricKey: "balanceMinor", Value: domain.NumberValue(10)}, {MetricKey: "toppedUpMinor", Value: domain.TextValue("bad")}}, true},
+		{"required absent", []domain.Observation{{MetricKey: "toppedUpMinor", Value: domain.NumberValue(5)}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snapshot := domain.Snapshot{PanelID: def.Panel.ID, ProviderID: "fake", Status: domain.StatusOK, Observations: tc.observations}
+			if err := checkSnapshot(def, snapshot); (err != nil) != tc.wantErr {
+				t.Fatalf("checkSnapshot = %v, want error = %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestTestProviderChecksWithoutStoring(t *testing.T) {
 	provider := newFakeProvider()
 	panels := newTestPanels(t, provider, nil)

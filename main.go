@@ -393,8 +393,9 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 			Metrics: deepseekpanel.Metrics(),
 		},
 		{
-			Panel:   codexpanel.Panel(),
-			Metrics: codexpanel.Metrics(),
+			Panel:              codexpanel.Panel(),
+			Metrics:            codexpanel.Metrics(),
+			OptionalMetricKeys: codexpanel.OptionalMetricKeys(),
 			// The quota comes from the Codex CLI's own login on this
 			// machine, so reading it is the user's to allow.
 			Optional: true,

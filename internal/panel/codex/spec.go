@@ -53,12 +53,24 @@ const (
 	MetricSessionResetsInSeconds = "sessionResetsInSeconds"
 	// MetricPlanName is the account's tier, as the service spells it.
 	MetricPlanName = "planName"
+	// Window lengths come from the response, independently of reset countdowns.
+	MetricSessionWindowSeconds = "sessionWindowSeconds"
+	MetricLongWindowSeconds    = "longWindowSeconds"
+	// Long-window observations are optional: free accounts and responses
+	// without a secondary window only carry the session metrics.
+	MetricLongWindowRemainingPercent = "longWindowRemainingPercent"
+	MetricLongWindowResetsInSeconds  = "longWindowResetsInSeconds"
 )
 
 // UsageURL is ChatGPT's own page for the account: what a quota panel is a
 // summary of. The panel's bar opens it, so it belongs next to the panel's
 // keys and titles.
 const UsageURL = "https://chatgpt.com/codex/settings/usage"
+
+// OptionalMetricKeys names observations the endpoint may omit.
+func OptionalMetricKeys() []string {
+	return []string{MetricSessionWindowSeconds, MetricLongWindowRemainingPercent, MetricLongWindowResetsInSeconds, MetricLongWindowSeconds}
+}
 
 // Panel returns the quota panel.
 func Panel() domain.Panel {
@@ -98,6 +110,34 @@ func Metrics() []domain.Metric {
 			Label:      "账号等级",
 			Unit:       domain.UnitText,
 			ValueType:  domain.ValueTypeText,
+			Comparison: domain.ComparisonNone,
+		},
+		{
+			Key:        MetricSessionWindowSeconds,
+			Label:      "主窗口周期",
+			Unit:       domain.UnitSeconds,
+			ValueType:  domain.ValueTypeDuration,
+			Comparison: domain.ComparisonNone,
+		},
+		{
+			Key:        MetricLongWindowRemainingPercent,
+			Label:      "长周期剩余额度",
+			Unit:       domain.UnitPercent,
+			ValueType:  domain.ValueTypeNumber,
+			Comparison: domain.ComparisonHigherIsBetter,
+		},
+		{
+			Key:        MetricLongWindowResetsInSeconds,
+			Label:      "长周期重置",
+			Unit:       domain.UnitSeconds,
+			ValueType:  domain.ValueTypeDuration,
+			Comparison: domain.ComparisonNone,
+		},
+		{
+			Key:        MetricLongWindowSeconds,
+			Label:      "长窗口周期",
+			Unit:       domain.UnitSeconds,
+			ValueType:  domain.ValueTypeDuration,
 			Comparison: domain.ComparisonNone,
 		},
 	}

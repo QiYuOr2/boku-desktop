@@ -7,6 +7,7 @@ package codex
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,9 +25,7 @@ type usageResponse struct {
 
 type rateLimit struct {
 	PrimaryWindow *window `json:"primary_window"`
-	// SecondaryWindow is the weekly window. It is part of the response and
-	// deliberately not part of this panel (Task 027's Out of Scope): the
-	// panel's metrics are what the adapter can always produce.
+	// SecondaryWindow is optional and is shown for non-free accounts.
 	SecondaryWindow *window `json:"secondary_window"`
 }
 
@@ -34,9 +33,8 @@ type window struct {
 	UsedPercent *int `json:"used_percent"`
 	// ResetAt is Unix seconds.
 	ResetAt *int64 `json:"reset_at"`
-	// LimitWindowSeconds is the length of the window (18000 for the
-	// session, 604800 for the week). The panel's labels do not name a
-	// length, so it is read only to keep the response's shape in one place.
+	// LimitWindowSeconds supplies the period label, independently of when
+	// the window next resets. A missing length must not imply five hours.
 	LimitWindowSeconds *int64 `json:"limit_window_seconds"`
 }
 
@@ -64,37 +62,30 @@ func (a *Adapter) Normalize(result domain.FetchResult, panel domain.Panel) (doma
 		return domain.Snapshot{}, badResponse(result, "the response carries no rate-limit window")
 	}
 	session := payload.RateLimit.PrimaryWindow
-	if session.UsedPercent == nil {
-		return domain.Snapshot{}, badResponse(result, "the rate-limit window does not say how much is used")
-	}
-	if session.ResetAt == nil {
-		return domain.Snapshot{}, badResponse(result, "the rate-limit window does not say when it resets")
-	}
-
-	// What is left is the whole of what the bar shows. A window that is
-	// over its limit reports 0 rather than a negative amount, and a
-	// percentage outside 0..100 is read as its nearest end rather than
-	// refused: the service is allowed to report an over-quota account.
-	used := int64(*session.UsedPercent)
-	switch {
-	case used < 0:
-		used = 0
-	case used > 100:
-		used = 100
-	}
-	remaining := 100 - used
-
-	// The reset time is absolute and the adapter has no clock: the moment
-	// the provider fetched the answer is what it is counted from.
-	resetsIn := *session.ResetAt - result.FetchedAt.Unix()
-	if resetsIn < 0 {
-		resetsIn = 0
+	remaining, resetsIn, err := windowValues(session, result.FetchedAt)
+	if err != nil {
+		return domain.Snapshot{}, badResponse(result, "primary window: %v", err)
 	}
 
 	values := map[string]domain.Value{
 		MetricSessionRemainingPercent: domain.NumberValue(remaining),
 		MetricSessionResetsInSeconds:  domain.DurationValue(resetsIn),
 		MetricPlanName:                domain.TextValue(strings.TrimSpace(payload.PlanType)),
+	}
+	if seconds := session.LimitWindowSeconds; seconds != nil && *seconds > 0 {
+		values[MetricSessionWindowSeconds] = domain.DurationValue(*seconds)
+	}
+	plan := strings.TrimSpace(payload.PlanType)
+	if secondary := payload.RateLimit.SecondaryWindow; secondary != nil && plan != "" && !strings.EqualFold(plan, "free") {
+		remaining, resetsIn, err := windowValues(secondary, result.FetchedAt)
+		if err != nil {
+			return domain.Snapshot{}, badResponse(result, "secondary window: %v", err)
+		}
+		values[MetricLongWindowRemainingPercent] = domain.NumberValue(remaining)
+		values[MetricLongWindowResetsInSeconds] = domain.DurationValue(resetsIn)
+		if seconds := secondary.LimitWindowSeconds; seconds != nil && *seconds > 0 {
+			values[MetricLongWindowSeconds] = domain.DurationValue(*seconds)
+		}
 	}
 	observations, err := observations(panel, values, result.FetchedAt)
 	if err != nil {
@@ -114,14 +105,30 @@ func (a *Adapter) Normalize(result domain.FetchResult, panel domain.Panel) (doma
 	return snapshot, nil
 }
 
+func windowValues(w *window, fetchedAt time.Time) (remaining, resetsIn int64, err error) {
+	if w.UsedPercent == nil || w.ResetAt == nil {
+		return 0, 0, fmt.Errorf("the rate-limit window must say how much is used and when it resets")
+	}
+	used := max(int64(0), min(int64(100), int64(*w.UsedPercent)))
+	return 100 - used, max(int64(0), *w.ResetAt-fetchedAt.Unix()), nil
+}
+
 // observations builds the panel's observations in the order its metrics are
 // defined, so the bar's own number comes first. A metric the response has no
 // value for is a bad response, not a zero.
 func observations(panel domain.Panel, values map[string]domain.Value, observedAt time.Time) ([]domain.Observation, error) {
-	keys := panel.MetricKeys
+	keys := append([]string(nil), panel.MetricKeys...)
 	if len(keys) == 0 {
 		for _, metric := range Metrics() {
-			keys = append(keys, metric.Key)
+			if _, ok := values[metric.Key]; ok {
+				keys = append(keys, metric.Key)
+			}
+		}
+	} else {
+		for _, key := range OptionalMetricKeys() {
+			if _, ok := values[key]; ok && !slices.Contains(keys, key) {
+				keys = append(keys, key)
+			}
 		}
 	}
 	built := make([]domain.Observation, 0, len(keys))
