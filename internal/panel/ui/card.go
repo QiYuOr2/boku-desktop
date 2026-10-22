@@ -72,11 +72,8 @@ func (s *State) panelBlock(c *ui.Context, view panel.View) {
 // panelHead is a block's first line: the mark of what it is about, its name,
 // and at the right the age of the numbers with the way to fetch them again.
 //
-// A quota block carries one more line under it — what the account is and when
-// its window resets, and at the far end how much of the window is gone —
-// because both are longer than the room left beside a 320-point name once the
-// age and the refresh are on the same line; put there, they would all be
-// ellipsised.
+// A quota block places the account tier beside its name as a badge. The line
+// below holds the window period and reset time, with usage at the far end.
 func (s *State) panelHead(c *ui.Context, view panel.View) {
 	ui.Column(c).FillWidth().Gap(float32(2)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
@@ -87,6 +84,11 @@ func (s *State) panelHead(c *ui.Context, view panel.View) {
 					FontWeight(600).
 					TextColor(presentation.PanelInk).
 					SingleLine()
+				if IsQuota(view) {
+					if plan := Account(view); plan != "" {
+						presentation.KindBadge(c, presentation.BadgeStoneFill, presentation.BadgeStoneInk, plan)
+					}
+				}
 			})
 			ui.Spacer(c)
 			freshness(c, view)
@@ -97,7 +99,7 @@ func (s *State) panelHead(c *ui.Context, view panel.View) {
 		if !IsQuota(view) {
 			return
 		}
-		line, used := Account(view), ""
+		line, used := quotaTitle(read(view), view.Snapshot.ObservedAt), ""
 		if share, ok := Used(view); ok {
 			used = "已用 " + strconv.FormatInt(share, 10) + "%"
 		}
@@ -199,6 +201,20 @@ func (s *State) quotaBody(c *ui.Context, view panel.View) {
 		// part of that block rather than as a decoration of the window.
 		mark := s.providerMark(view.Panel.ProviderID)
 		presentation.ProgressBar(c, used, mark.Bar, label, "已用额度")
+		windows := readWindows(view)
+		if len(windows) > 1 && windows[1].hasLeft && windows[1].hasReset {
+			long := windows[1]
+			used := 100 - long.remaining
+			ui.Column(c).FillWidth().Gap(float32(4)).Children(func() {
+				ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+					presentation.CardNote(c, quotaTitle(long, view.Snapshot.ObservedAt))
+					ui.Spacer(c)
+					ui.Text(c, "已用 "+strconv.FormatInt(used, 10)+"%").
+						FontSize(presentation.SizeQuickFine).TextColor(presentation.PanelFaint).SingleLine()
+				})
+				presentation.ProgressBar(c, used, mark.Bar, "已用 "+strconv.FormatInt(used, 10)+"%", "长周期已用额度")
+			})
+		}
 	}
 
 	// The bar above stays on screen when a refresh fails: an old answer is

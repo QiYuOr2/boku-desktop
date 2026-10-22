@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -85,6 +86,12 @@ func TestNormalizeMapsTheSessionWindow(t *testing.T) {
 	if got, ok := observation(t, snapshot, MetricPlanName).Value.Text(); !ok || got != "plus" {
 		t.Errorf("planName = %q (%v), want plus", got, observation(t, snapshot, MetricPlanName).Value)
 	}
+	if got, _ := observation(t, snapshot, MetricLongWindowRemainingPercent).Value.Number(); got != 76 {
+		t.Errorf("longWindowRemainingPercent = %d, want 76", got)
+	}
+	if got, _ := observation(t, snapshot, MetricLongWindowResetsInSeconds).Value.DurationSeconds(); got != 1792400000-fetchedAt.Unix() {
+		t.Errorf("longWindowResetsInSeconds = %d, want %d", got, 1792400000-fetchedAt.Unix())
+	}
 	// The metrics come out in the panel's own order, so the bar's number is
 	// first.
 	if len(snapshot.Observations) != len(Metrics()) {
@@ -94,6 +101,134 @@ func TestNormalizeMapsTheSessionWindow(t *testing.T) {
 		if got := snapshot.Observations[index].MetricKey; got != metric.Key {
 			t.Errorf("observation %d is %s, want %s", index, got, metric.Key)
 		}
+	}
+}
+
+func TestNormalizeOptionalLongWindow(t *testing.T) {
+	for _, name := range []string{"usage_free.json", "usage_no_secondary.json", "usage_no_plan.json"} {
+		t.Run(name, func(t *testing.T) {
+			snapshot, err := normalize(t, fixture(t, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, key := range []string{MetricLongWindowRemainingPercent, MetricLongWindowResetsInSeconds} {
+				if _, ok := snapshot.Observation(key); ok {
+					t.Errorf("unexpected observation %s", key)
+				}
+			}
+			if _, ok := snapshot.Observation(MetricSessionRemainingPercent); !ok {
+				t.Fatal("primary quota was lost")
+			}
+		})
+	}
+}
+
+func TestNormalizeWindowLengths(t *testing.T) {
+	for _, tc := range []struct {
+		file          string
+		session, long int64
+	}{
+		{"usage_ok.json", 18000, 604800},
+		{"usage_free.json", 2592000, 0},
+		{"usage_window_lengths.json", 7200, 1209600},
+		{"usage_no_secondary.json", 18000, 0},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			snapshot, err := normalize(t, fixture(t, tc.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for key, want := range map[string]int64{MetricSessionWindowSeconds: tc.session, MetricLongWindowSeconds: tc.long} {
+				got, exists := snapshot.Observation(key)
+				if want == 0 {
+					if exists {
+						t.Errorf("unexpected %s", key)
+					}
+					continue
+				}
+				if seconds, ok := got.Value.DurationSeconds(); !exists || !ok || seconds != want {
+					t.Errorf("%s = %+v, want %d seconds", key, got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestNormalizeOmitsUnavailableWindowLength(t *testing.T) {
+	zero, negative := int64(0), int64(-1)
+	for _, length := range []*int64{nil, &zero, &negative} {
+		result := fixture(t, "usage_ok.json")
+		var response usageResponse
+		if err := json.Unmarshal(result.Payload, &response); err != nil {
+			t.Fatal(err)
+		}
+		response.RateLimit.PrimaryWindow.LimitWindowSeconds = length
+		response.RateLimit.SecondaryWindow.LimitWindowSeconds = length
+		var err error
+		result.Payload, err = json.Marshal(response)
+		if err != nil {
+			t.Fatal(err)
+		}
+		snapshot, err := normalize(t, result)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, key := range []string{MetricSessionWindowSeconds, MetricLongWindowSeconds} {
+			if _, exists := snapshot.Observation(key); exists {
+				t.Errorf("unexpected %s", key)
+			}
+		}
+		if len(snapshot.Observations) != 5 {
+			t.Fatalf("quotas lost when period unavailable: %+v", snapshot.Observations)
+		}
+	}
+}
+
+func TestNormalizeLongWindowBoundaries(t *testing.T) {
+	for _, tc := range []struct {
+		name, plan          string
+		used                int
+		reset               int64
+		wantLeft, wantReset int64
+		wantWindow          bool
+	}{
+		{"zero used", "pro", 0, 1792400000, 100, 1792400000 - fetchedAt.Unix(), true},
+		{"over limit", "business", 120, 1792400000, 0, 1792400000 - fetchedAt.Unix(), true},
+		{"negative used and past reset", "enterprise", -5, fetchedAt.Unix() - 1, 100, 0, true},
+		{"unknown paid tier", "future-plan", 24, 1792400000, 76, 1792400000 - fetchedAt.Unix(), true},
+		{"free with secondary", " FrEe ", 24, 1792400000, 0, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := fixture(t, "usage_ok.json")
+			var response usageResponse
+			if err := json.Unmarshal(result.Payload, &response); err != nil {
+				t.Fatal(err)
+			}
+			response.PlanType = tc.plan
+			response.RateLimit.SecondaryWindow.UsedPercent = &tc.used
+			response.RateLimit.SecondaryWindow.ResetAt = &tc.reset
+			var err error
+			result.Payload, err = json.Marshal(response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := normalize(t, result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := snapshot.Observation(MetricLongWindowRemainingPercent); ok != tc.wantWindow {
+				t.Fatalf("long window present = %v, want %v", ok, tc.wantWindow)
+			}
+			if !tc.wantWindow {
+				return
+			}
+			if got, _ := observation(t, snapshot, MetricLongWindowRemainingPercent).Value.Number(); got != tc.wantLeft {
+				t.Errorf("remaining = %d, want %d", got, tc.wantLeft)
+			}
+			if got, _ := observation(t, snapshot, MetricLongWindowResetsInSeconds).Value.DurationSeconds(); got != tc.wantReset {
+				t.Errorf("resets in = %d, want %d", got, tc.wantReset)
+			}
+		})
 	}
 }
 
