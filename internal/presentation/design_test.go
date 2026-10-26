@@ -2,6 +2,7 @@ package presentation
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -74,18 +75,8 @@ func TestUIFontFamilyEndsAtTheSystemFallback(t *testing.T) {
 	// A CJK face has to be named before the generic fallback: the families
 	// after the generic one are never reached.
 	for _, want := range []string{"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC"} {
-		if !slicesContains(families, want) {
+		if !slices.Contains(families, want) {
 			t.Errorf("the family list does not name %q: %q", want, families)
 		}
 	}
-}
-
-// slicesContains is a small helper so the test reads as the check it is.
-func slicesContains(list []string, want string) bool {
-	for _, got := range list {
-		if got == want {
-			return true
-		}
-	}
-	return false
 }

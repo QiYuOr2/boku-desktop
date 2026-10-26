@@ -5,6 +5,7 @@ import (
 	"errors"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,7 +22,7 @@ import (
 // binding that is put back when the platform refuses the new one.
 
 func TestRegisterShortcutsBindsTheDefault(t *testing.T) {
-	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
 
 	if got := shortcuts.bound(); got != translate.DefaultAccelerator {
@@ -48,6 +49,11 @@ func TestRegisterShortcutsBindsTheDefault(t *testing.T) {
 // that happens to be there.
 func TestShortcutCallbackReturnsAtOnce(t *testing.T) {
 	state, translate, card := translateState(t)
+	gate := make(chan struct{})
+	release := sync.OnceFunc(func() { close(gate) })
+	t.Cleanup(release)
+	translate.reply.gate = gate
+	card.updates = make(chan func(), 2)
 	state.RegisterShortcuts()
 	translate.device.set(domain.ClipContent{
 		Kind:    domain.ClipKindText,
@@ -65,25 +71,31 @@ func TestShortcutCallbackReturnsAtOnce(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("the shortcut callback did not return: something in it waits")
 	}
-	// What the callback left behind is the window asking for a translation.
-	// The answer itself arrives on the thread that owns the state, and a fake
-	// translator can answer before this line runs: loading and ready are both
-	// the state the callback is allowed to leave. Waiting for a particular one
-	// made this a test of the fake's speed rather than of the callback.
-	switch state.translation.status {
-	case translateLoading, translateReady:
-	default:
-		t.Errorf("the window is in state %d, want loading or ready", state.translation.status)
+	if state.translation.status != translateLoading {
+		t.Errorf("the window is in state %d, want loading while the request is blocked", state.translation.status)
 	}
 	if !card.visible() {
 		t.Error("the card the callback asked for was not shown")
+	}
+	release()
+	// Run the focus and result callbacks on the test's main thread, as Window.Update does.
+	for range 2 {
+		select {
+		case update := <-card.updates:
+			update()
+		case <-time.After(2 * time.Second):
+			t.Fatal("the translation did not hand its result back to the window")
+		}
+	}
+	if state.translation.status != translateReady || state.translation.result.TranslatedText != "译文" {
+		t.Fatalf("translation = %+v, want the completed result", state.translation)
 	}
 }
 
 // A registration the platform refuses is visible and does not stop the
 // application: §6 of the tool design.
 func TestRegisterShortcutsReportsAFailure(t *testing.T) {
-	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state, _, shortcuts := testStateWith(t)
 	shortcuts.failWith(errors.New("already registered by another application"))
 	state.RegisterShortcuts()
 
@@ -106,7 +118,7 @@ func TestRegisterShortcutsReportsAFailure(t *testing.T) {
 // platform has one call that releases them all, and a binding left behind
 // belongs to a process that no longer answers.
 func TestRebindingReleasesBeforeItRegisters(t *testing.T) {
-	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
 	state.applyShortcut("Ctrl+Alt+J")
 
@@ -139,7 +151,7 @@ func TestRebindingReleasesBeforeItRegisters(t *testing.T) {
 // A combination another application holds leaves the binding that was there:
 // a user who tries one has not asked to lose the shortcut they had.
 func TestRebindingPutsTheOldBindingBackOnFailure(t *testing.T) {
-	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
 	// The first registration is the one that is already there; everything
 	// after it is refused, which is the shape of a combination another
@@ -168,7 +180,7 @@ func TestRebindingPutsTheOldBindingBackOnFailure(t *testing.T) {
 }
 
 func TestResetShortcutPutsTheDefaultBack(t *testing.T) {
-	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
 	state.applyShortcut("Ctrl+Alt+J")
 	state.resetShortcut()
@@ -187,7 +199,7 @@ func TestResetShortcutPutsTheDefaultBack(t *testing.T) {
 
 // The application releases its binding on the way out.
 func TestUnregisterShortcutsReleasesEverything(t *testing.T) {
-	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
 	state.UnregisterShortcuts()
 
@@ -205,7 +217,7 @@ func TestUnregisterShortcutsReleasesEverything(t *testing.T) {
 // one is not a combination, and the other would take that key from every
 // application on the machine.
 func TestRecordingBindsACombination(t *testing.T) {
-	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
 	state.beginShortcutCapture()
 
@@ -245,7 +257,7 @@ func TestRecordingBindsACombination(t *testing.T) {
 
 // Escape cancels the recording without binding anything.
 func TestRecordingCancelsOnEscape(t *testing.T) {
-	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
 	state.beginShortcutCapture()
 
@@ -263,7 +275,7 @@ func TestRecordingCancelsOnEscape(t *testing.T) {
 // Nothing is read while the window is not recording: a key pressed elsewhere
 // in the settings window is not a binding.
 func TestCaptureIgnoresKeysWhileNotRecording(t *testing.T) {
-	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
 
 	if state.captureShortcut(ui.InputEvent{Kind: ui.InputKeyDown, Key: ui.KeyT, Mods: ui.Ctrl}) {
@@ -362,21 +374,6 @@ func TestCompactAccelerator(t *testing.T) {
 	}
 }
 
-// waitForTranslation waits until the translation tool has reached a state,
-// which is how a test waits for work the shortcut started: the answer arrives
-// on the main thread, and a test window has no frame to carry it.
-func waitForTranslation(t *testing.T, state *State, want translateStatus) {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if state.translation.status == want {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("the translation window stayed in state %d", state.translation.status)
-}
-
 // A tool that starts switched off takes no shortcut at launch.
 //
 // A global shortcut is a key this process holds against every other
@@ -384,7 +381,7 @@ func waitForTranslation(t *testing.T, state *State, want translateStatus) {
 // denies them the combination for a feature that will not run — so "off" has to
 // mean the key was never taken.
 func TestNoShortcutIsBoundWhileTheToolStartsOff(t *testing.T) {
-	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state, _, shortcuts := testStateWith(t)
 	if err := state.translate.SetEnabled(t.Context(), false); err != nil {
 		t.Fatalf("SetEnabled failed: %v", err)
 	}
@@ -404,7 +401,7 @@ func TestNoShortcutIsBoundWhileTheToolStartsOff(t *testing.T) {
 // It is what makes the switch mean what it says: the two states a user can be
 // in are "off, and the key is free" and "on, and the key opens it".
 func TestTheSwitchTakesAndReleasesTheShortcut(t *testing.T) {
-	state, _, shortcuts := testStateWith(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
 	if got := shortcuts.bound(); got != translate.DefaultAccelerator {
 		t.Fatalf("the shortcut did not start bound: %q", got)

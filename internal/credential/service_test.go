@@ -11,7 +11,7 @@ import (
 )
 
 func TestSecretsSetGetAndMask(t *testing.T) {
-	store := newMemoryStore()
+	store := newServiceStore(t)
 	secrets, err := NewSecrets(store)
 	if err != nil {
 		t.Fatalf("NewSecrets failed: %v", err)
@@ -40,13 +40,14 @@ func TestSecretsSetGetAndMask(t *testing.T) {
 	}
 
 	// The key is stored under the provider's namespace, not under "apiKey".
-	if _, ok := store.values["deepseek.apiKey"]; !ok {
-		t.Errorf("the store holds %v, want deepseek.apiKey", store.values)
+	stored, err := store.Get(ctx, "deepseek.apiKey")
+	if err != nil || stored.Text() != "sk-abcdef1234" {
+		t.Fatalf("stored credential after masking = %q, %v", stored.Text(), err)
 	}
 }
 
 func TestSecretsRefuseEmptyValues(t *testing.T) {
-	secrets, err := NewSecrets(newMemoryStore())
+	secrets, err := NewSecrets(newServiceStore(t))
 	if err != nil {
 		t.Fatalf("NewSecrets failed: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestSecretsRefuseEmptyValues(t *testing.T) {
 }
 
 func TestSecretsNamesAndMasked(t *testing.T) {
-	store := newMemoryStore()
+	store := newServiceStore(t)
 	secrets, err := NewSecrets(store)
 	if err != nil {
 		t.Fatalf("NewSecrets failed: %v", err)
@@ -113,41 +114,13 @@ func TestSecretsNamesAndMasked(t *testing.T) {
 	}
 }
 
-// The masked form is what the interface shows; the store must still hold
-// the value itself.
-func TestSecretsMaskedKeepsTheValueStored(t *testing.T) {
-	store := newMemoryStore()
-	secrets, err := NewSecrets(store)
-	if err != nil {
-		t.Fatalf("NewSecrets failed: %v", err)
-	}
-	ctx := context.Background()
-	const value = "sk-very-secret-value-9a8b"
-	if err := secrets.Set(ctx, "deepseek", "apiKey", value); err != nil {
-		t.Fatalf("Set failed: %v", err)
-	}
-	masked, _, err := secrets.Masked(ctx, "deepseek", "apiKey")
-	if err != nil {
-		t.Fatalf("Masked failed: %v", err)
-	}
-	stored, err := secrets.Get(ctx, "deepseek", "apiKey")
-	if err != nil || stored != value {
-		t.Fatalf("Get = %q, %v; want the stored value", stored, err)
-	}
-	if strings.Contains(masked, "secret") {
-		t.Errorf("Masked = %q", masked)
-	}
-}
-
 func TestNewSecretsNeedsAStore(t *testing.T) {
 	if _, err := NewSecrets(nil); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("error = %v, want ErrInvalidArgument", err)
 	}
 }
 
-// The service over the real file store: what a value goes in as is what comes
-// back out, and the interface's own naming rule is applied on the way.
-func TestTheServiceOverTheFileStore(t *testing.T) {
+func TestSecretsSurviveReopeningTheFile(t *testing.T) {
 	dir := t.TempDir()
 	store, err := Open(filepath.Join(dir, FileName))
 	if err != nil {
@@ -162,6 +135,14 @@ func TestTheServiceOverTheFileStore(t *testing.T) {
 	if err := secrets.Set(ctx, "deepseek", "apiKey", "sk-test-0001"); err != nil {
 		t.Fatalf("Set failed: %v", err)
 	}
+	reopened, err := Open(filepath.Join(dir, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secrets, err = NewSecrets(reopened)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if value, err := secrets.Get(ctx, "deepseek", "apiKey"); err != nil || value != "sk-test-0001" {
 		t.Errorf("Get = %q, %v", value, err)
 	}
@@ -172,4 +153,13 @@ func TestTheServiceOverTheFileStore(t *testing.T) {
 	if path := secrets.Path(); filepath.Base(path) != FileName {
 		t.Errorf("Path = %q, want the file the store was opened with", path)
 	}
+}
+
+func newServiceStore(t *testing.T) *Store {
+	t.Helper()
+	store, err := Open(filepath.Join(t.TempDir(), FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
 }

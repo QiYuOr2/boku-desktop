@@ -11,6 +11,11 @@ import (
 	"boku/internal/translate"
 )
 
+const (
+	freeMicrosoftID = contractfree.MicrosoftEdge
+	freeBilibiliID  = contractfree.Bilibili
+)
+
 // okTranslation is an answer a free engine gives when it works.
 func okTranslation() domain.TranslationResult {
 	return domain.TranslationResult{
@@ -60,7 +65,7 @@ func cardOf(t *testing.T, state *State, id string) credentialui.TranslateCard {
 // The free engines are two independent options, and they are what a fresh
 // installation starts on.
 func TestTheFreeEnginesAreTwoSeparateChoices(t *testing.T) {
-	state, _, _ := translateState(t)
+	state, _ := translateState(t)
 	cards := state.credentialUI.TranslateCards()
 
 	byID := map[string]credentialui.TranslateCard{}
@@ -96,7 +101,7 @@ func TestTheFreeEnginesAreTwoSeparateChoices(t *testing.T) {
 // The picker's two groups: the free engines above, the services that have
 // something to fill in below.
 func TestThePickerGroupsFreeEnginesSeparately(t *testing.T) {
-	state, fixture, _ := translateState(t)
+	state, fixture := translateState(t)
 	// A service of the user's own is added, because that is the only way one
 	// exists: there is no card for a service nobody configured.
 	own := fixture.addService(translate.CustomSettings{
@@ -109,7 +114,7 @@ func TestThePickerGroupsFreeEnginesSeparately(t *testing.T) {
 		t.Fatalf("free = %+v, want the two free engines", free)
 	}
 	for _, card := range free {
-		if !isFreeTranslator(card.ID) {
+		if card.ID != freeMicrosoftID && card.ID != freeBilibiliID {
 			t.Errorf("%s is in the free group and is not a free engine", card.ID)
 		}
 	}
@@ -126,7 +131,7 @@ func TestThePickerGroupsFreeEnginesSeparately(t *testing.T) {
 		}
 	}
 	for id := range ids {
-		if isFreeTranslator(id) {
+		if id == freeMicrosoftID || id == freeBilibiliID {
 			t.Errorf("%s is a free engine and is in the group that needs a key", id)
 		}
 	}
@@ -136,7 +141,7 @@ func TestThePickerGroupsFreeEnginesSeparately(t *testing.T) {
 // engines are chosen in the translation section instead, where the user is
 // deciding what to translate with rather than what to type.
 func TestTheAPIKeySectionLeavesTheFreeEnginesOut(t *testing.T) {
-	state, fixture, _ := translateState(t)
+	state, fixture := translateState(t)
 	own := fixture.addService(translate.CustomSettings{
 		BaseURL:     "https://api.example.com/v1",
 		DisplayName: "本地 Ollama",
@@ -144,7 +149,7 @@ func TestTheAPIKeySectionLeavesTheFreeEnginesOut(t *testing.T) {
 
 	keyed := credentialui.KeyedTranslateCards(state.credentialUI.TranslateCards())
 	for _, card := range keyed {
-		if isFreeTranslator(card.ID) {
+		if card.ID == freeMicrosoftID || card.ID == freeBilibiliID {
 			t.Errorf("the API Key section draws %s, a free engine", card.ID)
 		}
 	}
@@ -172,7 +177,7 @@ func TestTheAPIKeySectionLeavesTheFreeEnginesOut(t *testing.T) {
 // user's own entries. A list reads better when what is fixed comes first and
 // what was added comes after it.
 func TestTheOwnServiceCardsComeLast(t *testing.T) {
-	state, fixture, _ := translateState(t)
+	state, fixture := translateState(t)
 
 	// An unconfigured service is not a card: it has nothing to show and
 	// nothing to ask.
@@ -221,7 +226,7 @@ func TestTheOwnServiceCardsComeLast(t *testing.T) {
 // the same fact the badge states for every other card: it is added configured,
 // so the badge never reads 未配置 on one.
 func TestAnAddedOwnServiceIsConfigured(t *testing.T) {
-	state, fixture, _ := translateState(t)
+	state, fixture := translateState(t)
 
 	id := fixture.addService(translate.CustomSettings{
 		BaseURL:     "https://api.example.com/v1",
@@ -244,7 +249,7 @@ func TestAnAddedOwnServiceIsConfigured(t *testing.T) {
 // service of the user's own with no key — a model on their own machine needs
 // none — was a card they had added and could not get rid of.
 func TestDeleteIsOnEveryCardThatHasSomethingToRemove(t *testing.T) {
-	state, fixture, _ := translateState(t)
+	state, fixture := translateState(t)
 
 	// The user's own service, added with no key at all: nothing is stored for
 	// it, and it is still removable.
@@ -275,7 +280,7 @@ func TestDeleteIsOnEveryCardThatHasSomethingToRemove(t *testing.T) {
 // It is what a local model goes through — added with no key, then removed —
 // and the credential store answers ErrSecretNotFound for a name it never had.
 func TestRemovingAKeylessOwnServiceWorks(t *testing.T) {
-	state, fixture, _ := translateState(t)
+	state, fixture := translateState(t)
 	id := fixture.addService(translate.CustomSettings{
 		BaseURL:     "http://127.0.0.1:11434/v1",
 		DisplayName: "本地 Ollama",
@@ -298,14 +303,9 @@ func TestRemovingAKeylessOwnServiceWorks(t *testing.T) {
 	}
 }
 
-// A removed service leaves the page completely: its card is gone, and so is
-// its row in the picker.
-//
-// The bug this pins: the cards are drawn from the registry, and removing a
-// service only took it out of the settings — so the card stayed, with no
-// address and nothing to ask. Both halves have to go.
-func TestARemovedServiceLeavesThePage(t *testing.T) {
-	state, fixture, _ := translateState(t)
+// Registry synchronization is covered by ownservices_test.go in the assembly package.
+func TestRemovedTranslatorIsAbsentFromCardsAndPicker(t *testing.T) {
+	state, fixture := translateState(t)
 	id := fixture.addService(translate.CustomSettings{
 		BaseURL:     "http://127.0.0.1:11434/v1",
 		DisplayName: "本地 Ollama",
@@ -323,9 +323,7 @@ func TestARemovedServiceLeavesThePage(t *testing.T) {
 	if err := fixture.service.RemoveCustomTranslator(t.Context(), id); err != nil {
 		t.Fatalf("RemoveCustomTranslator failed: %v", err)
 	}
-	if err := fixture.registerOwn(); err != nil {
-		t.Fatalf("the registry could not be brought in step: %v", err)
-	}
+	fixture.registry.Remove(id)
 
 	if hasCard(state, id) {
 		t.Errorf("the removed service is still a card: %+v", state.credentialUI.TranslateCards())
@@ -363,7 +361,7 @@ func hasPickerRow(state *State, id string) bool {
 // A service of the user's own is a row only once it exists: it is created from
 // the API Key section, and there is nothing to choose until then.
 func TestAnUnaddedOwnServiceIsNotARow(t *testing.T) {
-	state, fixture, _ := translateState(t)
+	state, fixture := translateState(t)
 
 	// Nothing added yet: no row of the user's own.
 	cards := pickerTranslateCards(state.credentialUI.TranslateCards())
@@ -395,38 +393,10 @@ func TestAnUnaddedOwnServiceIsNotARow(t *testing.T) {
 	}
 }
 
-// 免费 is the free engines' own word and nobody else's: the user's own service
-// needs no key either, but it is not one of the free ones.
-func TestOnlyTheFreeEnginesWearTheFreeChip(t *testing.T) {
-	state, fixture, _ := translateState(t)
-	// Add a service of the user's own so that it is a row at all.
-	id := fixture.addService(translate.CustomSettings{
-		BaseURL:     "https://api.example.com/v1",
-		DisplayName: "本地 Ollama",
-	})
-
-	for _, card := range state.credentialUI.TranslateCards() {
-		chipIsFree := isFreeTranslator(card.ID)
-		switch card.ID {
-		case freeMicrosoftID, freeBilibiliID:
-			if !chipIsFree {
-				t.Errorf("%s does not wear the free chip", card.ID)
-			}
-		case id:
-			if chipIsFree {
-				t.Error("the user's own service wears the free chip")
-			}
-			if card.NeedsCredential {
-				t.Error("the user's own service is drawn as needing a key")
-			}
-		}
-	}
-}
-
 // Two options mean two answers: picking one asks that engine, and nothing else
 // is asked in its place when it fails.
 func TestPickingAFreeEngineAsksThatEngineOnly(t *testing.T) {
-	state, fixture, _ := translateState(t)
+	state, fixture := translateState(t)
 
 	if err := state.translate.SetProvider(t.Context(), freeBilibiliID); err != nil {
 		t.Fatalf("SetProvider failed: %v", err)
@@ -450,7 +420,7 @@ func TestPickingAFreeEngineAsksThatEngineOnly(t *testing.T) {
 // And the other way round: picking the Microsoft engine does not fall back to
 // B 站 when it fails.
 func TestAFailedFreeEngineDoesNotFallBackToTheOther(t *testing.T) {
-	state, fixture, _ := translateState(t)
+	state, fixture := translateState(t)
 
 	if err := state.translate.SetProvider(t.Context(), freeMicrosoftID); err != nil {
 		t.Fatalf("SetProvider failed: %v", err)
@@ -472,7 +442,7 @@ func TestAFailedFreeEngineDoesNotFallBackToTheOther(t *testing.T) {
 // Switching between the two free engines is an ordinary choice: whatever was
 // stored is what is asked.
 func TestTheTwoFreeEnginesAreSwitchedBetween(t *testing.T) {
-	state, fixture, _ := translateState(t)
+	state, fixture := translateState(t)
 	fixture.translator(t, freeMicrosoftID).answer(okTranslation())
 	fixture.translator(t, freeBilibiliID).answer(okTranslation())
 
@@ -494,18 +464,5 @@ func TestTheTwoFreeEnginesAreSwitchedBetween(t *testing.T) {
 	if fixture.translator(t, freeMicrosoftID).requestCount() != 2 || fixture.translator(t, freeBilibiliID).requestCount() != 1 {
 		t.Errorf("calls = %d / %d, want each engine asked for its own turns",
 			fixture.translator(t, freeMicrosoftID).requestCount(), fixture.translator(t, freeBilibiliID).requestCount())
-	}
-}
-
-// The free engines are recognised by id, and the ids are the contract's, so
-// that the settings file and the window cannot disagree about them.
-func TestTheFreeEngineIDsComeFromTheContract(t *testing.T) {
-	if !isFreeTranslator(contractfree.MicrosoftEdge) || !isFreeTranslator(contractfree.Bilibili) {
-		t.Error("the contract's free engine ids are not the ones the window knows")
-	}
-	for _, id := range []string{"deepseek", customTranslatorID, "openai", ""} {
-		if isFreeTranslator(id) {
-			t.Errorf("%q is treated as a free engine", id)
-		}
 	}
 }

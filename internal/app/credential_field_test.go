@@ -23,7 +23,7 @@ import (
 // ran the stack out. It is also the behaviour the field needs, so it is checked
 // rather than only not-crashing.
 func TestSavingACardForgetsWhatWasTypedIntoIt(t *testing.T) {
-	state, _, _ := translateState(t)
+	state, _ := translateState(t)
 
 	// The user typed into DeepSeek's card, then moved to another card: the
 	// value is filed under DeepSeek and the field is bound to the other one.
@@ -47,7 +47,7 @@ func TestSavingACardForgetsWhatWasTypedIntoIt(t *testing.T) {
 // emptied as well: the key is stored, and the box it was typed into does not
 // keep it.
 func TestSavingTheDisplayedCardEmptiesTheField(t *testing.T) {
-	state, _, _ := translateState(t)
+	state, _ := translateState(t)
 
 	state.credentialUI.Form.Keys = map[string]string{"deepseek": "sk-typed-0001"}
 	state.credentialUI.Form.InputCard = "deepseek"
@@ -66,7 +66,7 @@ func TestSavingTheDisplayedCardEmptiesTheField(t *testing.T) {
 // A card that was never typed into is an empty answer rather than a panic: the
 // actions read the field whether or not the user has been there.
 func TestClearingACardWithNothingTypedIsHarmless(t *testing.T) {
-	state, _, _ := translateState(t)
+	state, _ := translateState(t)
 	state.credentialUI.Form.Keys = map[string]string{}
 	state.credentialUI.Form.InputCard = ""
 	state.credentialUI.Form.Input = ""
@@ -79,43 +79,8 @@ func TestClearingACardWithNothingTypedIsHarmless(t *testing.T) {
 	}
 }
 
-// The whole path a user takes to add a service of their own: type a name and an
-// address into the blank card, press 添加, and the field is clear afterwards
-// while the settings hold what they typed.
-//
-// It is the sequence that crashed when the field cleared itself in a loop. It
-// runs without a window — the write runs on a goroutine and hands its answer to
-// Window.Update, and a state with no window never receives it — so what is
-// checked here is the part that ran on the main thread before the goroutine,
-// which is where the crash was.
-func TestAddingAnOwnServiceDoesNotCrashTheField(t *testing.T) {
-	state, _, _ := translateState(t)
-
-	// What the user typed, in the two fields and the key box.
-	state.credentialUI.Form.NewName = "测试"
-	state.credentialUI.Form.NewURL = "127.0.0.1:11434/v1"
-	state.credentialUI.Form.Keys = map[string]string{credentialui.NewCustomServiceID: ""}
-	state.credentialUI.Form.InputCard = credentialui.NewCustomServiceID
-	state.credentialUI.Form.Input = ""
-
-	// The guard clause the add runs before it writes anything: a service with
-	// no address is not a service.
-	address := translate.CustomSettings{BaseURL: state.credentialUI.Form.NewURL}.Normalize().BaseURL
-	if address == "" {
-		t.Fatal("the address the user typed was cleaned away")
-	}
-	if address != "http://127.0.0.1:11434/v1" {
-		t.Errorf("address = %q, want the local service to be http", address)
-	}
-	// What the add does on the main thread once the write is done.
-	state.credentialUI.ClearCardInput(credentialui.NewCustomServiceID)
-	if state.credentialUI.Form.Input != "" {
-		t.Errorf("the field still holds %q", state.credentialUI.Form.Input)
-	}
-}
-
 func TestNewCustomServiceInputIsSeparateFromDeepSeekInput(t *testing.T) {
-	state, _, _ := translateState(t)
+	state, _ := translateState(t)
 	state.credentialUI.Form.InputCard = "deepseek"
 	state.credentialUI.Form.Input = "sk-deepseek-only"
 
@@ -130,7 +95,7 @@ func TestNewCustomServiceInputIsSeparateFromDeepSeekInput(t *testing.T) {
 }
 
 func TestDeletingSelectedDeepSeekUsesTheFreeProvider(t *testing.T) {
-	state, fixture, _ := translateState(t)
+	state, fixture := translateState(t)
 	if err := fixture.service.SetProvider(t.Context(), "deepseek"); err != nil {
 		t.Fatalf("SetProvider(deepseek) failed: %v", err)
 	}
@@ -150,10 +115,8 @@ func TestDeletingSelectedDeepSeekUsesTheFreeProvider(t *testing.T) {
 	t.Error("deleting the selected DeepSeek key did not select the free provider")
 }
 
-// The settings the card wrote are the ones the translator reads, so a saved
-// address is the address asked.
-func TestASavedAddressIsTheAddressAsked(t *testing.T) {
-	_, fixture, _ := translateState(t)
+func TestSavedCustomSettingsConfigureTheProvider(t *testing.T) {
+	_, fixture := translateState(t)
 
 	id := fixture.addService(translate.CustomSettings{
 		BaseURL:     "http://127.0.0.1:11434/v1",

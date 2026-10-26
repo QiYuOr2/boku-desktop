@@ -1,6 +1,7 @@
 package app
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -11,18 +12,14 @@ import (
 	"boku/internal/panel/deepseek"
 )
 
-// The quick window's own behaviour: what it needs to be built, what its
-// actions do, and the refresh it starts behind the frame. What the card draws
-// is in card_test.go, the layout in layout_test.go, the settings window in
-// settings_test.go, and the clipboard in clipboard_test.go.
 func TestNewRequiresItsDependencies(t *testing.T) {
-	secrets, err := credential.NewSecrets(newTestStore())
+	secrets, err := credential.NewSecrets(newTestStore(t))
 	if err != nil {
 		t.Fatalf("NewSecrets failed: %v", err)
 	}
 	panels, err := panel.NewPanels(
-		testRegistry{provider: newTestProvider(), adapter: testAdapter{provider: newTestProvider()}},
-		newTestStore(),
+		testPanelRegistry(t, newTestProvider(t)),
+		newTestStore(t),
 		panel.NewSection(),
 		nil,
 		[]panel.PanelDef{{Panel: deepseek.Panel(), Metrics: deepseek.Metrics()}},
@@ -46,7 +43,7 @@ func TestNewRequiresItsDependencies(t *testing.T) {
 // tray nor a parent, and a launch arriving while the application is still
 // starting must not take it down.
 func TestActivateWithoutATrayOpensNothing(t *testing.T) {
-	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state := testState(t, newTestProvider(t), withCredential(newTestStore(t)), "0.1.0")
 	state.Activate()
 	if state.panel != nil {
 		t.Error("Activate opened a quick window with no tray to anchor it to")
@@ -55,7 +52,7 @@ func TestActivateWithoutATrayOpensNothing(t *testing.T) {
 
 // Without a version the footer still has to say something.
 func TestVersionLineFallsBack(t *testing.T) {
-	state := testState(t, newTestProvider(), withCredential(newTestStore()), "")
+	state := testState(t, newTestProvider(t), withCredential(newTestStore(t)), "")
 	if got := state.versionLine(); got != "Boku dev" {
 		t.Errorf("versionLine = %q, want Boku dev", got)
 	}
@@ -68,14 +65,21 @@ func TestVersionLineFallsBack(t *testing.T) {
 // refreshAsync is what the interface calls; it must never block the frame,
 // and it must ask only when there is something to ask for.
 func TestRefreshAsyncDoesNotBlockAndOnlyAsksWhenNeeded(t *testing.T) {
-	provider := newTestProvider()
+	provider := newTestProvider(t)
 	gate := provider.hold()
-	state := testState(t, provider, withCredential(newTestStore()), "0.1.0")
+	release := sync.OnceFunc(func() { close(gate) })
+	t.Cleanup(release)
+	state := testState(t, provider, withCredential(newTestStore(t)), "0.1.0")
 
-	start := time.Now()
-	state.refreshAsync(false)
-	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
-		t.Fatalf("refreshAsync blocked for %s", elapsed)
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		state.refreshAsync(false)
+	}()
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("refreshAsync waited for the blocked HTTP request")
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -85,12 +89,15 @@ func TestRefreshAsyncDoesNotBlockAndOnlyAsksWhenNeeded(t *testing.T) {
 	if provider.count() != 1 {
 		t.Fatalf("the provider was called %d times, want 1", provider.count())
 	}
-	close(gate)
+	release()
 
 	// Wait for the fetch to settle, then a second call must not ask again.
 	deadline = time.Now().Add(2 * time.Second)
 	for state.panelService.View(deepseek.PanelID).Loading && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
+	}
+	if view := state.panelService.View(deepseek.PanelID); !view.HasSnapshot || view.Loading || view.Err != nil {
+		t.Fatalf("the refresh did not produce a snapshot: %+v", view)
 	}
 	state.refreshAsync(false)
 	time.Sleep(20 * time.Millisecond)

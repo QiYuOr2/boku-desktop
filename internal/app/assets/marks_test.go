@@ -1,6 +1,11 @@
 package assets
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+
+	"github.com/egoist/mygo/ui"
+)
 
 func TestMarksAreSVGDocuments(t *testing.T) {
 	marks := map[string][]byte{
@@ -8,14 +13,13 @@ func TestMarksAreSVGDocuments(t *testing.T) {
 		"TVBilibili": TVBilibili(),
 	}
 	for name, data := range marks {
-		if len(data) == 0 {
-			t.Fatalf("%s is empty", name)
-		}
-		if string(data[:4]) != "<svg" {
-			t.Errorf("%s does not start with <svg: %q", name, string(data[:20]))
-		}
+		t.Run(name, func(t *testing.T) {
+			if _, err := ui.ParseSVG(data); err != nil {
+				t.Fatalf("parse %s SVG: %v", name, err)
+			}
+		})
 	}
-	if string(TV()) == string(TVBilibili()) {
+	if bytes.Equal(TV(), TVBilibili()) {
 		t.Error("the animation block and the followed-UP block share one drawing")
 	}
 }
