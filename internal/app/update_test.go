@@ -109,7 +109,7 @@ func (n *testNotifier) Notify(id, title, body string, open func()) {
 // with an update service attached the way the assembly attaches one.
 func updateStateWith(t *testing.T, updates UpdateService, notifier desktopNotifier) *State {
 	t.Helper()
-	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state := testState(t, newTestProvider(t), withCredential(newTestStore(t)), "0.1.0")
 	state.notifier = notifier
 	state.AttachUpdates(updates)
 	if updates != nil {
@@ -229,7 +229,7 @@ func TestUpdateDialogState(t *testing.T) {
 // panics when asked to.
 func TestUpdateWithoutAService(t *testing.T) {
 	notifier := &testNotifier{supported: true}
-	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state := testState(t, newTestProvider(t), withCredential(newTestStore(t)), "0.1.0")
 	state.notifier = notifier
 
 	if status := state.updateState().Status; status != domain.UpdateUnsupported {
@@ -415,7 +415,7 @@ func TestUpdateNoticeClickRevealsTheAboutSection(t *testing.T) {
 // must not do anything else.
 func TestAttachUpdatesInstallsTheListener(t *testing.T) {
 	updates := &testUpdates{state: domain.UpdateState{Status: domain.UpdateIdle}}
-	state := testState(t, newTestProvider(), withCredential(newTestStore()), "0.1.0")
+	state := testState(t, newTestProvider(t), withCredential(newTestStore(t)), "0.1.0")
 	state.AttachUpdates(updates)
 	if updates.onChange == nil {
 		t.Fatal("the service was given no listener")
@@ -508,10 +508,10 @@ func waitForCalls(t *testing.T, updates *testUpdates, checks, installs int) erro
 // is drawn once and never redrawn. This is the path main.go takes.
 func TestAServicePassedToNewGetsItsListener(t *testing.T) {
 	updates := &testUpdates{state: domain.UpdateState{Status: domain.UpdateIdle}}
-	store := withCredential(newTestStore())
-	provider := newTestProvider()
+	store := withCredential(newTestStore(t))
+	provider := newTestProvider(t)
 	panels, err := panel.NewPanels(
-		testRegistry{provider: provider, adapter: testAdapter{provider: provider}},
+		testPanelRegistry(t, provider),
 		store,
 		panel.NewSection(),
 		nil,
@@ -527,7 +527,7 @@ func TestAServicePassedToNewGetsItsListener(t *testing.T) {
 	state, err := New(mygo.App, Deps{
 		Panels:    panels,
 		Secrets:   secrets,
-		Clipboard: testClipboard(t, nil, nil),
+		Clipboard: testClipboard(t),
 		Version:   "0.1.0",
 		Quit:      func() {},
 		Updates:   updates,
