@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -284,6 +285,37 @@ func TestRefreshRetriesAnEmptyFeed(t *testing.T) {
 	defer mu.Unlock()
 	if calls != 2 {
 		t.Fatalf("the feed was asked %d times, want 2", calls)
+	}
+}
+
+// An empty feed after a real post must not replace that post. Bilibili uses
+// the same empty list for throttling, and believing it wipes the last row.
+func TestRefreshKeepsThePreviousPostWhenTheFeedIsEmpty(t *testing.T) {
+	f := newFeedServer(t)
+	f.feeds = map[string]string{"1": feedJSON(itemJSON("1", "DYNAMIC_TYPE_AV", 1, "UP", "", 1700000000, "", "BV1", "新视频"))}
+	path := filepath.Join(t.TempDir(), "bilibili_followed.json")
+	section := NewSection()
+	section.Set(Settings{Enabled: true, UIDs: []int64{1}, DynamicCount: 1})
+	service, err := NewWithCache(httpc.New(httpc.Options{}), section, nil, NewCache(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return time.Unix(1800000000, 0) }
+	service.session.now = service.now
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	f.feeds["1"] = feedJSON("")
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	items, _, _, err := service.View()
+	if err != nil || len(items) != 1 || items[0].Summary != "新视频" || items[0].Live {
+		t.Fatalf("items = %#v, err = %v", items, err)
+	}
+	stored, _, ok := NewCache(path).Load([]int64{1})
+	if !ok || len(stored) != 1 || stored[0].Summary != "新视频" {
+		t.Fatalf("record = %#v, ok = %v", stored, ok)
 	}
 }
 

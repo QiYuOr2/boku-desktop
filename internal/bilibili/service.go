@@ -265,12 +265,21 @@ func (s *Service) Refresh(ctx context.Context) error {
 	s.loading = true
 	s.mu.Unlock()
 	defer func() { s.mu.Lock(); s.loading = false; s.mu.Unlock() }()
+	s.mu.RLock()
+	previous := append([]domain.FollowedUpdate(nil), s.items...)
+	s.mu.RUnlock()
 	items := make([]domain.FollowedUpdate, 0, len(v.UIDs))
 	for _, uid := range v.UIDs {
 		row, ok, err := s.fetchCreator(ctx, uid, v.DynamicCount)
 		if err != nil {
 			s.record(nil, err)
 			return err
+		}
+		if !ok {
+			// 空列表和「真的没有动态」长得一样，风控也会回这种结果。
+			// 已经展示过的帖子不能被这次空答案抹掉。直播行不保留：
+			// 这次直播接口已经明确说不在播。
+			row, ok = previousPost(previous, uid)
 		}
 		if ok {
 			items = append(items, row)
@@ -293,6 +302,15 @@ func (s *Service) Refresh(ctx context.Context) error {
 		slog.Warn("the followed-UP record could not be written", "event", "bilibili_cache_unwritable", "error", err)
 	}
 	return nil
+}
+
+func previousPost(items []domain.FollowedUpdate, uid int64) (domain.FollowedUpdate, bool) {
+	for _, item := range items {
+		if item.CreatorID == uid && !item.Live {
+			return item, true
+		}
+	}
+	return domain.FollowedUpdate{}, false
 }
 
 // fetchCreator answers the one row that stands for a creator.
