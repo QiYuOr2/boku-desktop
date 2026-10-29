@@ -132,6 +132,9 @@ var tvBilibiliSVG []byte
 //go:embed chevron-right.svg
 var chevronRightSVG []byte
 
+//go:embed steam.svg
+var steamSVG []byte
+
 // DeepSeek returns the DeepSeek mark as the SVG document it is. The caller
 // parses it once and keeps the result: parsing belongs to the framework,
 // and this package depends on the standard library alone.
@@ -174,6 +177,8 @@ func Codex() []byte { return codexSVG }
 
 // TV returns the small television mark used for scheduled animation updates.
 func TV() []byte { return tvSVG }
+
+func Steam() []byte { return steamSVG }
 
 // TVBilibili returns the small television mark that heads the followed-UP
 // block: rounded set, two antennae, two eyes — the shape the service's own

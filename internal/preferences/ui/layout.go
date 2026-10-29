@@ -62,17 +62,8 @@ func (s *LayoutState) quickLayoutCard(c *ui.Context, entry quickLayoutEntry) {
 	}
 	row.Children(func() {
 		ui.Icon(c, s.gripMark).Size(float32(16), float32(16)).Shrink(0).TextColor(presentation.ColorTextFaint)
-		tile := ui.Box(c).Size(float32(28), float32(28)).Shrink(0).Radius(float32(6)).Background(entry.mark.Tile).Center()
-		if entry.id == "codex" {
-			tile.Border(1, presentation.ColorBorder)
-		}
-		tile.Children(func() {
-			scale := entry.mark.Scale
-			if scale <= 0 {
-				scale = 1
-			}
-			size := min(float32(14)*scale, float32(22))
-			ui.Icon(c, entry.mark.SVG).Size(size, size).TextColor(entry.mark.Ink)
+		ui.Box(c).Size(float32(28), float32(28)).Shrink(0).Radius(float32(6)).Background(entry.mark.Tile).Center().Children(func() {
+			ui.Icon(c, entry.mark.SVG).Size(float32(14)*4/3, float32(14)*4/3).TextColor(entry.mark.Ink)
 		})
 		ui.Column(c).Grow(1).Gap(float32(1)).Children(func() {
 			ink := presentation.ColorTextSoft
@@ -132,14 +123,26 @@ type LayoutState struct {
 	layoutStatus                              string
 	layoutMark, eyeMark, eyeOffMark, gripMark *ui.SVG
 	marks                                     map[string]presentation.PanelMark
+	offer                                     func(string) bool
 }
 
 func NewLayout(layout *preferences.QuickWindowLayout, store preferences.LayoutStore, host presentation.Host, layoutMark, eye, eyeOff, grip *ui.SVG, marks map[string]presentation.PanelMark) *LayoutState {
 	return &LayoutState{layout: layout, store: store, host: host, layoutMark: layoutMark, eyeMark: eye, eyeOffMark: eyeOff, gripMark: grip, marks: marks}
 }
+
+// SetOffer drops a block this system cannot show. Nil offers every block.
+func (s *LayoutState) SetOffer(offer func(string) bool) {
+	if s != nil {
+		s.offer = offer
+	}
+}
+
 func (s *LayoutState) entries() []quickLayoutEntry {
-	entries := make([]quickLayoutEntry, 0, 4)
+	entries := make([]quickLayoutEntry, 0, 5)
 	for _, id := range s.layout.Order() {
+		if s.offer != nil && !s.offer(id) {
+			continue
+		}
 		var title, subtitle string
 		mark := s.marks[id]
 		switch id {
@@ -154,6 +157,9 @@ func (s *LayoutState) entries() []quickLayoutEntry {
 		case "bilibili":
 			title, subtitle = "B站 UP 监听", "关注主播动态 / 开播"
 			mark.Tile, mark.Ink = presentation.BilibiliAccent.Tile, presentation.BilibiliAccent.TileInk
+		case "playtime":
+			title, subtitle = "游戏时长", "本机 Steam 会话"
+			mark.Tile, mark.Ink = presentation.SteamTile, presentation.SteamInk
 		}
 		entries = append(entries, quickLayoutEntry{id: id, title: title, subtitle: subtitle, mark: mark})
 	}

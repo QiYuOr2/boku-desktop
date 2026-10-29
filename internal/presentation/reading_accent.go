@@ -15,4 +15,6 @@ var (
 	BilibiliAccent = LightPalette.Bilibili
 	CodexTile      = LightPalette.CodexTile
 	CodexInk       = LightPalette.CodexInk
+	SteamTile      = LightPalette.SteamTile
+	SteamInk       = LightPalette.SteamInk
 )

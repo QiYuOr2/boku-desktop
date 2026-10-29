@@ -36,6 +36,8 @@ import (
 	"boku/internal/panel"
 	panelui "boku/internal/panel/ui"
 	"boku/internal/platform/autostart"
+	"boku/internal/playtime"
+	playtimeui "boku/internal/playtime/ui"
 	"boku/internal/preferences"
 	preferencesui "boku/internal/preferences/ui"
 	"boku/internal/presentation"
@@ -141,6 +143,9 @@ type Deps struct {
 	// main injects internal/platform/autostart's platform implementation; a
 	// test injects its own.
 	Autostart autostart.Manager
+	// Playtime is the tray readout of recorded sessions. Nil draws nothing,
+	// which is every test that does not care about it.
+	Playtime *playtime.Recorder
 	// Updates is the update check. A State without one draws no update row,
 	// starts no check and adds nothing to the tray menu: a build without an
 	// updater is every test and every assembly that wired none.
@@ -193,6 +198,8 @@ type State struct {
 	secretService     *credential.Secrets
 	credentialUI      *credentialui.State
 	clipboard         *clipboard.Clipboard
+	playtime          *playtime.Recorder
+	playtimePanel     *playtimeui.Panel
 	clipboardUI       *clipboardui.State
 	translate         *translate.Translate
 	translationUI     *translateui.State
@@ -390,6 +397,10 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the drag mark: %w", err)
 	}
+	steamMark, err := ui.ParseSVG(assets.Steam())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the playtime mark: %w", err)
+	}
 	quickLayout := deps.QuickWindowLayout
 	if quickLayout == nil {
 		quickLayout = preferences.NewQuickWindowLayout()
@@ -403,6 +414,8 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		bilibiliUI:        bilibiliui.New(deps.Bilibili),
 		secretService:     deps.Secrets,
 		clipboard:         deps.Clipboard,
+		playtime:          deps.Playtime,
+		playtimePanel:     &playtimeui.Panel{},
 		translate:         deps.Translate,
 		ownServices:       deps.RegisterOwnServices,
 		version:           deps.Version,
@@ -460,6 +473,13 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		"codex":    state.panelUI.ProviderMark("codex"),
 		"anime":    {SVG: tvMark},
 		"bilibili": {SVG: bilibiliMark},
+		"playtime": {SVG: steamMark},
+	})
+	state.layoutUI.SetOffer(func(id string) bool {
+		if id != "playtime" {
+			return true
+		}
+		return state.playtime != nil && state.playtime.Available()
 	})
 	state.clipboardUI = clipboardui.New(deps.Clipboard, state.featureHost(), state.openHistory)
 	state.bilibiliUI.AttachHost(state.featureHost())
@@ -754,6 +774,7 @@ func (s *State) Open() {
 	// opening does not flash placeholder marks while the network refresh is
 	// still in flight. This is presentation-thread image decoding, not I/O.
 	s.cacheAnimeCovers()
+	s.CachePlaytimeCovers()
 	// The followed-UP block may already hold rows from the last refresh, and
 	// its avatars may already have been fetched. Turn them into bitmaps and
 	// size the flyout for them before the first frame, so an opening does not

@@ -27,11 +27,12 @@ func TestServicesLoadAndPersistQuickWindowLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	layout := preferences.NewQuickWindowLayout()
-	_, _, _, _, _, _, _, appearance, prefs, err := services(userData, "test", layout)
+	_, _, _, _, _, _, _, appearance, prefs, recorder, err := services(userData, "test", layout)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if layout.Order()[0] != "anime" || layout.Visible("bilibili") {
+	t.Cleanup(recorder.Stop)
+	if layout.Order()[0] != "playtime" || layout.Order()[1] != "anime" || layout.Visible("bilibili") {
 		t.Fatalf("loaded layout=%v", layout.Order())
 	}
 	layout.MoveToEnd("anime")
@@ -43,10 +44,12 @@ func TestServicesLoadAndPersistQuickWindowLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	reloaded := preferences.NewQuickWindowLayout()
-	if _, _, _, _, _, _, _, _, _, err := services(userData, "test", reloaded); err != nil {
+	_, _, _, _, _, _, _, _, _, again, err := services(userData, "test", reloaded)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if reloaded.Order()[3] != "anime" || reloaded.Visible("codex") || reloaded.Visible("bilibili") {
+	t.Cleanup(again.Stop)
+	if reloaded.Order()[4] != "anime" || reloaded.Visible("codex") || reloaded.Visible("bilibili") {
 		t.Fatalf("saved layout=%v", reloaded.Order())
 	}
 	contents, err := os.ReadFile(path)
@@ -63,10 +66,11 @@ func TestServicesLoadAndPersistQuickWindowLayout(t *testing.T) {
 // be checked without a window.
 func TestServicesAssembleThePanels(t *testing.T) {
 	userData := t.TempDir()
-	panels, anime, bilibili, secrets, clip, translation, _, appearance, prefs, err := services(userData, "0.1.0")
+	panels, anime, bilibili, secrets, clip, translation, _, appearance, prefs, recorder, err := services(userData, "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}
+	t.Cleanup(recorder.Stop)
 	if panels == nil || anime == nil || bilibili == nil || secrets == nil || clip == nil || translation == nil {
 		t.Fatal("services returned no services")
 	}
@@ -292,10 +296,11 @@ func TestRecordPanicsWritesItDownAndRaisesItAgain(t *testing.T) {
 // a translator without a settings store, or one whose settings it cannot
 // read, is a startup mistake worth catching here.
 func TestServicesAssembleTheTranslators(t *testing.T) {
-	_, _, _, _, _, translation, own, _, _, err := services(t.TempDir(), "0.1.0")
+	_, _, _, _, _, translation, own, _, _, recorder, err := services(t.TempDir(), "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}
+	t.Cleanup(recorder.Stop)
 	views, err := translation.Providers(context.Background())
 	if err != nil {
 		t.Fatalf("Providers failed: %v", err)

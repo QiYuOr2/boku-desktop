@@ -23,6 +23,8 @@ func (s *State) quickLayoutBlocks(c *ui.Context) {
 			s.animeUpdates(c)
 		case "bilibili":
 			s.bilibiliUpdates(c)
+		case "playtime":
+			s.playtimePanel.Draw(c, s.playtime)
 		}
 	}
 }
@@ -40,6 +42,8 @@ func (s *State) quickBlockAvailable(id string) bool {
 		return len(items) > 0 || loading
 	case "bilibili":
 		return s.bilibiliService != nil && s.bilibiliService.Enabled() && len(s.bilibiliService.UIDs()) > 0
+	case "playtime":
+		return s.playtime != nil && s.playtime.Available() && s.playtimePanel != nil
 	default:
 		return false
 	}
