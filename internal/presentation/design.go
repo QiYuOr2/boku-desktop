@@ -42,6 +42,7 @@ import (
 type Palette struct {
 	Anime, Bilibili     ReadingAccent
 	CodexTile, CodexInk ui.Color
+	SteamTile, SteamInk ui.Color
 	// Faces.
 	surface, sidebar, field, muted, hover, active, rowAlt ui.Color
 	border, Hairline                                      ui.Color
@@ -82,12 +83,16 @@ type Palette struct {
 	PanelInk, PanelNumber, PanelFaint, PanelBody ui.Color
 	PanelLine, PanelField, PanelBorder           ui.Color
 	PanelHover, PanelPress                       ui.Color
+	// The calendar's four steps above an empty day, from a short session
+	// to two hours or more.
+	playHeat1, playHeat2, playHeat3, playHeat4 ui.Color
 }
 
 // lightPalette is the design as its own classes write it: white pages, slate
 // borders, stone inks and the brand green on top.
 var LightPalette = Palette{
 	CodexTile: ui.Hex("#111111"), CodexInk: ui.Hex("#FFFFFF"),
+	SteamTile: ui.Hex("#171A21"), SteamInk: ui.Hex("#FFFFFF"),
 	Anime: ReadingAccent{
 		Ink: ui.Hex("#B74F5B"), Tint: ui.Hex("#FFF5F6"), Border: ui.Hex("#F9DDE0"),
 		Hover: ui.Hex("#FFECEF"), HoverBorder: ui.Hex("#F4B8BE"),
@@ -178,6 +183,10 @@ var LightPalette = Palette{
 	PanelBorder: ui.Hex("#E7E5E4"),
 	PanelHover:  ui.Hex("#F5F5F4"),
 	PanelPress:  ui.Hex("#E7E5E4"),
+	playHeat1:   ui.RGBA(59, 105, 61, 0.22),
+	playHeat2:   ui.RGBA(59, 105, 61, 0.45),
+	playHeat3:   ui.Hex("#5C8A5E"),
+	playHeat4:   ui.Hex("#3B693D"),
 }
 
 // darkPalette is the same design at night. The page is the darkest surface
@@ -192,6 +201,7 @@ var LightPalette = Palette{
 // the color that says what it is without lighting up the list.
 var DarkPalette = Palette{
 	CodexTile: ui.Hex("#E7E5E4"), CodexInk: ui.Hex("#18181B"),
+	SteamTile: ui.Hex("#171A21"), SteamInk: ui.Hex("#66C0F4"),
 	Anime: ReadingAccent{
 		Ink: ui.Hex("#F0A9B2"), Tint: ui.Hex("#2B2228"), Border: ui.Hex("#49313B"),
 		Hover: ui.Hex("#392932"), HoverBorder: ui.Hex("#80505E"),
@@ -282,6 +292,10 @@ var DarkPalette = Palette{
 	PanelBorder: ui.Hex("#3A3735"),
 	PanelHover:  ui.Hex("#292524"),
 	PanelPress:  ui.Hex("#3A3735"),
+	playHeat1:   ui.RGBA(111, 167, 118, 0.28),
+	playHeat2:   ui.RGBA(111, 167, 118, 0.50),
+	playHeat3:   ui.Hex("#5C8F63"),
+	playHeat4:   ui.Hex("#84BA8A"),
 }
 
 // The colors every view asks for, as the current appearance spells them.
@@ -420,7 +434,10 @@ var (
 	PanelBorder = LightPalette.PanelBorder // stone-200, its hairline
 	PanelHover  = LightPalette.PanelHover  // stone-100, what a quiet action takes
 	PanelPress  = LightPalette.PanelPress  // stone-200, and what it takes pressed
-
+	PlayHeat1   = LightPalette.playHeat1
+	PlayHeat2   = LightPalette.playHeat2
+	PlayHeat3   = LightPalette.playHeat3
+	PlayHeat4   = LightPalette.playHeat4
 )
 
 // applyDesign installs one appearance for the pass that is about to build a
@@ -433,6 +450,7 @@ func ApplyDesign(dark bool) {
 	ColorSurface = p.surface
 	AnimeAccent, BilibiliAccent = p.Anime, p.Bilibili
 	CodexTile, CodexInk = p.CodexTile, p.CodexInk
+	SteamTile, SteamInk = p.SteamTile, p.SteamInk
 	ColorSidebar = p.sidebar
 	ColorField = p.field
 	ColorMuted = p.muted
@@ -498,6 +516,27 @@ func ApplyDesign(dark bool) {
 	PanelBorder = p.PanelBorder
 	PanelHover = p.PanelHover
 	PanelPress = p.PanelPress
+	PlayHeat1 = p.playHeat1
+	PlayHeat2 = p.playHeat2
+	PlayHeat3 = p.playHeat3
+	PlayHeat4 = p.playHeat4
+}
+
+// HeatColor is one step of the playtime calendar. Zero is an empty day.
+func HeatColor(level int) ui.Color {
+	switch level {
+	case 1:
+		return PlayHeat1
+	case 2:
+		return PlayHeat2
+	case 3:
+		return PlayHeat3
+	default:
+		if level >= 4 {
+			return PlayHeat4
+		}
+		return PanelField
+	}
 }
 
 // The application's metrics, in points, taken from the design: every window

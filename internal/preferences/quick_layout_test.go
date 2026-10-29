@@ -66,7 +66,7 @@ func TestQuickWindowLayoutDefaultsAndMoves(t *testing.T) {
 		t.Fatalf("default order = %v, want %v", got, want)
 	}
 	layout.MoveBefore(quickBlockBilibili, quickBlockCodex)
-	want := []string{quickBlockDeepSeek, quickBlockBilibili, quickBlockCodex, quickBlockAnime}
+	want := []string{quickBlockPlaytime, quickBlockDeepSeek, quickBlockBilibili, quickBlockCodex, quickBlockAnime}
 	if got := layout.Order(); !slices.Equal(got, want) {
 		t.Errorf("moved order = %v, want %v", got, want)
 	}
@@ -75,7 +75,7 @@ func TestQuickWindowLayoutDefaultsAndMoves(t *testing.T) {
 func TestQuickWindowLayoutMoveToEnd(t *testing.T) {
 	layout := NewQuickWindowLayout()
 	layout.MoveToEnd(quickBlockCodex)
-	want := []string{quickBlockDeepSeek, quickBlockAnime, quickBlockBilibili, quickBlockCodex}
+	want := []string{quickBlockPlaytime, quickBlockDeepSeek, quickBlockAnime, quickBlockBilibili, quickBlockCodex}
 	if got := layout.Order(); !slices.Equal(got, want) {
 		t.Errorf("moved order = %v, want %v", got, want)
 	}
@@ -92,7 +92,7 @@ func TestQuickWindowLayoutNormalizesStoredValues(t *testing.T) {
 	if err := layout.Decode(map[string]json.RawMessage{quickLayoutKey: raw}); err != nil {
 		t.Fatalf("Decode failed: %v", err)
 	}
-	want := []string{quickBlockCodex, quickBlockDeepSeek, quickBlockAnime, quickBlockBilibili}
+	want := []string{quickBlockPlaytime, quickBlockCodex, quickBlockDeepSeek, quickBlockAnime, quickBlockBilibili}
 	if got := layout.Order(); !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v", got, want)
 	}
@@ -107,7 +107,7 @@ func TestQuickWindowLayoutNormalizesStoredValues(t *testing.T) {
 func TestQuickWindowLayoutEncodingRoundTripsVisibility(t *testing.T) {
 	layout := NewQuickWindowLayout()
 	layout.SetVisible(quickBlockBilibili, false)
-	layout.MoveBefore(quickBlockAnime, quickBlockDeepSeek)
+	layout.MoveBefore(quickBlockAnime, quickBlockPlaytime)
 	values, err := layout.Encode()
 	if err != nil {
 		t.Fatalf("Encode failed: %v", err)
@@ -125,5 +125,33 @@ func TestQuickWindowLayoutEncodingRoundTripsVisibility(t *testing.T) {
 	}
 	if got, want := reloaded.Order()[0], quickBlockAnime; got != want {
 		t.Errorf("first reordered block = %q, want %q", got, want)
+	}
+}
+
+func TestOlderLayoutKeepsPlaytimeAtTheFrontUntilItIsPlaced(t *testing.T) {
+	layout := NewQuickWindowLayout()
+	raw := json.RawMessage(`{"order":["bilibili","deepseek","codex","anime"],"hidden":[]}`)
+	if err := layout.Decode(map[string]json.RawMessage{quickLayoutKey: raw}); err != nil {
+		t.Fatal(err)
+	}
+	if got := layout.Order()[0]; got != quickBlockPlaytime {
+		t.Fatalf("first = %q", got)
+	}
+	layout.MoveToEnd(quickBlockPlaytime)
+	values, err := layout.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(values[quickLayoutKey])
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded := NewQuickWindowLayout()
+	if err := reloaded.Decode(map[string]json.RawMessage{quickLayoutKey: encoded}); err != nil {
+		t.Fatal(err)
+	}
+	order := reloaded.Order()
+	if order[len(order)-1] != quickBlockPlaytime {
+		t.Fatalf("placed order = %v", order)
 	}
 }

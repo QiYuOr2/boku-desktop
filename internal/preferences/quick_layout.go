@@ -8,6 +8,7 @@ import (
 )
 
 const (
+	quickBlockPlaytime     = "playtime"
 	quickBlockDeepSeek     = "deepseek"
 	quickBlockCodex        = "codex"
 	quickBlockBilibili     = "bilibili"
@@ -16,7 +17,7 @@ const (
 	quickLayoutSectionName = "quick-window-layout"
 )
 
-var defaultQuickBlockOrder = []string{quickBlockDeepSeek, quickBlockCodex, quickBlockAnime, quickBlockBilibili}
+var defaultQuickBlockOrder = []string{quickBlockPlaytime, quickBlockDeepSeek, quickBlockCodex, quickBlockAnime, quickBlockBilibili}
 
 type QuickWindowLayout struct {
 	order  []string
@@ -104,8 +105,12 @@ func (l *QuickWindowLayout) Encode() (map[string]any, error) {
 func (l *QuickWindowLayout) normalizedOrder() []string { return normalizeQuickBlockOrder(l.order) }
 func normalizeQuickBlockOrder(order []string) []string {
 	result, seen := make([]string, 0, len(defaultQuickBlockOrder)), make(map[string]bool, len(defaultQuickBlockOrder))
+	mentionedPlaytime := false
 	for _, id := range order {
 		id = strings.TrimSpace(id)
+		if id == quickBlockPlaytime {
+			mentionedPlaytime = true
+		}
 		if knownQuickBlock(id) && !seen[id] {
 			seen[id] = true
 			result = append(result, id)
@@ -116,7 +121,22 @@ func normalizeQuickBlockOrder(order []string) []string {
 			result = append(result, id)
 		}
 	}
+	// Playtime used to sit above the ordered blocks. An older file that
+	// never named it keeps that place; a file that already placed it does not.
+	if !mentionedPlaytime {
+		result = moveQuickBlockFront(result, quickBlockPlaytime)
+	}
 	return result
+}
+
+func moveQuickBlockFront(order []string, id string) []string {
+	index := quickBlockIndex(order, id)
+	if index <= 0 {
+		return order
+	}
+	item := order[index]
+	order = append(order[:index], order[index+1:]...)
+	return append([]string{item}, order...)
 }
 func knownQuickBlock(id string) bool {
 	for _, known := range defaultQuickBlockOrder {
