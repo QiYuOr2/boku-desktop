@@ -9,13 +9,11 @@ package deepseek
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	contract "boku/internal/contract/deepseek"
 	"boku/internal/domain"
-	"boku/internal/kit"
 	"boku/internal/platform/httpc"
 	"boku/internal/translate/openai"
 )
@@ -100,7 +98,7 @@ func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credential
 		APIKey:  key,
 		Target:  target,
 		Image:   image,
-		System:  `You translate text visible in an image. Return exactly one JSON object and no Markdown. For a translation return {"status":"success","sourceLang":"ja","sourceText":"original visible text","targetLang":"zh","translatedText":"translation","failure":null}. Use only zh,en,ja,ko,ru,ar,th for language codes and preserve line breaks. If the image has no readable text, is unsupported, or must be refused, return {"status":"failure","sourceLang":"","sourceText":"","targetLang":"","translatedText":"","failure":{"code":"no_readable_text"}}; code must be exactly one of no_readable_text, unsupported_image, refused.`,
+		System:  openai.ImageSystemPrompt,
 	})
 	if err != nil {
 		return domain.TranslationResult{}, err
@@ -109,21 +107,7 @@ func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credential
 	if err != nil {
 		return domain.TranslationResult{}, err
 	}
-	sourceText := strings.TrimSpace(answer.SourceText)
-	result := domain.TranslationResult{
-		SourceText:     sourceText,
-		TranslatedText: strings.TrimSpace(answer.TranslatedText),
-		SourceLang:     kit.ImageSourceLanguage(answer.SourceLang, sourceText),
-		// The caller chose the target. Do not let an image model silently
-		// relabel a Chinese request as a different language.
-		TargetLang: target,
-		ProviderID: ProviderID,
-		CreatedAt:  t.now(),
-	}
-	if err := result.Validate(); err != nil {
-		return domain.TranslationResult{}, err
-	}
-	return result, nil
+	return openai.ImageResult(answer, target, ProviderID, t.now())
 }
 
 // Translate asks for the translation.
@@ -148,11 +132,7 @@ func (t *Translator) translate(ctx context.Context, key string, req domain.Trans
 	// is reported rather than made silently: half a translated paragraph
 	// that says nothing about its missing half is worse than a short one
 	// that says so.
-	text, cut := openai.Truncate(req.Text, openai.DefaultMaxChars)
-	source := req.SourceLang
-	if source == domain.LangUnknown {
-		source = domain.Language(kit.DetectLanguage(text))
-	}
+	text, source, cut := openai.Prepare(req)
 	options := openai.AnnotationOptions{Furigana: req.Annotation.Furigana, LoanwordGloss: req.Annotation.LoanwordGloss}
 	content, err := openai.Translate(ctx, openai.Options{
 		Client:  t.client,
@@ -167,41 +147,7 @@ func (t *Translator) translate(ctx context.Context, key string, req domain.Trans
 	if err != nil {
 		return domain.TranslationResult{}, err
 	}
-	result := domain.TranslationResult{
-		SourceText: text,
-		SourceLang: source,
-		TargetLang: req.TargetLang,
-		ProviderID: ProviderID,
-		CreatedAt:  t.now(),
-	}
-	// What came back is read as an annotation only when one was asked for:
-	// a model that wraps a plain translation in a JSON object should not
-	// turn a paragraph into a column of one word.
-	if options.Wants() {
-		annotation := openai.ParseAnnotation(content)
-		if annotation.Segmented {
-			// The pieces are the annotation and nothing else. The source the
-			// window draws stays the text that was sent, with the line breaks
-			// the user copied: joining the pieces would put their sentence on
-			// one line, which is the format they did not ask to lose.
-			result.Segments = annotation.Segments
-		}
-		result.TranslatedText = annotation.TranslatedText
-		// What could not be read is said out loud: an answer that came back
-		// without the pieces that were asked for is drawn as a plain
-		// translation, and the window should say why it has no readings
-		// rather than let it look like the answer simply had none.
-		result.Note = openai.AnnotationNote(annotation, options)
-	} else {
-		result.TranslatedText = content
-	}
-	if cut {
-		result.Note = "原文过长，只翻译了前 " + strconv.Itoa(openai.DefaultMaxChars) + " 个字。"
-	}
-	if err := result.Validate(); err != nil {
-		return domain.TranslationResult{}, err
-	}
-	return result, nil
+	return openai.TextResult(content, text, source, req.TargetLang, ProviderID, t.now(), options, cut)
 }
 
 // ensure the interface is satisfied where it is defined, not at the call

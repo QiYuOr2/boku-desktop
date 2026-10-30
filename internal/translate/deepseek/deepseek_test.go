@@ -207,6 +207,29 @@ func TestTranslateImageUsesTheMultimodalModel(t *testing.T) {
 	}
 }
 
+// Thinking-mode streams set content to null until the answer starts. That
+// is the shape DeepSeek actually sends for a screenshot, and it has to become
+// the translation rather than an unreadable response.
+func TestTranslateImageAcceptsThinkingChunks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":null,\"reasoning_content\":\"\"}}]}\n\n"+
+			"data: {\"choices\":[{\"delta\":{\"content\":null,\"reasoning_content\":\"read the image\"}}]}\n\n"+
+			"data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"status\\\":\\\"success\\\",\\\"sourceLang\\\":\\\"en\\\",\\\"sourceText\\\":\\\"Hello\\\",\\\"targetLang\\\":\\\"zh\\\",\\\"translatedText\\\":\\\"你好\\\",\\\"failure\\\":null}\",\"reasoning_content\":null}}]}\n\n"+
+			"data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	result, err := NewWithBaseURL(httpc.New(httpc.Options{}), server.URL).TranslateImage(
+		context.Background(), credentials(), []byte{0x89, 'P', 'N', 'G'}, domain.LangChinese)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SourceText != "Hello" || result.TranslatedText != "你好" {
+		t.Errorf("result = %+v", result)
+	}
+}
+
 // A model that answers nothing is a failure at the boundary, never an empty
 // window.
 func TestTranslateRefusesAnEmptyAnswer(t *testing.T) {

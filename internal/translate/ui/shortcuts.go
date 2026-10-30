@@ -278,16 +278,16 @@ func (s *State) captureShortcut(ev ui.InputEvent) bool {
 		s.Refresh()
 		return true
 	}
-	if isModifierKey(ev.Key) {
+	if presentation.ModifierKey(ev.Key) {
 		if !ev.Repeat {
 			s.shortcutStateFor(kind).note = "修饰键要和一个字母或功能键一起按。"
 			s.Refresh()
 		}
 		return true
 	}
-	accelerator, ok := acceleratorOf(ev)
+	accelerator, ok := presentation.AcceleratorOf(ev)
 	if !ok {
-		s.shortcutStateFor(kind).note = modifierHint()
+		s.shortcutStateFor(kind).note = presentation.ModifierHint()
 		s.Refresh()
 		return true
 	}
@@ -318,7 +318,7 @@ func (s *State) applyScreenshotShortcut(accelerator string) {
 	}
 	if err := s.bindShortcutSet(text, accelerator); err != nil {
 		restored := s.bindShortcutSet(text, previous)
-		s.screenshotShortcut = shortcutState{accelerator: previous, registered: restored == nil, err: restored, note: "用不了 " + friendlyAccelerator(accelerator) + "：" + presentation.FriendlyError(err) + "，仍然是 " + friendlyAccelerator(previous) + "。"}
+		s.screenshotShortcut = shortcutState{accelerator: previous, registered: restored == nil, err: restored, note: "用不了 " + presentation.FriendlyAccelerator(accelerator) + "：" + presentation.FriendlyError(err) + "，仍然是 " + presentation.FriendlyAccelerator(previous) + "。"}
 		s.Refresh()
 		return
 	}
@@ -350,8 +350,8 @@ func (s *State) applyShortcut(accelerator string) {
 			accelerator: previous,
 			registered:  restored == nil,
 			err:         restored,
-			note: "用不了 " + friendlyAccelerator(accelerator) + "：" + presentation.FriendlyError(err) +
-				"，仍然是 " + friendlyAccelerator(previous) + "。",
+			note: "用不了 " + presentation.FriendlyAccelerator(accelerator) + "：" + presentation.FriendlyError(err) +
+				"，仍然是 " + presentation.FriendlyAccelerator(previous) + "。",
 		}
 		s.Refresh()
 		return
@@ -392,7 +392,7 @@ func (s *State) shortcutLine() (string, presentation.NoteKind) {
 	case s.shortcut.registered:
 		return "", presentation.NotePlain
 	case s.shortcut.err != nil:
-		return "快捷键 " + friendlyAccelerator(accelerator) + " 无法注册：" +
+		return "快捷键 " + presentation.FriendlyAccelerator(accelerator) + " 无法注册：" +
 			presentation.FriendlyError(s.shortcut.err) + "。请换一个组合键。", presentation.NoteWarning
 	default:
 		return "快捷键尚未注册。", presentation.NoteWarning
@@ -405,209 +405,6 @@ func (s *State) shortcutNote() (string, presentation.NoteKind) {
 		return "", presentation.NotePlain
 	}
 	return s.shortcut.note, presentation.NoteWarning
-}
-
-// acceleratorOf turns a key press into the accelerator the platform's own API
-// takes, and reports whether it is a combination at all.
-//
-// The modifiers are written in the order people say them, and the key in the
-// spelling the framework's parser reads.
-func acceleratorOf(ev ui.InputEvent) (string, bool) {
-	name, ok := keyNames[ev.Key]
-	if !ok {
-		// A key this build has no name for is not something to bind: a
-		// binding that cannot be written down cannot be stored either.
-		return "", false
-	}
-	mods := ev.Mods
-	if mods&(ui.Ctrl|ui.Alt|ui.Super) == 0 {
-		// Shift alone is not enough: Shift+A is how a capital is typed, and
-		// taking it would take the keyboard from every other application.
-		return "", false
-	}
-	parts := make([]string, 0, 4)
-	if mods&ui.Ctrl != 0 {
-		parts = append(parts, "Ctrl")
-	}
-	if mods&ui.Shift != 0 {
-		parts = append(parts, "Shift")
-	}
-	if mods&ui.Alt != 0 {
-		parts = append(parts, "Alt")
-	}
-	if mods&ui.Super != 0 {
-		parts = append(parts, "Super")
-	}
-	return strings.Join(append(parts, name), "+"), true
-}
-
-// isModifierKey reports whether a key press is a modifier on its own.
-//
-// The framework reports a modifier as an unknown key with its bit set in the
-// modifiers rather than as a key of its own: that is what makes a combination
-// readable in one event, and what makes a lone modifier recognisable.
-func isModifierKey(key ui.Key) bool {
-	return key == ui.KeyUnknown
-}
-
-// keyNames is what each key is called in an accelerator. It is written down
-// rather than derived, because the framework's own table is internal, and a
-// binding spelled the way its parser does not read is a binding that fails in
-// front of the user.
-//
-// A key that is not here cannot be bound, which is deliberate: the letters,
-// the digits, the function keys and the named keys are here, and a key nobody
-// binds is one whose name cannot be got wrong.
-var keyNames = map[ui.Key]string{
-	ui.KeyEnter:        "Enter",
-	ui.KeyBackspace:    "Backspace",
-	ui.KeyTab:          "Tab",
-	ui.KeySpace:        "Space",
-	ui.KeyDelete:       "Delete",
-	ui.KeyInsert:       "Insert",
-	ui.KeyHome:         "Home",
-	ui.KeyEnd:          "End",
-	ui.KeyPageUp:       "PageUp",
-	ui.KeyPageDown:     "PageDown",
-	ui.KeyUp:           "Up",
-	ui.KeyDown:         "Down",
-	ui.KeyLeft:         "Left",
-	ui.KeyRight:        "Right",
-	ui.KeyMinus:        "-",
-	ui.KeyEqual:        "=",
-	ui.KeyComma:        ",",
-	ui.KeyPeriod:       ".",
-	ui.KeySlash:        "/",
-	ui.KeySemicolon:    ";",
-	ui.KeyQuote:        "'",
-	ui.KeyBracketLeft:  "[",
-	ui.KeyBracketRight: "]",
-	ui.KeyBackslash:    "\\",
-	ui.KeyBackquote:    "`",
-	ui.KeyF1:           "F1",
-	ui.KeyF2:           "F2",
-	ui.KeyF3:           "F3",
-	ui.KeyF4:           "F4",
-	ui.KeyF5:           "F5",
-	ui.KeyF6:           "F6",
-	ui.KeyF7:           "F7",
-	ui.KeyF8:           "F8",
-	ui.KeyF9:           "F9",
-	ui.KeyF10:          "F10",
-	ui.KeyF11:          "F11",
-	ui.KeyF12:          "F12",
-	ui.Key0:            "0",
-	ui.Key1:            "1",
-	ui.Key2:            "2",
-	ui.Key3:            "3",
-	ui.Key4:            "4",
-	ui.Key5:            "5",
-	ui.Key6:            "6",
-	ui.Key7:            "7",
-	ui.Key8:            "8",
-	ui.Key9:            "9",
-	ui.KeyA:            "A",
-	ui.KeyB:            "B",
-	ui.KeyC:            "C",
-	ui.KeyD:            "D",
-	ui.KeyE:            "E",
-	ui.KeyF:            "F",
-	ui.KeyG:            "G",
-	ui.KeyH:            "H",
-	ui.KeyI:            "I",
-	ui.KeyJ:            "J",
-	ui.KeyK:            "K",
-	ui.KeyL:            "L",
-	ui.KeyM:            "M",
-	ui.KeyN:            "N",
-	ui.KeyO:            "O",
-	ui.KeyP:            "P",
-	ui.KeyQ:            "Q",
-	ui.KeyR:            "R",
-	ui.KeyS:            "S",
-	ui.KeyT:            "T",
-	ui.KeyU:            "U",
-	ui.KeyV:            "V",
-	ui.KeyW:            "W",
-	ui.KeyX:            "X",
-	ui.KeyY:            "Y",
-	ui.KeyZ:            "Z",
-}
-
-// modifierHint is what the recorder says when a key press has no modifier:
-// the names are the platform's own, so a Mac user is not told to press Ctrl
-// when the key is Command.
-func modifierHint() string {
-	if runtime.GOOS == "darwin" {
-		return "需要一个带 Command（⌘）或 Control 的组合键。"
-	}
-	return "需要一个带 Ctrl / Alt / Super 的组合键。"
-}
-
-// friendlyAccelerator writes a binding the way a person reads it: the parts
-// separated by spaces around the plus, which is how a shortcut is written
-// down outside a configuration file. The platform names the modifiers it has:
-// Command on macOS, Ctrl on the others, and "CmdOrCtrl" resolves to whichever
-// the platform uses.
-func friendlyAccelerator(accelerator string) string {
-	return friendlyAcceleratorFor(accelerator, runtime.GOOS)
-}
-
-// friendlyAcceleratorFor is friendlyAccelerator with the platform passed in,
-// so that both spellings can be tested on one machine.
-func friendlyAcceleratorFor(accelerator, goos string) string {
-	return strings.Join(acceleratorParts(accelerator, goos), " + ")
-}
-
-// acceleratorParts resolves a binding into the names the platform gives its
-// modifiers and the key, in the order they were written.
-func acceleratorParts(accelerator, goos string) []string {
-	trimmed := strings.TrimSpace(accelerator)
-	if trimmed == "" {
-		return nil
-	}
-	parts := strings.Split(trimmed, "+")
-	for index, part := range parts {
-		part = strings.TrimSpace(part)
-		switch {
-		case strings.EqualFold(part, "CmdOrCtrl"):
-			part = "Ctrl"
-			if goos == "darwin" {
-				part = "Command"
-			}
-		case strings.EqualFold(part, "Super") && goos == "darwin":
-			// The framework reads Command as Super; a person reads it as
-			// Command, and the symbol is what the menu bar shows.
-			part = "Command"
-		}
-		parts[index] = part
-	}
-	return parts
-}
-
-// compactAccelerator writes a binding for the recorder field: the same names
-// the sentence below uses, with no spaces around the plus. The field is 140
-// points wide and has to show the longest ordinary three-key combination
-// beside the clear icon of the screenshot binding — "Command + Control + T"
-// does not fit, "Command+Control+T" does. The long spelling still belongs to
-// prose (friendlyAccelerator) and to what assistive technology reads.
-func compactAccelerator(accelerator string) string {
-	return compactAcceleratorFor(accelerator, runtime.GOOS)
-}
-
-// compactAcceleratorFor is compactAccelerator with the platform passed in.
-func compactAcceleratorFor(accelerator, goos string) string {
-	return strings.Join(acceleratorParts(accelerator, goos), "+")
-}
-
-// shortcutPlatformNote is what the settings window says about the platform:
-// on Linux the binding is made by the desktop portal rather than by the
-// application itself.
-func shortcutPlatformNote() string {
-	if runtime.GOOS == "linux" {
-		return "Linux / Wayland 下快捷键由桌面门户绑定，可能需要系统确认。"
-	}
-	return ""
 }
 
 // selectionPlatformNote is what the settings window says about reading the
