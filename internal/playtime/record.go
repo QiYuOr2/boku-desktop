@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"boku/internal/platform/gamepad"
 )
 
 // heartEvery is how often an open session is saved while it is still
@@ -179,6 +181,7 @@ func (r *Recorder) look() {
 		slog.Warn("playtime sample failed", "err", err)
 		return
 	}
+	sample.Devices = deviceNames(gamepad.Snapshot())
 	sessions, changed, err := r.observe(sample)
 	if err != nil {
 		slog.Warn("playtime sample was not recorded", "err", err)
@@ -245,6 +248,20 @@ func (r *Recorder) notify() {
 	if r.changed != nil {
 		r.changed()
 	}
+}
+
+func deviceNames(pads []gamepad.Pad) []string {
+	seen := map[string]bool{}
+	names := make([]string, 0, len(pads))
+	for _, pad := range pads {
+		name := pad.Kind.Name()
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	return names
 }
 
 func sessionOpen(sessions []Session) bool {

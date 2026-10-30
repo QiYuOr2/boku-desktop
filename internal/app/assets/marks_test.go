@@ -11,6 +11,9 @@ func TestMarksAreSVGDocuments(t *testing.T) {
 	marks := map[string][]byte{
 		"TV":         TV(),
 		"TVBilibili": TVBilibili(),
+		"DualSense":  DualSense(),
+		"SwitchPro":  SwitchPro(),
+		"Xbox":       Xbox(),
 		"Lightbulb":  Lightbulb(),
 		"Command":    Command(),
 		"Return":     Return(),

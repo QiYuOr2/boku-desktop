@@ -33,6 +33,7 @@ import (
 	codexpanel "boku/internal/panel/codex"
 	deepseekpanel "boku/internal/panel/deepseek"
 	"boku/internal/platform/autostart"
+	"boku/internal/platform/gamepad"
 	"boku/internal/platform/httpc"
 	"boku/internal/platform/popoverappearance"
 	"boku/internal/platform/regioncapture"
@@ -237,8 +238,10 @@ func main() {
 		}
 	}
 	quitBilibili := func() { bilibiliUpdates.Stop() }
+	padCtx, stopPads := context.WithCancel(context.Background())
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
 		slog.Info("boku is quitting")
+		stopPads()
 		// The clipboard poll is a goroutine, and it ends before the
 		// process does: a read that arrives while the backend is going
 		// away is a read nobody asked for.
@@ -271,6 +274,14 @@ func main() {
 			})
 		})
 		playtimeRecorder.Start()
+		gamepad.Watch(padCtx, gamepad.RefreshEvery, func(pads []gamepad.Pad) {
+			mygo.RunOnMain(func() {
+				if state != nil {
+					state.SetPlaytimeControllers(pads)
+					state.Refresh()
+				}
+			})
+		})
 		bilibiliUpdates.Start(context.Background())
 		// The update check starts last: its first look at the feed is a
 		// minute away, and the tray is what a launch is for. A build that

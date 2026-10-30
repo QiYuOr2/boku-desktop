@@ -422,6 +422,18 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the playtime mark: %w", err)
 	}
+	dualSenseMark, err := ui.ParseSVG(assets.DualSense())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the DualSense mark: %w", err)
+	}
+	switchProMark, err := ui.ParseSVG(assets.SwitchPro())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the Switch Pro mark: %w", err)
+	}
+	xboxMark, err := ui.ParseSVG(assets.Xbox())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the Xbox mark: %w", err)
+	}
 	quickLayout := deps.QuickWindowLayout
 	if quickLayout == nil {
 		quickLayout = preferences.NewQuickWindowLayout()
@@ -522,6 +534,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	state.bilibiliUI.AttachHost(state.featureHost())
 	state.animeUI.AttachHost(state.featureHost(), deps.Secrets)
 	state.prepareUpdates(deps.Updates)
+	state.playtimePanel.SetControllerMarks(dualSenseMark, switchProMark, xboxMark)
 	return state, nil
 }
 

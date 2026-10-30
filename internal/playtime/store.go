@@ -16,7 +16,7 @@ import (
 const (
 	dbFile        = "playtime.sqlite"
 	legacyFile    = "playtime.json"
-	schemaVersion = 1
+	schemaVersion = 2
 )
 
 // Store is playtime.sqlite. It is the session list and nothing else.
@@ -106,7 +106,7 @@ func (s *Store) Save(sessions []Session) error {
 			return fmt.Errorf("write playtime: a session is missing its id, game or start")
 		}
 		statements = append(statements, sqlite.Statement{
-			SQL: `INSERT INTO sessions (id, app_id, name, started_at, ended_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?)`,
+			SQL: `INSERT INTO sessions (id, app_id, name, started_at, ended_at, last_seen_at, devices) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			Args: []any{
 				session.ID,
 				session.AppID,
@@ -114,6 +114,7 @@ func (s *Store) Save(sessions []Session) error {
 				formatTime(session.StartedAt),
 				nullableTime(session.EndedAt),
 				nullableTime(session.LastSeenAt),
+				session.Devices,
 			},
 		})
 	}
@@ -146,6 +147,13 @@ func (s *Store) migrate() error {
 				last_seen_at TEXT
 			)`},
 			{SQL: `CREATE INDEX sessions_started_at ON sessions (started_at)`},
+		}); err != nil {
+			return err
+		}
+	}
+	if current < 2 {
+		if err := s.apply(2, []sqlite.Statement{
+			{SQL: `ALTER TABLE sessions ADD COLUMN devices TEXT NOT NULL DEFAULT ''`},
 		}); err != nil {
 			return err
 		}
@@ -230,7 +238,7 @@ func (s *Store) importJSON() error {
 }
 
 func (s *Store) load() ([]Session, error) {
-	rows, err := s.db.Query(context.Background(), `SELECT id, app_id, name, started_at, ended_at, last_seen_at FROM sessions ORDER BY started_at, id`)
+	rows, err := s.db.Query(context.Background(), `SELECT id, app_id, name, started_at, ended_at, last_seen_at, devices FROM sessions ORDER BY started_at, id`)
 	if err != nil {
 		return nil, fmt.Errorf("read playtime: %w", err)
 	}
@@ -262,7 +270,7 @@ func (s *Store) count() (int, error) {
 }
 
 func sessionFromRow(row []any) (Session, error) {
-	if len(row) != 6 {
+	if len(row) != 7 {
 		return Session{}, fmt.Errorf("decode playtime: a session is missing its id, game or start")
 	}
 	id, _ := row[0].(string)
@@ -280,7 +288,8 @@ func sessionFromRow(row []any) (Session, error) {
 	if err != nil {
 		return Session{}, fmt.Errorf("decode playtime: a session look is not a time")
 	}
-	return Session{ID: id, AppID: appID, Name: name, StartedAt: started, EndedAt: ended, LastSeenAt: seen}, nil
+	devices, _ := row[6].(string)
+	return Session{ID: id, AppID: appID, Name: name, StartedAt: started, EndedAt: ended, LastSeenAt: seen, Devices: devices}, nil
 }
 
 func decodeSessions(data []byte) ([]Session, error) {
