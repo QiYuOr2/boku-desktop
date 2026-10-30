@@ -346,7 +346,7 @@ func (s *State) shortcutSwitches(c *ui.Context) {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(12)).Children(func() {
 			ui.Column(c).Grow(1).Children(func() {
 				ui.Text(c, "截图翻译").FontSize(presentation.SizeBody).TextColor(presentation.ColorTextSoft).SingleLine()
-				label := friendlyAccelerator(s.translateSettingsOr().ScreenshotAcceleratorOr())
+				label := presentation.FriendlyAccelerator(s.translateSettingsOr().ScreenshotAcceleratorOr())
 				if label == "" {
 					label = "已关闭"
 				}
@@ -363,7 +363,7 @@ func (s *State) shortcutSwitches(c *ui.Context) {
 		if note, noteKind := s.shortcutNote(); note != "" {
 			presentation.Notice(c, noteKind, note)
 		}
-		if platform := shortcutPlatformNote(); platform != "" {
+		if platform := presentation.ShortcutPlatformNote(); platform != "" {
 			presentation.Notice(c, presentation.NotePlain, platform)
 		}
 		if note := selectionPlatformNote(); note != "" && !s.selectionGranted {
@@ -446,91 +446,25 @@ func (s *State) shortcutButton(c *ui.Context, kind shortcutKind) ui.Element {
 	if accelerator == "" && kind == shortcutScreenshot {
 		accelerator = s.translateSettingsOr().ScreenshotAcceleratorOr()
 	}
-	// The field shows the binding without the spaces the sentence under the
-	// row uses: the two keys of a macOS binding plus their plus signs are
-	// wider than the field once the clear icon has its room.
-	label := compactAccelerator(accelerator)
-	if label == "" {
-		label = "点击录制"
+	clear := (*ui.SVG)(nil)
+	if kind == shortcutScreenshot {
+		clear = s.closeMark
 	}
-	if state.recording {
-		label = "按下组合键…"
-	}
-	// The recorder always owns the same 140-point column. Screenshot's clear
-	// affordance is layered inside that column, so its presence never shifts the
-	// two shortcut fields off their shared right edge.
-	control := ui.Box(c).
-		Width(float32(140)).
-		Height(presentation.HeightControl - 4)
-	// The clear icon's 22-point target sits 2 points in from the field's right
-	// edge, and its mark starts 4 points further in. Reserve that column in the
-	// label's padding: without it the last letter of "Shift+Command+T" is drawn
-	// under the X, and the widest ordinary three-key binding
-	// ("Command+Control+T") would lose its last letter to the ellipsis.
-	labelPad := float32(12)
-	if kind == shortcutScreenshot && accelerator != "" {
-		labelPad = 24
-	}
-	control.Children(func() {
-		button := ui.ButtonBase(c).Label("快捷键 "+friendlyAccelerator(accelerator)).
-			Absolute().Fill().
-			Padding(0, labelPad, 0, 12).
-			Radius(presentation.RadiusField).
-			Border(1, presentation.ColorBorder).
-			Background(presentation.ColorSurface).
-			Focusable().
-			Cursor(ui.CursorPointer)
-		switch {
-		case state.recording:
-			button.Background(presentation.ColorBrandTintStrong).Border(1, presentation.ColorBrand)
-		case button.Hovered() || button.Focused():
-			button.Background(presentation.ColorHover)
-		}
-		button.Children(func() {
-			text := ui.Text(c, label).
-				// A tight 10-point monospace label, written without spaces,
-				// keeps the widest ordinary three-key combination (for example
-				// Command+Control+T) inside the same field on every platform.
-				FontSize(presentation.SizeTiny).
-				Font("monospace").
-				LetterSpacing(float32(-0.25)).
-				SingleLine()
-			if state.recording {
-				text.TextColor(presentation.ColorBrand)
-			} else {
-				text.TextColor(presentation.ColorTextSoft)
-			}
-		})
-		// The keys arrive here only while recording, and only this button takes
-		// them: what is pressed elsewhere in the window is not a binding.
-		button.HandleInput(s.captureShortcut)
-		if state.recording {
-			// The keyboard has to be here for the keys to arrive at all.
-			button.AutoFocus()
-		}
-		if button.Clicked() {
+	return presentation.ShortcutField{
+		Accelerator: accelerator,
+		Recording:   state.recording,
+		ClearMark:   clear,
+		ClearLabel:  "清除截图翻译快捷键",
+		OnInput:     s.captureShortcut,
+		OnPress: func() {
 			if state.recording {
 				s.cancelShortcutCapture()
 			} else {
 				s.beginShortcutCapture(kind)
 			}
-		}
-		if kind == shortcutScreenshot && accelerator != "" {
-			// This is intentionally a child of the same field rather than a sibling
-			// in the settings row: both controls stay aligned, and the X has a clear
-			// association with only this binding.
-			if clear := presentation.CardIconButton(c, s.closeMark, "清除截图翻译快捷键").Absolute().Right(float32(2)).Top(shortcutClearTop()); clear.Clicked() {
-				s.clearScreenshotShortcut()
-			}
-		}
-	})
-	return control
-}
-
-func shortcutClearTop() float32 {
-	fieldHeight := presentation.HeightControl - 4
-	iconTarget := presentation.SizeCardMark + 2*presentation.CardMarkPad
-	return float32((fieldHeight - iconTarget) / 2)
+		},
+		OnClear: s.clearScreenshotShortcut,
+	}.View(c)
 }
 
 // setTranslationEnabled turns the tool on or off — and, with it, the global

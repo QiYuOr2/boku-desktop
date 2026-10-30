@@ -132,19 +132,6 @@ func TestClearAccelerator(t *testing.T) {
 	}
 }
 
-func TestAcceleratorSpelling(t *testing.T) {
-	got, ok := acceleratorOf(ui.InputEvent{Key: ui.KeyN, Mods: ui.Ctrl | ui.Shift})
-	if !ok || got != "Ctrl+Shift+N" {
-		t.Fatalf("acceleratorOf = %q %v", got, ok)
-	}
-	if _, ok := acceleratorOf(ui.InputEvent{Key: ui.KeyN, Mods: ui.Shift}); ok {
-		t.Fatal("shift alone was accepted")
-	}
-	if compactAccelerator("Super+N") == "" || friendlyAccelerator("Ctrl+Alt+N") != "Ctrl + Alt + N" {
-		t.Fatalf("compact %q friendly %q", compactAccelerator("Super+N"), friendlyAccelerator("Ctrl+Alt+N"))
-	}
-}
-
 func flashState(t *testing.T) (*State, *flash.Service) {
 	t.Helper()
 	section := flash.NewSection()

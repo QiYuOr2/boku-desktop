@@ -19,7 +19,6 @@
 package free
 
 import (
-	"strconv"
 	"strings"
 	"time"
 
@@ -33,15 +32,7 @@ import (
 // ceiling is the same wherever the text goes.
 const DefaultMaxChars = openai.DefaultMaxChars
 
-// truncationNote is what a result says when the text was too long to send
-// whole. It names the same ceiling the paid backends name, because it is the
-// same ceiling.
-func truncationNote(cut bool) string {
-	if !cut {
-		return ""
-	}
-	return "原文过长，只翻译了前 " + strconv.Itoa(DefaultMaxChars) + " 个字。"
-}
+func truncationNote(cut bool) string { return openai.TruncationNote(cut) }
 
 // noReadingsNote is what an engine that cannot annotate says about a request
 // for readings. It is openai.AnnotationNote's own words for the same

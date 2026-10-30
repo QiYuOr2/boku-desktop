@@ -310,7 +310,7 @@ func (s *State) SettingsView(c *ui.Context, head *ui.Handle) {
 				} else if s.shortcutErr != "" {
 					presentation.Notice(c, presentation.NoteWarning, s.shortcutErr)
 				}
-				if platform := shortcutPlatformNote(); platform != "" {
+				if platform := presentation.ShortcutPlatformNote(); platform != "" {
 					presentation.Notice(c, presentation.NotePlain, platform)
 				}
 			})

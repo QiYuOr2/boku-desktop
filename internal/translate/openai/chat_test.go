@@ -630,3 +630,39 @@ func TestImageRequestHonoursANarrowerTimeout(t *testing.T) {
 		t.Fatalf("a narrower image timeout = %v, want ErrProviderTimeout", err)
 	}
 }
+
+// A screenshot's thinking trace is larger than an ordinary JSON body. The
+// image stream has to accept that, or the card reports the ceiling as a
+// response it could not read.
+func TestImageStreamIsNotCappedByTheOrdinaryResponseLimit(t *testing.T) {
+	event := "data: {\"choices\":[{\"delta\":{\"content\":null,\"reasoning_content\":\"x\"}}]}\n\n"
+	var body strings.Builder
+	for body.Len() <= httpc.DefaultMaxBytes {
+		body.WriteString(event)
+	}
+	body.WriteString("data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"status\\\":\\\"success\\\",\\\"sourceLang\\\":\\\"en\\\",\\\"sourceText\\\":\\\"Hi\\\",\\\"targetLang\\\":\\\"zh\\\",\\\"translatedText\\\":\\\"嗨\\\",\\\"failure\\\":null}\"}}]}\n\ndata: [DONE]\n\n")
+	payload := body.String()
+	if len(payload) >= ImageMaxBytes {
+		t.Fatalf("fixture is %d bytes, want it under the image ceiling", len(payload))
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, payload)
+	}))
+	defer server.Close()
+
+	content, err := TranslateImage(context.Background(), ImageOptions{
+		Client:  httpc.New(httpc.Options{}),
+		BaseURL: server.URL,
+		Model:   "vision",
+		Image:   []byte{0x89, 'P', 'N', 'G'},
+		System:  "translate",
+		Target:  domain.LangChinese,
+	})
+	if err != nil {
+		t.Fatalf("a stream above the ordinary ceiling = %v", err)
+	}
+	if !strings.Contains(content, `"translatedText":"嗨"`) {
+		t.Errorf("content = %q", content)
+	}
+}

@@ -215,6 +215,12 @@ type chatMessage struct {
 // gives the whole operation two minutes, and this request may use all of it.
 const ImageTimeout = 2 * time.Minute
 
+// ImageMaxBytes is the vision-stream ceiling. Thinking-mode SSE frames every
+// token, so the body is much larger than the final JSON. The ordinary 1 MiB
+// ceiling tears the last event, and that tear is reported as an unreadable
+// response. Apple allows the same 8 MiB.
+const ImageMaxBytes = 8 << 20
+
 // ImageOptions is an OpenAI-compatible vision request. Image is PNG bytes;
 // callers never log it or include it in errors.
 type ImageOptions struct {
@@ -316,7 +322,7 @@ func TranslateImage(ctx context.Context, opts ImageOptions) (string, error) {
 		timeout = ImageTimeout
 	}
 	var content string
-	result, err := opts.Client.PostJSONStream(ctx, EndpointOf(opts.BaseURL), headers, body, httpc.RequestOptions{Timeout: timeout}, func(stream io.Reader) error {
+	result, err := opts.Client.PostJSONStream(ctx, EndpointOf(opts.BaseURL), headers, body, httpc.RequestOptions{Timeout: timeout, MaxBytes: ImageMaxBytes}, func(stream io.Reader) error {
 		var readErr error
 		content, readErr = readSSE(stream)
 		return readErr
@@ -340,7 +346,9 @@ func TranslateImage(ctx context.Context, opts ImageOptions) (string, error) {
 
 // readSSE accumulates OpenAI-compatible chat-completion deltas. A completed
 // stream ends with [DONE]; accepting an EOF before that would make a network
-// truncation look like a finished translation.
+// truncation look like a finished translation. Thinking-mode chunks set
+// content to null while they stream reasoning; that null is not text and is
+// not an invalid event. SSE lines may end in CR, which the scanner leaves on.
 func readSSE(stream io.Reader) (string, error) {
 	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(make([]byte, 8*1024), httpc.DefaultMaxBytes)
@@ -360,7 +368,7 @@ func readSSE(stream io.Reader) (string, error) {
 		var event struct {
 			Choices []struct {
 				Delta struct {
-					Content string `json:"content"`
+					Content *string `json:"content"`
 				} `json:"delta"`
 			} `json:"choices"`
 		}
@@ -368,12 +376,14 @@ func readSSE(stream io.Reader) (string, error) {
 			return fmt.Errorf("%w: image stream contains an invalid event", domain.ErrProviderBadResponse)
 		}
 		for _, choice := range event.Choices {
-			answer.WriteString(choice.Delta.Content)
+			if choice.Delta.Content != nil {
+				answer.WriteString(*choice.Delta.Content)
+			}
 		}
 		return nil
 	}
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := strings.TrimRight(scanner.Text(), "\r")
 		if line == "" {
 			if err := consume(); err != nil {
 				return "", err

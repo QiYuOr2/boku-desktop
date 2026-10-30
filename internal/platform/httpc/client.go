@@ -53,9 +53,10 @@ type Options struct {
 
 // RequestOptions narrows the configuration of one request without changing
 // the client shared by other providers. A non-positive Timeout keeps the
-// client's default deadline.
+// client's default deadline, and a non-positive MaxBytes keeps its ceiling.
 type RequestOptions struct {
-	Timeout time.Duration
+	Timeout  time.Duration
+	MaxBytes int64
 }
 
 // Client makes the requests. It is safe to use from several goroutines, and
@@ -178,12 +179,24 @@ func (c *Client) PostJSONStream(ctx context.Context, endpoint string, headers ma
 		}
 		return result, statusError(response.StatusCode, safe, payload)
 	}
-	limited := &io.LimitedReader{R: response.Body, N: c.maxBytes + 1}
+	limit := c.maxBytes
+	if opts.MaxBytes > 0 {
+		limit = opts.MaxBytes
+	}
+	// One extra byte tells a response that fills the ceiling apart from one
+	// that runs past it. Hitting the ceiling ends the read as an ordinary EOF,
+	// so a stream decoder would otherwise report the torn last event as a bad
+	// response.
+	limited := &io.LimitedReader{R: response.Body, N: limit + 1}
+	tooLarge := &domain.BadResponseError{Endpoint: safe, HTTPStatus: response.StatusCode, Reason: fmt.Sprintf("the response is larger than %d bytes", limit)}
 	if err := consume(limited); err != nil {
+		if limited.N <= 0 {
+			return result, tooLarge
+		}
 		return result, err
 	}
 	if limited.N <= 0 {
-		return result, &domain.BadResponseError{Endpoint: safe, HTTPStatus: response.StatusCode, Reason: fmt.Sprintf("the response is larger than %d bytes", c.maxBytes)}
+		return result, tooLarge
 	}
 	return result, nil
 }

@@ -13,12 +13,10 @@ package custom
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
 	"boku/internal/domain"
-	"boku/internal/kit"
 	"boku/internal/platform/httpc"
 	"boku/internal/translate/openai"
 )
@@ -163,7 +161,7 @@ func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credential
 	content, err := openai.TranslateImage(ctx, openai.ImageOptions{
 		Client: t.client, BaseURL: service.BaseURL, Model: service.Model,
 		APIKey: strings.TrimSpace(creds.Secrets[APIKeyCredential]), Target: target, Image: image,
-		System: `You translate text visible in an image. Return exactly one JSON object and no Markdown. For a translation return {"status":"success","sourceLang":"ja","sourceText":"original visible text","targetLang":"zh","translatedText":"translation","failure":null}. Use only zh,en,ja,ko,ru,ar,th for language codes and preserve line breaks. If the image has no readable text, is unsupported, or must be refused, return {"status":"failure","sourceLang":"","sourceText":"","targetLang":"","translatedText":"","failure":{"code":"no_readable_text"}}; code must be exactly one of no_readable_text, unsupported_image, refused.`,
+		System: openai.ImageSystemPrompt,
 	})
 	if err != nil {
 		return domain.TranslationResult{}, err
@@ -172,19 +170,7 @@ func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credential
 	if err != nil {
 		return domain.TranslationResult{}, err
 	}
-	sourceText := strings.TrimSpace(answer.SourceText)
-	result := domain.TranslationResult{
-		SourceText:     sourceText,
-		TranslatedText: strings.TrimSpace(answer.TranslatedText),
-		SourceLang:     kit.ImageSourceLanguage(answer.SourceLang, sourceText),
-		TargetLang:     target,
-		ProviderID:     t.id,
-		CreatedAt:      t.now(),
-	}
-	if err := result.Validate(); err != nil {
-		return domain.TranslationResult{}, err
-	}
-	return result, nil
+	return openai.ImageResult(answer, target, t.id, t.now())
 }
 
 // Translate asks for the translation.
@@ -210,11 +196,7 @@ func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, re
 	// needs a key answers 401, which the window translates into "check the
 	// key".
 	key := strings.TrimSpace(creds.Secrets[APIKeyCredential])
-	text, cut := openai.Truncate(req.Text, openai.DefaultMaxChars)
-	source := req.SourceLang
-	if source == domain.LangUnknown {
-		source = domain.Language(kit.DetectLanguage(text))
-	}
+	text, source, cut := openai.Prepare(req)
 	options := openai.AnnotationOptions{Furigana: req.Annotation.Furigana, LoanwordGloss: req.Annotation.LoanwordGloss}
 	content, err := openai.Translate(ctx, openai.Options{
 		Client:  t.client,
@@ -229,36 +211,7 @@ func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, re
 	if err != nil {
 		return domain.TranslationResult{}, err
 	}
-	result := domain.TranslationResult{
-		SourceText: text,
-		SourceLang: source,
-		TargetLang: req.TargetLang,
-		ProviderID: t.id,
-		CreatedAt:  t.now(),
-	}
-	if options.Wants() {
-		annotation := openai.ParseAnnotation(content)
-		if annotation.Segmented {
-			// The pieces are the annotation only: the source the window
-			// draws is the text that was sent, with the line breaks it came
-			// with, as in the built-in translator.
-			result.Segments = annotation.Segments
-		}
-		result.TranslatedText = annotation.TranslatedText
-		// What could not be read is said out loud, as in the built-in
-		// translator: a plain answer to a request for pieces has no
-		// readings, and the window should say so.
-		result.Note = openai.AnnotationNote(annotation, options)
-	} else {
-		result.TranslatedText = content
-	}
-	if cut {
-		result.Note = "原文过长，只翻译了前 " + strconv.Itoa(openai.DefaultMaxChars) + " 个字。"
-	}
-	if err := result.Validate(); err != nil {
-		return domain.TranslationResult{}, err
-	}
-	return result, nil
+	return openai.TextResult(content, text, source, req.TargetLang, t.id, t.now(), options, cut)
 }
 
 // ensure the interface is satisfied where it is defined, not at the call

@@ -168,6 +168,39 @@ func TestLongResponseIsRefusedNotTruncated(t *testing.T) {
 	}
 }
 
+func TestStreamCeilingReportsATornBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\""+strings.Repeat("x", 200)+"\"}}]}\n\n")
+	}))
+	defer server.Close()
+
+	client := New(Options{HTTPClient: server.Client(), MaxBytes: 32})
+	_, err := client.PostJSONStream(context.Background(), server.URL, nil, []byte(`{}`), RequestOptions{}, func(r io.Reader) error {
+		_, _ = io.ReadAll(r)
+		return errors.New("torn event")
+	})
+	if !errors.Is(err, domain.ErrProviderBadResponse) || !strings.Contains(err.Error(), "larger than") {
+		t.Fatalf("a torn stream = %v, want the ceiling", err)
+	}
+}
+
+func TestStreamCeilingCanBeRaisedForOneRequest(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, strings.Repeat("x", 80))
+	}))
+	defer server.Close()
+
+	client := New(Options{HTTPClient: server.Client(), MaxBytes: 32})
+	_, err := client.PostJSONStream(context.Background(), server.URL, nil, []byte(`{}`), RequestOptions{MaxBytes: 128}, func(r io.Reader) error {
+		_, readErr := io.ReadAll(r)
+		return readErr
+	})
+	if err != nil {
+		t.Fatalf("a raised ceiling = %v", err)
+	}
+}
+
 func TestTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(300 * time.Millisecond)

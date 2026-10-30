@@ -45,3 +45,30 @@ func TestReadSSEConsumesAMultilineEvent(t *testing.T) {
 		t.Errorf("answer = %q, want answer", got)
 	}
 }
+
+func TestReadSSEIgnoresNullContent(t *testing.T) {
+	// DeepSeek thinking mode sends content:null on reasoning chunks, then the
+	// answer. A null content is an empty delta, not a malformed event.
+	stream := strings.NewReader("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":null,\"reasoning_content\":\"look\"}}]}\n\n" +
+		"data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"status\\\":\\\"success\\\"}\",\"reasoning_content\":null}}]}\n\n" +
+		"data: [DONE]\n\n")
+	got, err := readSSE(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != `{"status":"success"}` {
+		t.Errorf("answer = %q", got)
+	}
+}
+
+func TestReadSSEAcceptsCRLF(t *testing.T) {
+	stream := strings.NewReader("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\r\n\r\n" +
+		"data: [DONE]\r\n\r\n")
+	got, err := readSSE(stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "ok" {
+		t.Errorf("answer = %q", got)
+	}
+}
