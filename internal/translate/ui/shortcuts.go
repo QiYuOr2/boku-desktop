@@ -116,6 +116,7 @@ func (s *State) bindShortcutForSwitch() {
 		s.unregisterShortcuts()
 		s.shortcut.registered = false
 		s.shortcut.err = nil
+		s.finishExtras("", "")
 		return
 	}
 	accelerator := s.shortcut.accelerator
@@ -150,19 +151,37 @@ func (s *State) bindShortcutSet(text, screenshot string) error {
 	}
 	s.shortcuts.UnregisterAll()
 	if err := s.shortcuts.Register(text, s.onTranslateShortcut); err != nil {
+		s.finishExtras("", "")
 		return err
 	}
 	if screenshot == "" || s.screenshot == nil {
+		s.finishExtras(text, "")
 		return nil
 	}
 	if strings.EqualFold(screenshot, text) {
+		s.finishExtras(text, "")
 		return fmt.Errorf("截图翻译快捷键不能与划词翻译快捷键相同")
 	}
 	if err := s.shortcuts.Register(screenshot, s.onScreenshotShortcut); err != nil {
+		s.finishExtras(text, "")
 		return err
 	}
 	s.screenshotShortcut = shortcutState{accelerator: screenshot, registered: true}
+	s.finishExtras(text, screenshot)
 	return nil
+}
+
+// SetExtraRebind is how the shell puts another global shortcut back in the
+// same pass that rebinds translation. nil leaves translation on its own.
+func (s *State) SetExtraRebind(rebind func(register func(string, func()) error, text, screenshot string)) {
+	s.extraRebind = rebind
+}
+
+func (s *State) finishExtras(text, screenshot string) {
+	if s.extraRebind == nil || s.shortcuts == nil {
+		return
+	}
+	s.extraRebind(s.shortcuts.Register, text, screenshot)
 }
 
 // unregisterShortcuts releases the binding. The application calls it on the

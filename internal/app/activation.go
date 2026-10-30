@@ -22,13 +22,14 @@ func (s *State) syncActivationPolicy() {
 	if runtime.GOOS != "darwin" || s.app == nil {
 		return
 	}
-	s.app.SetActivationPolicy(activationPolicyFor(s.settingsWindow != nil, s.historyWindow != nil))
+	s.app.SetActivationPolicy(activationPolicyFor(s.settingsWindow != nil, s.historyWindow != nil, s.flashHistory != nil))
 }
 
 // activationPolicyFor is the rule, separate from the windows so that "which
 // windows put the app in Cmd+Tab" can be checked without a session.
-func activationPolicyFor(settingsOpen, historyOpen bool) mygo.ActivationPolicy {
-	if settingsOpen || historyOpen {
+// The capture line is transient, like the translation card, and is not one of them.
+func activationPolicyFor(settingsOpen, historyOpen, flashHistoryOpen bool) mygo.ActivationPolicy {
+	if settingsOpen || historyOpen || flashHistoryOpen {
 		return mygo.ActivationPolicyRegular
 	}
 	return mygo.ActivationPolicyAccessory

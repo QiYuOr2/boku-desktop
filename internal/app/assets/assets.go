@@ -48,11 +48,13 @@ var clipboardSVG []byte
 //go:embed refresh.svg
 var refreshSVG []byte
 
-// The quick window footer's actions: the two screenshot tools, the way into
-// the settings window and the way out of the application. They are marks
-// rather than words because the footer is one line at the bottom of a card,
-// and words there read as content while marks read as what they are.
+// The quick window footer's actions: flashes, the two screenshot tools, the
+// way into the settings window and the way out of the application. They are
+// marks rather than words because the footer is one line at the bottom of a
+// card, and words there read as content while marks read as what they are.
 var (
+	//go:embed lightbulb.svg
+	lightbulbSVG []byte
 	//go:embed settings.svg
 	settingsSVG []byte
 	//go:embed quit.svg
@@ -91,6 +93,10 @@ var (
 	closeSVG []byte
 	//go:embed translate.svg
 	translateSVG []byte
+	//go:embed command.svg
+	commandSVG []byte
+	//go:embed return.svg
+	returnSVG []byte
 )
 
 // The settings window's sidebar marks: what each section of the page is
@@ -149,6 +155,9 @@ func Pin() []byte { return pinSVG }
 // Close returns the mark for dismissing a window.
 func Close() []byte { return closeSVG }
 
+func Command() []byte { return commandSVG }
+func Return() []byte  { return returnSVG }
+
 // Translate returns the mark that heads the translation section: the
 // application's own drawing rather than a brand's.
 func Translate() []byte { return translateSVG }
@@ -197,6 +206,9 @@ func Settings() []byte { return settingsSVG }
 
 // Quit returns the quit mark as the SVG document it is.
 func Quit() []byte { return quitSVG }
+
+// Lightbulb returns the mark that opens flashes.
+func Lightbulb() []byte { return lightbulbSVG }
 
 // Screenshot returns the region-capture mark used beside settings.
 func Screenshot() []byte { return screenshotSVG }

@@ -27,7 +27,7 @@ func TestServicesLoadAndPersistQuickWindowLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	layout := preferences.NewQuickWindowLayout()
-	_, _, _, _, _, _, _, appearance, prefs, recorder, err := services(userData, "test", layout)
+	_, _, _, _, _, _, _, appearance, prefs, recorder, _, err := services(userData, "test", layout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +44,7 @@ func TestServicesLoadAndPersistQuickWindowLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	reloaded := preferences.NewQuickWindowLayout()
-	_, _, _, _, _, _, _, _, _, again, err := services(userData, "test", reloaded)
+	_, _, _, _, _, _, _, _, _, again, _, err := services(userData, "test", reloaded)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestServicesLoadAndPersistQuickWindowLayout(t *testing.T) {
 // be checked without a window.
 func TestServicesAssembleThePanels(t *testing.T) {
 	userData := t.TempDir()
-	panels, anime, bilibili, secrets, clip, translation, _, appearance, prefs, recorder, err := services(userData, "0.1.0")
+	panels, anime, bilibili, secrets, clip, translation, _, appearance, prefs, recorder, _, err := services(userData, "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestRecordPanicsWritesItDownAndRaisesItAgain(t *testing.T) {
 // a translator without a settings store, or one whose settings it cannot
 // read, is a startup mistake worth catching here.
 func TestServicesAssembleTheTranslators(t *testing.T) {
-	_, _, _, _, _, translation, own, _, _, recorder, err := services(t.TempDir(), "0.1.0")
+	_, _, _, _, _, translation, own, _, _, recorder, _, err := services(t.TempDir(), "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}

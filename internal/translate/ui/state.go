@@ -57,6 +57,10 @@ type State struct {
 	host                                                          presentation.Host
 	dark                                                          func() bool
 	connectionsBusy                                               func() bool
+	// extraRebind registers shortcuts that share this registrar. MyGo can
+	// only release every binding at once, so another feature's shortcut has
+	// to be put back in the same rebind or the next translation change drops it.
+	extraRebind func(register func(string, func()) error, text, screenshot string)
 }
 
 type Config struct {

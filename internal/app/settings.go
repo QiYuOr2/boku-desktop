@@ -50,6 +50,7 @@ const (
 	sectionAPIKey settingsSectionKind = iota
 	sectionTranslate
 	sectionClipboard
+	sectionFlash
 	sectionAnime
 	sectionBilibili
 	sectionQuickLayout
@@ -75,16 +76,21 @@ type settingsPage struct {
 // settingsPages is the settings page as the sidebar and the page both read
 // it, in the order they show it.
 func (s *State) settingsPages() []*settingsPage {
-	return []*settingsPage{
+	pages := []*settingsPage{
 		{kind: sectionAPIKey, name: "API Key", mark: s.keyMark, build: s.credentialUI.ApiKeySection},
 		{kind: sectionTranslate, name: "划词翻译", mark: s.translationMark, build: s.translateSection},
 		{kind: sectionClipboard, name: "剪贴板", mark: s.clipboardMark, build: s.clipboardSection},
-		{kind: sectionAnime, name: "动画", mark: s.tvMark, build: s.animeSection},
-		{kind: sectionBilibili, name: "B站", mark: s.bilibiliMark, build: s.bilibiliSection},
-		{kind: sectionQuickLayout, name: "面板布局", mark: s.layoutMark, build: s.layoutUI.SettingsView},
-		{kind: sectionGeneral, name: "通用", mark: s.settingsMark, build: s.generalSection},
-		{kind: sectionAbout, name: "关于", mark: s.infoMark, build: s.aboutSection},
 	}
+	if s.flashUI != nil {
+		pages = append(pages, &settingsPage{kind: sectionFlash, name: "闪念", mark: s.flashMark, build: s.flashSection})
+	}
+	return append(pages,
+		&settingsPage{kind: sectionAnime, name: "动画", mark: s.tvMark, build: s.animeSection},
+		&settingsPage{kind: sectionBilibili, name: "B站", mark: s.bilibiliMark, build: s.bilibiliSection},
+		&settingsPage{kind: sectionQuickLayout, name: "面板布局", mark: s.layoutMark, build: s.layoutUI.SettingsView},
+		&settingsPage{kind: sectionGeneral, name: "通用", mark: s.settingsMark, build: s.generalSection},
+		&settingsPage{kind: sectionAbout, name: "关于", mark: s.infoMark, build: s.aboutSection},
+	)
 }
 
 func (s *State) bilibiliSection(c *ui.Context, head *ui.Handle) {
