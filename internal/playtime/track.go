@@ -1,6 +1,8 @@
 package playtime
 
 import (
+	"sort"
+	"strings"
 	"time"
 
 	"boku/internal/domain"
@@ -125,6 +127,9 @@ func (t *Tracker) Observe(sample Sample) (bool, error) {
 			if t.sessions[i].Name == "" && game.Name != "" {
 				t.sessions[i].Name = game.Name
 			}
+			if mergeDevices(&t.sessions[i], sample.Devices) {
+				changed = true
+			}
 			delete(open, id)
 			continue
 		}
@@ -139,13 +144,15 @@ func (t *Tracker) Observe(sample Sample) (bool, error) {
 		if err != nil {
 			return changed, err
 		}
-		t.sessions = append(t.sessions, Session{
+		session := Session{
 			ID:         ident,
 			AppID:      id,
 			Name:       game.Name,
 			StartedAt:  start,
 			LastSeenAt: at,
-		})
+		}
+		mergeDevices(&session, sample.Devices)
+		t.sessions = append(t.sessions, session)
 		changed = true
 	}
 	for _, i := range open {
@@ -158,6 +165,52 @@ func (t *Tracker) Observe(sample Sample) (bool, error) {
 	t.biased = sample.Biased
 	t.seen = true
 	return changed, nil
+}
+
+// deviceOrder is the order a session stores controller kinds in.
+var deviceOrder = []string{"dualsense", "switch-pro", "xbox"}
+
+func mergeDevices(session *Session, extra []string) bool {
+	have := splitDevices(session.Devices)
+	changed := false
+	for _, name := range extra {
+		if name == "" || have[name] {
+			continue
+		}
+		have[name] = true
+		changed = true
+	}
+	if !changed {
+		return false
+	}
+	session.Devices = joinDevices(have)
+	return true
+}
+
+func splitDevices(text string) map[string]bool {
+	have := map[string]bool{}
+	for _, name := range strings.Split(text, ",") {
+		if name != "" {
+			have[name] = true
+		}
+	}
+	return have
+}
+
+func joinDevices(have map[string]bool) string {
+	parts := make([]string, 0, len(have))
+	for _, name := range deviceOrder {
+		if have[name] {
+			parts = append(parts, name)
+			delete(have, name)
+		}
+	}
+	rest := make([]string, 0, len(have))
+	for name := range have {
+		rest = append(rest, name)
+	}
+	sort.Strings(rest)
+	return strings.Join(append(parts, rest...), ",")
 }
 
 func stopAt(exit, sample time.Time) time.Time {

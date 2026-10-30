@@ -141,6 +141,19 @@ var chevronRightSVG []byte
 //go:embed steam.svg
 var steamSVG []byte
 
+// The playtime title's controller marks. DualSense is a flat white face:
+// one dark center through the inner grips, black seams on both sides of the
+// touchpad, dark sticks. The others are square line drawings in currentColor.
+// The title draws them about as tall as its own type, on the same midline.
+var (
+	//go:embed dualsense.svg
+	dualSenseSVG []byte
+	//go:embed switchpro.svg
+	switchProSVG []byte
+	//go:embed xbox.svg
+	xboxSVG []byte
+)
+
 // DeepSeek returns the DeepSeek mark as the SVG document it is. The caller
 // parses it once and keeps the result: parsing belongs to the framework,
 // and this package depends on the standard library alone.
@@ -188,6 +201,12 @@ func Codex() []byte { return codexSVG }
 func TV() []byte { return tvSVG }
 
 func Steam() []byte { return steamSVG }
+
+// DualSense, SwitchPro and Xbox are the controller marks drawn beside the
+// playtime title. Anything that is not a DualSense or a Switch Pro uses Xbox.
+func DualSense() []byte { return dualSenseSVG }
+func SwitchPro() []byte { return switchProSVG }
+func Xbox() []byte      { return xboxSVG }
 
 // TVBilibili returns the small television mark that heads the followed-UP
 // block: rounded set, two antennae, two eyes — the shape the service's own

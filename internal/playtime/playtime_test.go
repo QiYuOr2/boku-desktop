@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"boku/internal/platform/gamepad"
 	"boku/internal/platform/sqlite"
 )
 
@@ -223,7 +224,7 @@ func TestSessionsRoundTripAndABadFileIsNotReplaced(t *testing.T) {
 	end := start.Add(4*time.Hour + 23*time.Minute + 7*time.Second)
 	if err := store.Save([]Session{{
 		ID: "018f", AppID: "730", Name: "Counter-Strike 2",
-		StartedAt: start, EndedAt: end, LastSeenAt: end,
+		StartedAt: start, EndedAt: end, LastSeenAt: end, Devices: "dualsense",
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +232,7 @@ func TestSessionsRoundTripAndABadFileIsNotReplaced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded) != 1 || loaded[0].Name != "Counter-Strike 2" || !loaded[0].StartedAt.Equal(start) || !loaded[0].EndedAt.Equal(end) {
+	if len(loaded) != 1 || loaded[0].Name != "Counter-Strike 2" || loaded[0].Devices != "dualsense" || !loaded[0].StartedAt.Equal(start) || !loaded[0].EndedAt.Equal(end) {
 		t.Fatalf("loaded = %+v", loaded)
 	}
 	if loaded[0].EndedAt.Sub(loaded[0].StartedAt) != end.Sub(start) {
@@ -243,7 +244,7 @@ func TestSessionsRoundTripAndABadFileIsNotReplaced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Execute(context.Background(), `INSERT INTO schema_migrations (version, applied_at) VALUES (2, 'x')`); err != nil {
+	if _, err := db.Execute(context.Background(), `INSERT INTO schema_migrations (version, applied_at) VALUES (3, 'x')`); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
@@ -335,5 +336,97 @@ func TestSessionsHandsTheUIItsOwnCopy(t *testing.T) {
 	got[0].Name = "changed"
 	if recorder.Sessions()[0].Name != "Counter-Strike 2" {
 		t.Fatal("the UI copy still points at the recorder")
+	}
+}
+
+func TestASessionKeepsEveryControllerItSaw(t *testing.T) {
+	var tracker Tracker
+	start := time.Date(2026, 10, 29, 4, 0, 0, 0, time.UTC)
+	changed, err := tracker.Observe(Sample{
+		At: start, Awake: time.Second, Biased: time.Second,
+		Games:   []Game{{AppID: "730", Name: "Counter-Strike 2", RunningSince: start}},
+		Devices: []string{"xbox", "dualsense", "xbox", ""},
+	})
+	if err != nil || !changed {
+		t.Fatalf("observe = %v, %v", changed, err)
+	}
+	if got := tracker.Sessions()[0].Devices; got != "dualsense,xbox" {
+		t.Fatalf("devices = %q", got)
+	}
+	again := start.Add(time.Minute)
+	changed, err = tracker.Observe(Sample{
+		At: again, Awake: time.Minute, Biased: time.Minute,
+		Games:   []Game{{AppID: "730", Name: "Counter-Strike 2"}},
+		Devices: []string{"dualsense"},
+	})
+	if err != nil || changed {
+		t.Fatalf("repeat = %v, %v", changed, err)
+	}
+	changed, err = tracker.Observe(Sample{
+		At: again.Add(time.Minute), Awake: 2 * time.Minute, Biased: 2 * time.Minute,
+		Games:   []Game{{AppID: "730", Name: "Counter-Strike 2"}},
+		Devices: []string{"switch-pro"},
+	})
+	if err != nil || !changed {
+		t.Fatalf("new pad = %v, %v", changed, err)
+	}
+	if got := tracker.Sessions()[0].Devices; got != "dualsense,switch-pro,xbox" {
+		t.Fatalf("devices = %q", got)
+	}
+	changed, err = tracker.Observe(Sample{
+		At: again.Add(2 * time.Minute), Awake: 3 * time.Minute, Biased: 3 * time.Minute,
+		Games: []Game{{AppID: "730", Name: "Counter-Strike 2"}},
+	})
+	if err != nil || changed || tracker.Sessions()[0].Devices != "dualsense,switch-pro,xbox" {
+		t.Fatalf("unplugged = %v %v %q", changed, err, tracker.Sessions()[0].Devices)
+	}
+}
+
+func TestDeviceNamesCollapsesTheSameKind(t *testing.T) {
+	names := deviceNames([]gamepad.Pad{
+		{Kind: gamepad.KindXbox},
+		{Kind: gamepad.KindDualSense},
+		{Kind: gamepad.KindXbox},
+		{Kind: gamepad.KindSwitchPro},
+	})
+	if len(names) != 3 || names[0] != "xbox" || names[1] != "dualsense" || names[2] != "switch-pro" {
+		t.Fatalf("names = %v", names)
+	}
+}
+
+func TestAVersionOneDatabaseKeepsItsSessionsAndGainsDevices(t *testing.T) {
+	dir := t.TempDir()
+	db, err := sqlite.Open(context.Background(), filepath.Join(dir, dbFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sql := range []string{
+		`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`,
+		`CREATE TABLE sessions (
+			id TEXT PRIMARY KEY,
+			app_id TEXT NOT NULL,
+			name TEXT NOT NULL,
+			started_at TEXT NOT NULL,
+			ended_at TEXT,
+			last_seen_at TEXT
+		)`,
+		`INSERT INTO schema_migrations (version, applied_at) VALUES (1, '2026-10-29T00:00:00Z')`,
+		`INSERT INTO sessions (id, app_id, name, started_at, ended_at, last_seen_at)
+			VALUES ('018f', '730', 'Counter-Strike 2', '2026-10-29T01:02:03Z', '2026-10-29T02:02:03Z', '2026-10-29T02:02:03Z')`,
+	} {
+		if _, err := db.Execute(context.Background(), sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+
+	store := NewStore(dir)
+	t.Cleanup(func() { store.Close() })
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded) != 1 || loaded[0].Name != "Counter-Strike 2" || loaded[0].Devices != "" {
+		t.Fatalf("migrated = %+v", loaded)
 	}
 }

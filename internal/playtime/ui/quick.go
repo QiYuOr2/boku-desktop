@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"boku/internal/platform/gamepad"
 	"boku/internal/playtime"
 	"boku/internal/presentation"
 
@@ -12,20 +13,26 @@ import (
 )
 
 const (
-	monthCell float32 = 20
-	monthGap  float32 = 2
+	monthCell      float32 = 20
+	monthGap       float32 = 2
+	weekBarMax     float32 = 48
+	weekPlotHeight float32 = 62 // bar, a 2pt gap, then a 12pt label
 )
 
 // Panel is the flyout block: today, this week, or one month.
 //
-// The choice and the month being shown are the only state. They stay here,
-// not on the recorder, because they are how the block is read.
+// The choice, the month being shown, and which controllers sit beside the
+// title stay here. They are how the block is read, not what the recorder stores.
 type Panel struct {
-	span   int
-	month  time.Time
-	covers map[string]*ui.Bitmap
-	names  map[string]string
-	skip   map[string]bool
+	span        int
+	month       time.Time
+	covers      map[string]*ui.Bitmap
+	names       map[string]string
+	skip        map[string]bool
+	dualSense   *ui.SVG
+	switchPro   *ui.SVG
+	xbox        *ui.SVG
+	controllers []gamepad.Pad
 }
 
 // Draw is one frame of the block. A recorder that does not record on this
@@ -39,7 +46,10 @@ func (p *Panel) Draw(c *ui.Context, recorder *playtime.Recorder) {
 	presentation.QuickBlock(c, func() {
 		ui.Column(c).FillWidth().Gap(8).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "游戏时长").FontSize(presentation.SizeQuickName).FontWeight(600).TextColor(presentation.PanelInk).SingleLine()
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Text(c, "游戏时长").FontSize(presentation.SizeQuickName).FontWeight(600).TextColor(presentation.PanelInk).SingleLine()
+					p.controllersRow(c)
+				})
 				ui.Spacer(c)
 				spanSwitch(c, &p.span)
 			})
@@ -50,6 +60,90 @@ func (p *Panel) Draw(c *ui.Context, recorder *playtime.Recorder) {
 				p.drawMonth(c, sessions, now)
 			default:
 				p.today(c, sessions, now)
+			}
+		})
+	})
+}
+
+// SetControllerMarks keeps the three drawings the title uses. They are parsed
+// once by the shell; a nil mark draws nothing for that kind.
+func (p *Panel) SetControllerMarks(dualSense, switchPro, xbox *ui.SVG) {
+	if p == nil {
+		return
+	}
+	p.dualSense = dualSense
+	p.switchPro = switchPro
+	p.xbox = xbox
+}
+
+// SetControllers replaces the controllers drawn beside the title. The caller
+// has already read them; drawing does not touch the device.
+func (p *Panel) SetControllers(pads []gamepad.Pad) {
+	if p == nil {
+		return
+	}
+	p.controllers = append([]gamepad.Pad(nil), pads...)
+}
+
+func (p *Panel) controllersRow(c *ui.Context) {
+	if len(p.controllers) == 0 {
+		return
+	}
+	ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+		for _, pad := range p.controllers {
+			mark := p.xbox
+			switch pad.Kind {
+			case gamepad.KindDualSense:
+				mark = p.dualSense
+			case gamepad.KindSwitchPro:
+				mark = p.switchPro
+			}
+			if mark == nil {
+				continue
+			}
+			// Glyphs sit below the line box center, so a centered mark lands high.
+			ui.Row(c).Gap(5).AlignItems(ui.Center).Top(1).Children(func() {
+				if pad.Kind == gamepad.KindDualSense {
+					// Icon flattens an SVG to one ink color, which turns the
+					// two-tone controller into a black blob. Image keeps the
+					// shell, touchpad, and sticks.
+					ui.Image(c, mark).Size(18, 12).Shrink(0)
+				} else {
+					ui.Icon(c, mark).Size(14, 14).Shrink(0).TextColor(presentation.PanelInk)
+				}
+				if pad.Kind == gamepad.KindDualSense && pad.Battery.Known {
+					batteryGlyph(c, pad.Battery.Percent, pad.Battery.Charging)
+				}
+			})
+		}
+	})
+}
+
+func batteryGlyph(c *ui.Context, percent int, charging bool) {
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	ink := presentation.PanelFaint
+	fill := presentation.PanelFaint
+	// High charge is the brand green. Charging is too, at any level.
+	if charging || percent >= 60 {
+		fill = presentation.ColorBrand
+	}
+	const (
+		bodyW = float32(8)
+		bodyH = float32(12)
+		inset = float32(1.5) // border and padding, each side
+	)
+	ui.Column(c).Gap(0.5).AlignItems(ui.Center).Shrink(0).Children(func() {
+		ui.Box(c).Width(4).Height(1.5).Radius(0.8).Background(ink)
+		ui.Box(c).Width(bodyW).Height(bodyH).Radius(3.5).Border(1, ink).Padding(0.5).Children(func() {
+			ui.Spacer(c)
+			height := (bodyH - inset*2) * float32(percent) / 100
+			if height >= 1 {
+				ui.Box(c).Height(height).FillWidth().Radius(1.5).Background(fill)
 			}
 		})
 	})
@@ -195,11 +289,6 @@ func (p *Panel) week(c *ui.Context, sessions []playtime.Session, now time.Time) 
 			today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 			for i, day := range days {
 				ui.Column(c).Grow(1).Gap(4).AlignItems(ui.Center).Children(func() {
-					ui.Box(c).Height(12).Center().Children(func() {
-						if day.Seconds > 0 {
-							ui.Text(c, shortSeconds(day.Seconds)).FontSize(presentation.SizeQuickTiny).TextColor(presentation.PanelFaint).SingleLine()
-						}
-					})
 					fill := presentation.PanelLine
 					height := float32(2)
 					if day.Seconds > 0 {
@@ -209,7 +298,12 @@ func (p *Panel) week(c *ui.Context, sessions []playtime.Session, now time.Time) 
 							fill = presentation.ColorBrand
 						}
 					}
-					ui.Column(c).Height(48).Justify(ui.End).Children(func() {
+					// The label travels with its bar. A shared top row would
+					// leave a gap above every bar shorter than the tallest.
+					ui.Column(c).Height(weekPlotHeight).Gap(2).Justify(ui.End).AlignItems(ui.Center).Children(func() {
+						if day.Seconds > 0 {
+							ui.Text(c, shortSeconds(day.Seconds)).FontSize(presentation.SizeQuickTiny).TextColor(presentation.PanelFaint).SingleLine()
+						}
 						ui.Box(c).Width(8).Height(height).Radius(2).Background(fill)
 					})
 					ink := presentation.PanelFaint
@@ -504,11 +598,10 @@ func runLine(run playtime.Run) string {
 }
 
 func barHeight(seconds, tallest int64) float32 {
-	const full = 48
 	if seconds <= 0 || tallest <= 0 {
 		return 2
 	}
-	height := full * float32(seconds) / float32(tallest)
+	height := weekBarMax * float32(seconds) / float32(tallest)
 	if height < 4 {
 		height = 4
 	}
@@ -519,16 +612,18 @@ func shortSeconds(seconds int64) string {
 	if seconds <= 0 {
 		return ""
 	}
-	if seconds < 60 {
-		return playtime.FormatSeconds(seconds)
-	}
 	if seconds < 3600 {
-		return fmt.Sprintf("%d分", seconds/60)
+		minutes := seconds / 60
+		if minutes < 1 {
+			minutes = 1
+		}
+		return fmt.Sprintf("%dmin", minutes)
 	}
-	hours := seconds / 3600
-	minutes := (seconds % 3600) / 60
-	if minutes == 0 {
-		return fmt.Sprintf("%d时", hours)
+	// Nearest tenth of an hour. 360 seconds is 0.1h; half of that rounds up.
+	tenths := (seconds + 180) / 360
+	hours, fraction := tenths/10, tenths%10
+	if fraction == 0 {
+		return fmt.Sprintf("%dh", hours)
 	}
-	return fmt.Sprintf("%d:%02d", hours, minutes)
+	return fmt.Sprintf("%d.%dh", hours, fraction)
 }

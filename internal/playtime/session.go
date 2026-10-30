@@ -20,6 +20,10 @@ type Session struct {
 	StartedAt  time.Time
 	EndedAt    time.Time
 	LastSeenAt time.Time
+	// Devices lists the controllers connected while this run was open.
+	// Empty means none were seen. A pad that disconnects stays: this is what
+	// was used, not what is plugged in at the end.
+	Devices string
 }
 
 // Game is a Steam game the sampler can see right now.
@@ -53,4 +57,7 @@ type Sample struct {
 	Biased  time.Duration
 	Games   []Game
 	Stopped []Stop
+	// Devices is the controllers connected at this look. The tracker keeps
+	// every distinct kind it sees on an open session.
+	Devices []string
 }
