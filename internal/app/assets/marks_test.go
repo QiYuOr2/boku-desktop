@@ -11,6 +11,9 @@ func TestMarksAreSVGDocuments(t *testing.T) {
 	marks := map[string][]byte{
 		"TV":         TV(),
 		"TVBilibili": TVBilibili(),
+		"Lightbulb":  Lightbulb(),
+		"Command":    Command(),
+		"Return":     Return(),
 	}
 	for name, data := range marks {
 		t.Run(name, func(t *testing.T) {

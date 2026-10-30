@@ -28,6 +28,7 @@ internal/contract/<厂商>    厂商身份常量：providerId、凭据 key、申
         ↑
 internal/panel             功能：面板（服务 + 注册表 + 每个厂商一棵子树）
 internal/clipboard         功能：剪贴板历史（服务 + 轮询 + 历史与图片存储）
+internal/flash             功能：闪念（JSON 文档 + 快捷键；纯文字）
 internal/translate         功能：划词翻译（openai 协议 + 各后端）
 internal/credential        功能：凭据（服务 + 存储）
 internal/settings          功能：应用设置的存储
@@ -132,7 +133,7 @@ main.go         装配：应用名、生命周期监听、托盘、悬浮窗。�
 mygo.json       应用名、identifier、版本、产物目录
 resources/      icon.png：应用图标，由 mygo build 打进应用包
 internal/       app / domain / kit / platform / contract / panel / clipboard
-                / translate / credential / settings / logging
+                / flash / translate / credential / settings / logging
 testdata/       适配器测试用的原始响应样本
 ```
 

@@ -11,7 +11,7 @@ import (
 )
 
 func TestOwnServicesFollowStoredSettings(t *testing.T) {
-	_, _, _, _, _, translation, own, _, _, recorder, err := services(t.TempDir(), "0.1.0")
+	_, _, _, _, _, translation, own, _, _, recorder, _, err := services(t.TempDir(), "0.1.0")
 	if err != nil {
 		t.Fatal(err)
 	}

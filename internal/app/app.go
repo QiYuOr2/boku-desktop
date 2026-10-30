@@ -33,6 +33,8 @@ import (
 	"boku/internal/credential"
 	credentialui "boku/internal/credential/ui"
 	"boku/internal/domain"
+	"boku/internal/flash"
+	flashui "boku/internal/flash/ui"
 	"boku/internal/panel"
 	panelui "boku/internal/panel/ui"
 	"boku/internal/platform/autostart"
@@ -98,6 +100,9 @@ type Deps struct {
 	// Translate is the selection-translation tool. A State without one
 	// draws no translation window and binds no shortcut for it.
 	Translate *translate.Translate
+	// Flash is the text-flash document. A State without one draws no capture
+	// line and no history.
+	Flash *flash.Service
 	// Screenshot opens the platform region selector and returns the chosen PNG.
 	Screenshot domain.ScreenshotDevice
 	// RegionCapture reads physical desktop pixels. When present, the app
@@ -203,6 +208,7 @@ type State struct {
 	clipboardUI       *clipboardui.State
 	translate         *translate.Translate
 	translationUI     *translateui.State
+	flashUI           *flashui.State
 	version           string
 	quit              func()
 	appearance        *Appearance
@@ -232,6 +238,7 @@ type State struct {
 	historyCode       *ui.SVG
 	settingsMark      *ui.SVG
 	quitMark          *ui.SVG
+	flashMark         *ui.SVG
 	screenshotMark    *ui.SVG
 	qrMark            *ui.SVG
 	copyMark          *ui.SVG
@@ -246,6 +253,8 @@ type State struct {
 	panelInjectedDark bool
 	settingsWindow    *mygo.Window
 	historyWindow     *mygo.Window
+	flashCapture      *mygo.Window
+	flashHistory      *mygo.Window
 	ownServices       func() error
 	panelStatus       string
 	settingsScroll    ui.ScrollState
@@ -338,6 +347,10 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the settings mark: %w", err)
 	}
+	flashMark, err := ui.ParseSVG(assets.Lightbulb())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the flash mark: %w", err)
+	}
 	quitMark, err := ui.ParseSVG(assets.Quit())
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the quit mark: %w", err)
@@ -361,6 +374,14 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	closeMark, err := ui.ParseSVG(assets.Close())
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the close mark: %w", err)
+	}
+	commandMark, err := ui.ParseSVG(assets.Command())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the command mark: %w", err)
+	}
+	returnMark, err := ui.ParseSVG(assets.Return())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the return mark: %w", err)
 	}
 	// The translation section's mark is the application's own drawing, not a
 	// brand's: it heads a section of Boku's settings rather than standing for
@@ -441,6 +462,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		historyCode:       historyCode,
 		settingsMark:      settingsMark,
 		quitMark:          quitMark,
+		flashMark:         flashMark,
 		screenshotMark:    screenshotMark,
 		qrMark:            qrMark,
 		copyMark:          copyMark,
@@ -482,6 +504,21 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		return state.playtime != nil && state.playtime.Available()
 	})
 	state.clipboardUI = clipboardui.New(deps.Clipboard, state.featureHost(), state.openHistory)
+	if deps.Flash != nil {
+		state.flashUI = flashui.New(flashui.Config{
+			Service:     deps.Flash,
+			Host:        state.featureHost(),
+			CopyText:    state.copyFlashText,
+			RebindAll:   state.RegisterShortcuts,
+			ShowCapture: state.openFlashCapture,
+			HideCapture: state.hideFlashCapture,
+			Mark:        state.flashMark,
+			CloseMark:   state.closeMark,
+			CommandMark: commandMark,
+			ReturnMark:  returnMark,
+		})
+		state.translationUI.SetExtraRebind(state.flashUI.Rebind)
+	}
 	state.bilibiliUI.AttachHost(state.featureHost())
 	state.animeUI.AttachHost(state.featureHost(), deps.Secrets)
 	state.prepareUpdates(deps.Updates)
@@ -614,6 +651,14 @@ func (s *State) refresh(after func()) {
 		s.historyWindow.Update(refreshCallback(after))
 		after = nil
 	}
+	if s.flashCapture != nil {
+		s.flashCapture.Update(refreshCallback(after))
+		after = nil
+	}
+	if s.flashHistory != nil {
+		s.flashHistory.Update(refreshCallback(after))
+		after = nil
+	}
 	if s.translationUI != nil && s.translationUI.Repaint(refreshCallback(after)) {
 		after = nil
 	}
@@ -639,6 +684,12 @@ func (s *State) menu() *mygo.Menu {
 	items := []*mygo.MenuItem{
 		{Label: "打开 " + appName, Click: func(*mygo.MenuItem, *mygo.Window) { s.Toggle() }},
 		{Label: "设置…", Click: func(*mygo.MenuItem, *mygo.Window) { s.openSettings() }},
+	}
+	if s.flashUI != nil {
+		items = append(items,
+			&mygo.MenuItem{Label: "记一条闪念", Click: func(*mygo.MenuItem, *mygo.Window) { s.openFlashCapture() }},
+			&mygo.MenuItem{Label: "闪念历史", Click: func(*mygo.MenuItem, *mygo.Window) { s.openFlashHistory() }},
+		)
 	}
 	// A ready update earns a line here, between the settings and the way
 	// out: the menu is the one place reachable while the application is
@@ -918,6 +969,12 @@ func (s *State) clipboardBottom(c *ui.Context) {
 // pointer that rests on it and for assistive technology.
 func (s *State) flyoutActions(c *ui.Context) {
 	ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(4)).Children(func() {
+		if s.flashUI != nil {
+			if button := presentation.QuietIconButton(c, s.flashMark, "闪念"); button.Clicked() {
+				slog.Info("flash button clicked", "event", "flash_history_opened", "source", "quick_window")
+				s.openFlashHistory()
+			}
+		}
 		if s.translationUI.HasScreenshot() {
 			if button := presentation.QuietIconButton(c, s.qrMark, "识别二维码"); button.Clicked() {
 				slog.Info("QR recognition button clicked", "event", "qr_recognition_requested", "source", "quick_window")
