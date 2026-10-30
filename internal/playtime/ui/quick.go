@@ -21,10 +21,11 @@ const (
 
 // Panel is the flyout block: today, this week, or one month.
 //
-// The choice, the month being shown, and which controllers sit beside the
-// title stay here. They are how the block is read, not what the recorder stores.
+// The choice, the week and month being shown, and which controllers sit beside
+// the title stay here. They are how the block is read, not what the recorder stores.
 type Panel struct {
 	span        int
+	sunday      time.Time
 	month       time.Time
 	covers      map[string]*ui.Bitmap
 	names       map[string]string
@@ -103,15 +104,18 @@ func (p *Panel) controllersRow(c *ui.Context) {
 			}
 			// Glyphs sit below the line box center, so a centered mark lands high.
 			ui.Row(c).Gap(5).AlignItems(ui.Center).Top(1).Children(func() {
-				if pad.Kind == gamepad.KindDualSense {
-					// Icon flattens an SVG to one ink color, which turns the
-					// two-tone controller into a black blob. Image keeps the
+				switch pad.Kind {
+				case gamepad.KindDualSense:
+					// Icon flattens an SVG to one ink color. Image keeps the
 					// shell, touchpad, and sticks.
 					ui.Image(c, mark).Size(18, 12).Shrink(0)
-				} else {
-					ui.Icon(c, mark).Size(14, 14).Shrink(0).TextColor(presentation.PanelInk)
+				case gamepad.KindSwitchPro:
+					ui.Image(c, mark).Size(20, 15).Shrink(0)
+				default:
+					// Xbox-protocol pads, including third-party ones, share this mark.
+					ui.Image(c, mark).Size(20, 15).Shrink(0)
 				}
-				if pad.Kind == gamepad.KindDualSense && pad.Battery.Known {
+				if pad.Battery.Known {
 					batteryGlyph(c, pad.Battery.Percent, pad.Battery.Charging)
 				}
 			})
@@ -213,6 +217,34 @@ func (p *Panel) ShiftMonth(now time.Time, delta int) {
 	p.month = next
 }
 
+// ShownWeek is the Sunday of the week the chart shows. A panel that has not
+// been moved shows the week of now.
+func (p *Panel) ShownWeek(now time.Time) time.Time {
+	anchor := now
+	if p != nil && !p.sunday.IsZero() {
+		anchor = p.sunday
+	}
+	return weekStart(anchor, now.Location())
+}
+
+// ShiftWeek moves the chart by delta weeks and refuses a week after the one
+// now is in.
+func (p *Panel) ShiftWeek(now time.Time, delta int) {
+	if p == nil || delta == 0 {
+		return
+	}
+	next := p.ShownWeek(now).AddDate(0, 0, 7*delta)
+	if next.After(weekStart(now, now.Location())) {
+		return
+	}
+	p.sunday = next
+}
+
+func weekStart(day time.Time, loc *time.Location) time.Time {
+	anchor := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+	return anchor.AddDate(0, 0, -int(anchor.Weekday()))
+}
+
 func (p *Panel) today(c *ui.Context, sessions []playtime.Session, now time.Time) {
 	day := now
 	games := playtime.GamesOn(sessions, day, now)
@@ -226,40 +258,38 @@ func (p *Panel) today(c *ui.Context, sessions []playtime.Session, now time.Time)
 		day = latest
 		games = playtime.GamesOn(sessions, day, now)
 	}
-	var total, tallest int64
+	var total int64
 	for _, game := range games {
 		total += game.Seconds
-		if game.Seconds > tallest {
-			tallest = game.Seconds
-		}
 	}
 	figure(c, playtime.DayHeading(day, now), total)
 	if len(games) == 0 {
 		quiet(c, "今天还没有记录。")
 		return
 	}
+	dayRibbon(c, games, day)
 	ui.Column(c).FillWidth().Gap(10).Children(func() {
-		for _, game := range games {
+		for index, game := range games {
 			name := p.gameName(game)
+			ink := gameInk(index)
 			ui.Row(c).FillWidth().Gap(8).AlignItems(ui.Start).Children(func() {
-				p.cover(c, game.AppID, 36, 48)
+				p.cover(c, game.AppID, 32, 48)
 				ui.Column(c).Grow(1).Gap(4).Children(func() {
-					ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
+					ui.Row(c).FillWidth().Gap(4).AlignItems(ui.Center).Children(func() {
+						ui.Box(c).Size(dayChip, dayChip).Radius(2).Shrink(0).Background(ink)
 						ui.Text(c, name).FontSize(presentation.SizeQuickFine).FontWeight(600).TextColor(presentation.PanelInk).SingleLine().Grow(1)
 						ui.Text(c, playtime.FormatSeconds(game.Seconds)).FontSize(presentation.SizeQuickFine).TextColor(presentation.PanelFaint).SingleLine()
 					})
-					for _, run := range game.Runs {
-						ink := presentation.PanelFaint
-						if run.Open {
-							ink = presentation.ColorBrand
+					ui.Column(c).FillWidth().Padding(0, 0, 0, dayChip+4).Gap(4).Children(func() {
+						for i := 0; i < len(game.Runs); i += 2 {
+							ui.Row(c).FillWidth().Gap(4).Children(func() {
+								sessionChip(c, game.Runs[i], ink)
+								if i+1 < len(game.Runs) {
+									sessionChip(c, game.Runs[i+1], ink)
+								}
+							})
 						}
-						ui.Text(c, runLine(run)).FontSize(presentation.SizeQuickTiny).TextColor(ink).SingleLine()
-					}
-					share := int64(0)
-					if tallest > 0 {
-						share = game.Seconds * 100 / tallest
-					}
-					presentation.ProgressBar(c, share, presentation.ColorBrand, "", name)
+					})
 				})
 			})
 		}
@@ -267,7 +297,8 @@ func (p *Panel) today(c *ui.Context, sessions []playtime.Session, now time.Time)
 }
 
 func (p *Panel) week(c *ui.Context, sessions []playtime.Session, now time.Time) {
-	days := playtime.WeekOf(sessions, now)
+	shown := p.ShownWeek(now)
+	days := playtime.WeekContaining(sessions, shown, now)
 	var total, tallest int64
 	for _, day := range days {
 		total += day.Seconds
@@ -277,7 +308,7 @@ func (p *Panel) week(c *ui.Context, sessions []playtime.Session, now time.Time) 
 	}
 	var longest playtime.GameDay
 	if len(days) == 7 {
-		figure(c, days[0].Day.Format("1月2日")+" – "+days[6].Day.Format("1月2日"), total)
+		p.weekHeading(c, days[0].Day, days[6].Day, total, now)
 		games := playtime.GamesDuring(sessions, days[0].Day, days[0].Day.AddDate(0, 0, 7), now)
 		if len(games) > 0 {
 			longest = games[0]
@@ -316,7 +347,32 @@ func (p *Panel) week(c *ui.Context, sessions []playtime.Session, now time.Time) 
 		})
 		if longest.AppID != "" {
 			p.longest(c, longest)
+		} else {
+			weekNone(c)
 		}
+	})
+}
+
+func (p *Panel) weekHeading(c *ui.Context, start, end time.Time, total int64, now time.Time) {
+	current := weekStart(now, now.Location())
+	label := start.Format("1月2日") + " – " + end.Format("1月2日")
+	if start.Year() != end.Year() {
+		label = start.Format("2006年1月2日") + " – " + end.Format("2006年1月2日")
+	}
+	ui.Column(c).Gap(2).AlignItems(ui.Start).Children(func() {
+		periodTitle(c, label, start.Before(current), func() { p.ShiftWeek(now, -1) }, func() { p.ShiftWeek(now, 1) })
+		if total == 0 {
+			ui.Text(c, "暂无数据").FontSize(presentation.SizeQuickNumber).FontWeight(700).TextColor(presentation.PanelFaint).SingleLine()
+			return
+		}
+		ui.Text(c, playtime.FormatSeconds(total)).FontSize(presentation.SizeQuickNumber).FontWeight(700).TextColor(presentation.PanelNumber).SingleLine()
+	})
+}
+
+func weekNone(c *ui.Context) {
+	ui.Column(c).Width(76).Gap(4).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, "最久").FontSize(presentation.SizeQuickTiny).TextColor(presentation.PanelFaint).SingleLine()
+		ui.Text(c, "暂无数据").FontSize(presentation.SizeQuickTiny).TextColor(presentation.PanelFaint).SingleLine()
 	})
 }
 
@@ -324,7 +380,7 @@ func (p *Panel) longest(c *ui.Context, game playtime.GameDay) {
 	name := p.gameName(game)
 	ui.Column(c).Width(76).Gap(4).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, "最久").FontSize(presentation.SizeQuickTiny).TextColor(presentation.PanelFaint).SingleLine()
-		p.cover(c, game.AppID, 56, 72)
+		p.cover(c, game.AppID, 48, 72)
 		ui.Text(c, name).FontSize(presentation.SizeQuickTiny).FontWeight(600).TextColor(presentation.PanelInk).SingleLine()
 		ui.Text(c, playtime.FormatSeconds(game.Seconds)).FontSize(presentation.SizeQuickTiny).TextColor(presentation.PanelFaint).SingleLine()
 	})
@@ -378,11 +434,17 @@ func (p *Panel) drawMonth(c *ui.Context, sessions []playtime.Session, now time.T
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 		heatLegend(c)
 		ui.Spacer(c)
-		ui.Row(c).Shrink(0).AlignItems(ui.Center).Radius(6).Background(presentation.PanelField).Children(func() {
-			monthStep(c, "‹", true, func() { p.ShiftMonth(now, -1) })
-			ui.Text(c, shown.Format("2006年1月")).FontSize(presentation.SizeQuickFine).FontWeight(600).TextColor(presentation.PanelInk).SingleLine()
-			monthStep(c, "›", shown.Before(current), func() { p.ShiftMonth(now, 1) })
-		})
+		periodTitle(c, shown.Format("2006年1月"), shown.Before(current), func() { p.ShiftMonth(now, -1) }, func() { p.ShiftMonth(now, 1) })
+	})
+}
+
+// periodTitle is the week or month pager. The pale face wraps the arrows and
+// the words, and only that cluster, the same way the month title does.
+func periodTitle(c *ui.Context, label string, canForward bool, back, forward func()) {
+	ui.Row(c).Shrink(0).AlignItems(ui.Center).Radius(6).Background(presentation.PanelField).Children(func() {
+		monthStep(c, "‹", true, back)
+		ui.Text(c, label).FontSize(presentation.SizeQuickFine).FontWeight(600).TextColor(presentation.PanelInk).SingleLine()
+		monthStep(c, "›", canForward, forward)
 	})
 }
 
@@ -488,7 +550,7 @@ func leaderCover(weeks, games int) (width, height, gap float32) {
 	if row > maxH && games > 1 {
 		row = maxH
 	}
-	return row * 28 / 36, row, gap
+	return row * 2 / 3, row, gap
 }
 
 func monthCalendarHeight(weeks int) float32 {
@@ -585,16 +647,36 @@ func quiet(c *ui.Context, text string) {
 	ui.Text(c, text).FontSize(presentation.SizeQuickFine).TextColor(presentation.PanelFaint)
 }
 
-func runLine(run playtime.Run) string {
+// sessionChip is one played stretch: the clock range and its length on the
+// same light face the day switch uses, so two of them can sit on a line
+// without a gap across the row. An open stretch keeps that game's color.
+func sessionChip(c *ui.Context, run playtime.Run, ink ui.Color) {
+	line := presentation.PanelFaint
+	if run.Open {
+		line = ink
+	}
+	ui.Row(c).Grow(1).Children(func() {
+		ui.Row(c).Shrink(0).Gap(4).AlignItems(ui.Center).
+			Padding(2, 4).
+			Radius(4).
+			Background(presentation.PanelField).
+			Children(func() {
+				ui.Text(c, runWhen(run)).FontSize(presentation.SizeQuickTiny).TextColor(line).SingleLine()
+				ui.Text(c, playtime.FormatSeconds(run.Seconds)).FontSize(presentation.SizeQuickTiny).TextColor(line).SingleLine()
+			})
+	})
+}
+
+func runWhen(run playtime.Run) string {
 	start := run.StartedAt.Format("15:04")
 	if run.Open {
-		return start + " 起 · " + playtime.FormatSeconds(run.Seconds)
+		return start + " 起"
 	}
 	end := run.EndedAt.Format("15:04")
 	if run.UntilMidnight {
 		end = "24:00"
 	}
-	return start + "–" + end + " · " + playtime.FormatSeconds(run.Seconds)
+	return start + "–" + end
 }
 
 func barHeight(seconds, tallest int64) float32 {

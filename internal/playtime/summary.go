@@ -172,15 +172,22 @@ func GamesDuring(sessions []Session, from, to, now time.Time) []GameDay {
 
 // WeekOf is the Sunday-to-Saturday week that contains now, in now's location.
 func WeekOf(sessions []Session, now time.Time) []DayTotal {
-	if now.IsZero() {
+	return WeekContaining(sessions, now, now)
+}
+
+// WeekContaining is the Sunday-to-Saturday week that contains day.
+// now ends a session that is still running, including when day is an earlier week.
+func WeekContaining(sessions []Session, day, now time.Time) []DayTotal {
+	if day.IsZero() || now.IsZero() {
 		return nil
 	}
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	sunday := today.AddDate(0, 0, -int(today.Weekday()))
+	loc := day.Location()
+	anchor := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+	sunday := anchor.AddDate(0, 0, -int(anchor.Weekday()))
 	days := make([]DayTotal, 7)
 	for i := range days {
-		day := sunday.AddDate(0, 0, i)
-		days[i] = DayTotal{Day: day, Seconds: secondsOn(sessions, day, now)}
+		date := sunday.AddDate(0, 0, i)
+		days[i] = DayTotal{Day: date, Seconds: secondsOn(sessions, date, now)}
 	}
 	return days
 }

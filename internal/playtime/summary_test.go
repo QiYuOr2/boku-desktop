@@ -102,6 +102,26 @@ func TestWeekOfStartsOnSunday(t *testing.T) {
 	}
 }
 
+func TestWeekContainingUsesTheAskedWeek(t *testing.T) {
+	loc := time.FixedZone("CST", 8*3600)
+	now := time.Date(2026, 10, 29, 18, 0, 0, 0, loc)
+	played := time.Date(2026, 10, 26, 10, 0, 0, 0, loc)
+	sessions := []Session{{AppID: "1", StartedAt: played, EndedAt: played.Add(90 * time.Minute)}}
+	earlier := time.Date(2026, 10, 18, 12, 0, 0, 0, loc)
+	days := WeekContaining(sessions, earlier, now)
+	if len(days) != 7 || days[0].Day.Day() != 18 || days[6].Day.Day() != 24 {
+		t.Fatalf("week = %+v", days)
+	}
+	for _, day := range days {
+		if day.Seconds != 0 {
+			t.Fatalf("earlier week counted %d", day.Seconds)
+		}
+	}
+	if WeekContaining(sessions, time.Time{}, now) != nil || WeekContaining(sessions, earlier, time.Time{}) != nil {
+		t.Fatal("a zero bound invented a week")
+	}
+}
+
 func TestMonthOfPadsUntilSunday(t *testing.T) {
 	loc := time.FixedZone("CST", 8*3600)
 	now := time.Date(2026, 10, 29, 12, 0, 0, 0, loc)

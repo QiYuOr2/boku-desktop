@@ -34,6 +34,7 @@ var (
 	setupapi             = syscall.NewLazyDLL("setupapi.dll")
 	hid                  = syscall.NewLazyDLL("hid.dll")
 	kernel32             = syscall.NewLazyDLL("kernel32.dll")
+	cfgmgr               = syscall.NewLazyDLL("cfgmgr32.dll")
 	hidGetGuid           = hid.NewProc("HidD_GetHidGuid")
 	hidGetAttributes     = hid.NewProc("HidD_GetAttributes")
 	hidGetPreparsed      = hid.NewProc("HidD_GetPreparsedData")
@@ -50,6 +51,10 @@ var (
 	waitForSingle        = kernel32.NewProc("WaitForSingleObject")
 	getOverlapped        = kernel32.NewProc("GetOverlappedResult")
 	cancelIoEx           = kernel32.NewProc("CancelIoEx")
+	xinput               = syscall.NewLazyDLL("xinput1_4.dll")
+	xinputBattery        = xinput.NewProc("XInputGetBatteryInformation")
+	cmParent             = cfgmgr.NewProc("CM_Get_Parent")
+	cmDeviceID           = cfgmgr.NewProc("CM_Get_Device_IDW")
 )
 
 type guid struct {
@@ -101,14 +106,38 @@ type nativeOverlapped struct {
 }
 
 type listed struct {
-	pad   Pad
-	usage uint16
-	id    string
+	pad    Pad
+	usage  uint16
+	id     string
+	xinput bool
+	wired  bool
 }
 
-// Connected lists HID gamepads and joysticks. A DualSense also contributes
-// the charge nibble from one input report; other protocols are not read.
+// Connected lists HID gamepads and joysticks. A DualSense or a Switch Pro
+// contributes its charge byte only over Bluetooth. An Xbox-protocol pad
+// contributes an XInput charge only when the report is not the wired one.
 func Connected() []Pad {
+	found := listPads()
+	if found == nil {
+		note(nil)
+		return nil
+	}
+	sort.Slice(found, func(i, j int) bool {
+		if kindOrder(found[i].pad.Kind) != kindOrder(found[j].pad.Kind) {
+			return kindOrder(found[i].pad.Kind) < kindOrder(found[j].pad.Kind)
+		}
+		return found[i].id < found[j].id
+	})
+	assignXInput(found)
+	out := make([]Pad, len(found))
+	for i := range found {
+		out[i] = found[i].pad
+	}
+	note(out)
+	return out
+}
+
+func listPads() []listed {
 	var class guid
 	hidGetGuid.Call(uintptr(unsafe.Pointer(&class)))
 	devs, _, _ := setupGetClassDevs.Call(
@@ -117,7 +146,6 @@ func Connected() []Pad {
 		digcfPresent|digcfDeviceInterface,
 	)
 	if devs == 0 || devs == ^uintptr(0) {
-		note(nil)
 		return nil
 	}
 	defer setupDestroy.Call(devs)
@@ -135,28 +163,20 @@ func Connected() []Pad {
 		if ok == 0 {
 			break
 		}
-		path := interfacePath(devs, &data)
+		path, devInst := interfacePath(devs, &data)
 		if path == "" {
 			continue
 		}
-		item, okPad := inspect(path)
+		item, okPad := inspect(path, wiredConnection(instanceChain(devInst)))
 		if !okPad {
 			continue
 		}
 		found = mergePad(found, item)
 	}
-	sort.Slice(found, func(i, j int) bool {
-		if kindOrder(found[i].pad.Kind) != kindOrder(found[j].pad.Kind) {
-			return kindOrder(found[i].pad.Kind) < kindOrder(found[j].pad.Kind)
-		}
-		return found[i].id < found[j].id
-	})
-	out := make([]Pad, len(found))
-	for i := range found {
-		out[i] = found[i].pad
+	if found == nil {
+		return []listed{}
 	}
-	note(out)
-	return out
+	return found
 }
 
 func mergePad(found []listed, item listed) []listed {
@@ -174,11 +194,18 @@ func mergePad(found []listed, item listed) []listed {
 	return append(found, item)
 }
 
-func interfacePath(devs uintptr, data *spDeviceInterfaceData) string {
+type spDevInfoData struct {
+	cbSize    uint32
+	classGUID guid
+	devInst   uint32
+	reserved  uintptr
+}
+
+func interfacePath(devs uintptr, data *spDeviceInterfaceData) (string, uint32) {
 	var need uint32
 	setupInterfaceDetail.Call(devs, uintptr(unsafe.Pointer(data)), 0, 0, uintptr(unsafe.Pointer(&need)), 0)
 	if need < 8 || need > 4096 {
-		return ""
+		return "", 0
 	}
 	buf := make([]byte, need)
 	// On 64-bit Windows cbSize is 8, but the path begins at byte 4.
@@ -187,21 +214,40 @@ func interfacePath(devs uintptr, data *spDeviceInterfaceData) string {
 		cbSize = 6
 	}
 	*(*uint32)(unsafe.Pointer(&buf[0])) = cbSize
+	info := spDevInfoData{cbSize: uint32(unsafe.Sizeof(spDevInfoData{}))}
 	ok, _, _ := setupInterfaceDetail.Call(
 		devs,
 		uintptr(unsafe.Pointer(data)),
 		uintptr(unsafe.Pointer(&buf[0])),
 		uintptr(need),
 		uintptr(unsafe.Pointer(&need)),
-		0,
+		uintptr(unsafe.Pointer(&info)),
 	)
 	if ok == 0 {
-		return ""
+		return "", 0
 	}
-	return utf16From(buf, 4)
+	return utf16From(buf, 4), info.devInst
 }
 
-func inspect(path string) (listed, bool) {
+func instanceChain(devInst uint32) []string {
+	var ids []string
+	for i := 0; i < 8 && devInst != 0; i++ {
+		buf := make([]uint16, 200)
+		r, _, _ := cmDeviceID.Call(uintptr(devInst), uintptr(unsafe.Pointer(&buf[0])), 200, 0)
+		if r == 0 {
+			ids = append(ids, syscall.UTF16ToString(buf))
+		}
+		var parent uint32
+		r, _, _ = cmParent.Call(uintptr(unsafe.Pointer(&parent)), uintptr(devInst), 0)
+		if r != 0 {
+			break
+		}
+		devInst = parent
+	}
+	return ids
+}
+
+func inspect(path string, wired bool) (listed, bool) {
 	handle := openHID(path)
 	if handle == 0 || handle == ^uintptr(0) {
 		return listed{}, false
@@ -228,16 +274,69 @@ func inspect(path string) (listed, bool) {
 		return listed{}, false
 	}
 	item := listed{
-		pad:   Pad{Kind: kindOf(attr.VendorID, attr.ProductID)},
-		usage: caps.Usage,
-		id:    deviceID(path),
+		pad:    Pad{Kind: kindOf(attr.VendorID, attr.ProductID)},
+		usage:  caps.Usage,
+		id:     deviceID(path),
+		xinput: strings.Contains(strings.ToLower(path), "&ig_"),
+		wired:  wired,
 	}
-	if readsDualSenseBattery(attr.VendorID, attr.ProductID) {
-		if battery, ok := batteryFromReport(readReport(handle, caps.InputReportByteLength)); ok {
-			item.pad.Battery = battery
+	var battery Battery
+	var known bool
+	if !wired {
+		switch {
+		case readsDualSenseBattery(attr.VendorID, attr.ProductID):
+			battery, known = batteryFromReport(readReport(handle, caps.InputReportByteLength))
+		case readsSwitchBattery(attr.VendorID, attr.ProductID):
+			battery, known = batteryFromSwitchReport(readReport(handle, caps.InputReportByteLength))
 		}
 	}
+	if known {
+		item.pad.Battery = battery
+	}
 	return item, true
+}
+
+// assignXInput pairs each XInput interface with a connected user, in index
+// order. A wired report leaves that pad without a charge.
+func assignXInput(found []listed) {
+	need := false
+	for i := range found {
+		if found[i].xinput {
+			need = true
+			break
+		}
+	}
+	if !need {
+		return
+	}
+	slots := xinputSlots()
+	n := 0
+	for i := range found {
+		if !found[i].xinput {
+			continue
+		}
+		if n >= len(slots) {
+			return
+		}
+		if slots[n].Known {
+			found[i].pad.Battery = slots[n]
+		}
+		n++
+	}
+}
+
+func xinputSlots() []Battery {
+	var slots []Battery
+	for user := uintptr(0); user < 4; user++ {
+		var info [2]byte
+		r, _, _ := xinputBattery.Call(user, 0, uintptr(unsafe.Pointer(&info[0])))
+		if r != 0 {
+			continue
+		}
+		battery, _ := batteryFromXInput(info[0], info[1])
+		slots = append(slots, battery)
+	}
+	return slots
 }
 
 func openHID(path string) uintptr {

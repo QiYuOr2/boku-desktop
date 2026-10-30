@@ -81,11 +81,83 @@ func TestPadsEqual(t *testing.T) {
 	}
 }
 
-func TestNeedsBatteryOnlyForADualSense(t *testing.T) {
-	if needsBattery(nil) || needsBattery([]Pad{{Kind: KindXbox}, {Kind: KindSwitchPro}}) {
+func TestNeedsBatteryOnlyForAChargeReading(t *testing.T) {
+	if needsBattery(nil) || needsBattery([]Pad{{Kind: KindXbox}}) {
 		t.Fatal("a pad without a charge byte asked for a refresh")
 	}
-	if !needsBattery([]Pad{{Kind: KindDualSense}}) {
-		t.Fatal("a DualSense did not ask for a refresh")
+	if !needsBattery([]Pad{{Kind: KindDualSense}}) || !needsBattery([]Pad{{Kind: KindSwitchPro}}) {
+		t.Fatal("a pad with a charge byte did not ask for a refresh")
+	}
+	if !needsBattery([]Pad{{Kind: KindXbox, Battery: Battery{Known: true, Percent: 66}}}) {
+		t.Fatal("a wireless Xbox charge did not ask for a refresh")
+	}
+}
+
+func TestWiredConnection(t *testing.T) {
+	usb := []string{`HID\VID_054C&PID_0CE6&MI_03\7&1`, `USB\VID_054C&PID_0CE6&MI_03\6&2`}
+	if !wiredConnection(usb) {
+		t.Fatal("a USB cable was treated as wireless")
+	}
+	bt := []string{`HID\VID_057E&PID_2009\8&1`, `BTHENUM\{00001124-0000-1000-8000-00805f9b34fb}_VID&0002057E_PID&2009\1`}
+	if wiredConnection(bt) {
+		t.Fatal("Bluetooth was treated as a cable")
+	}
+	if wiredConnection([]string{`HID\VID_054C&PID_0CE6\1`, `BTHLE\DEV_AABBCCDDEEFF`}) {
+		t.Fatal("Bluetooth LE was treated as a cable")
+	}
+	if wiredConnection(nil) || wiredConnection([]string{`HID\VID_054C&PID_0CE6\1`}) {
+		t.Fatal("an unknown bus was treated as a cable")
+	}
+}
+
+func TestBatteryFromXInput(t *testing.T) {
+	full, ok := batteryFromXInput(0x02, 3)
+	if !ok || full.Percent != 100 || full.Charging {
+		t.Fatalf("alkaline full: %+v ok=%v", full, ok)
+	}
+	low, ok := batteryFromXInput(0x03, 1)
+	if !ok || low.Percent != 33 {
+		t.Fatalf("nimh low: %+v ok=%v", low, ok)
+	}
+	mid, ok := batteryFromXInput(0xFF, 2)
+	if !ok || mid.Percent != 66 {
+		t.Fatalf("unknown medium: %+v ok=%v", mid, ok)
+	}
+	empty, ok := batteryFromXInput(0x02, 0)
+	if !ok || empty.Percent != 0 || !empty.Known {
+		t.Fatalf("alkaline empty: %+v ok=%v", empty, ok)
+	}
+	if _, ok := batteryFromXInput(0x01, 3); ok {
+		t.Fatal("a wired full report was accepted")
+	}
+	if _, ok := batteryFromXInput(0x00, 0); ok {
+		t.Fatal("a disconnected report was accepted")
+	}
+	if _, ok := batteryFromXInput(0x02, 4); ok {
+		t.Fatal("an undefined level was accepted")
+	}
+}
+
+func TestBatteryFromSwitchReport(t *testing.T) {
+	full, ok := batteryFromSwitchReport([]byte{0x30, 0x28, 0x91})
+	if !ok || full.Percent != 100 || !full.Charging {
+		t.Fatalf("full charging report: %+v ok=%v", full, ok)
+	}
+	discharging, ok := batteryFromSwitchReport([]byte{0x30, 0x01, 0x80, 0x00})
+	if !ok || discharging.Percent != 100 || discharging.Charging {
+		t.Fatalf("full report: %+v ok=%v", discharging, ok)
+	}
+	low, ok := batteryFromSwitchReport([]byte{0x21, 0x02, 0x40})
+	if !ok || low.Percent != 50 || low.Charging {
+		t.Fatalf("low report: %+v ok=%v", low, ok)
+	}
+	if _, ok := batteryFromSwitchReport([]byte{0x30, 0x00, 0xB0}); ok {
+		t.Fatal("an undefined charge nibble was accepted")
+	}
+	if _, ok := batteryFromSwitchReport([]byte{0x3F, 0x00, 0x80}); ok {
+		t.Fatal("a simple report was accepted")
+	}
+	if _, ok := batteryFromSwitchReport([]byte{0x30}); ok {
+		t.Fatal("a short report was accepted")
 	}
 }

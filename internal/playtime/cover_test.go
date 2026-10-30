@@ -10,8 +10,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"boku/internal/platform/httpc"
 )
@@ -73,6 +75,98 @@ func TestHeaderImageReadsTheStoreField(t *testing.T) {
 	}
 }
 
+func TestLibraryPortraitPrecedesTheHeader(t *testing.T) {
+	header := "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/4115450/header.jpg?t=1"
+	got := portraitURLs("4115450", header)
+	if len(got) < 2 || got[0] != "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/4115450/library_600x900_schinese.jpg" {
+		t.Fatalf("%v", got)
+	}
+	if got[1] != "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/4115450/library_600x900.jpg" {
+		t.Fatalf("%v", got)
+	}
+	if got[len(got)-1] != header {
+		t.Fatalf("header last: %v", got)
+	}
+	foreign := portraitURLs("4115450", "https://example.test/a.jpg")
+	for _, item := range foreign {
+		if strings.Contains(item, "example.test") {
+			t.Fatalf("foreign header was kept: %v", foreign)
+		}
+	}
+}
+
+func TestLibraryCapsuleURLUsesTheStoreFile(t *testing.T) {
+	raw := []byte(`{"response":{"store_items":[{"assets":{"asset_url_format":"steam/apps/4115450/${FILENAME}?t=1","library_capsule":"abc/library_capsule_schinese.jpg"}}]}}`)
+	got, err := libraryCapsuleURL(raw)
+	want := "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/4115450/abc/library_capsule_schinese.jpg?t=1"
+	if err != nil || got != want {
+		t.Fatalf("capsule = %q %v", got, err)
+	}
+	if _, err := libraryCapsuleURL([]byte(`{"response":{"store_items":[{"assets":{}}]}}`)); err == nil {
+		t.Fatal("missing capsule was accepted")
+	}
+}
+
+func TestCoverReplacesAWideImageOnce(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "9.jpg"), testJPEGSize(t, 4, 2), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "9.title"), []byte("游戏"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tall := testJPEGSize(t, 2, 4)
+	var mu sync.Mutex
+	calls := 0
+	c := &covers{dir: dir, busy: map[string]bool{}, failed: map[string]bool{}}
+	c.fetch = func(context.Context, string) ([]byte, string, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		return tall, "游戏", nil
+	}
+	done := make(chan struct{})
+	c.Want([]string{"9"}, func() { close(done) })
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out")
+	}
+	if !bytes.Equal(c.bytes("9"), tall) {
+		t.Fatal("wide cover was kept")
+	}
+	c.Want([]string{"9"}, nil)
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("calls = %d", calls)
+	}
+}
+
+func TestCoverKeepsAHeaderWhenNoPortraitExists(t *testing.T) {
+	dir := t.TempDir()
+	wide := testJPEGSize(t, 4, 2)
+	var mu sync.Mutex
+	calls := 0
+	c := &covers{dir: dir, busy: map[string]bool{}, failed: map[string]bool{}}
+	c.fetch = func(context.Context, string) ([]byte, string, error) {
+		mu.Lock()
+		calls++
+		mu.Unlock()
+		return wide, "游戏", nil
+	}
+	c.pull("9", nil)
+	if _, err := os.Stat(filepath.Join(dir, "9.wide")); err != nil {
+		t.Fatal(err)
+	}
+	c.Want([]string{"9"}, nil)
+	mu.Lock()
+	defer mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("calls = %d", calls)
+	}
+}
+
 func TestFetchFirstImageSkipsWhatIsNotAPicture(t *testing.T) {
 	picture := testJPEG(t)
 	var asked []string
@@ -109,7 +203,12 @@ func TestFetchFirstImageSkipsWhatIsNotAPicture(t *testing.T) {
 
 func testJPEG(t *testing.T) []byte {
 	t.Helper()
-	img := image.NewNRGBA(image.Rect(0, 0, 2, 2))
+	return testJPEGSize(t, 2, 2)
+}
+
+func testJPEGSize(t *testing.T, width, height int) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
 	img.Set(0, 0, color.NRGBA{R: 59, G: 105, B: 61, A: 255})
 	var buf bytes.Buffer
 	if err := jpeg.Encode(&buf, img, nil); err != nil {
