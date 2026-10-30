@@ -1,6 +1,8 @@
 // Package gamepad lists game controllers the operating system is exposing
-// and, for a DualSense, the battery in its input report.
+// and, for a wireless DualSense, Switch Pro, or Xbox-protocol pad, its charge.
 package gamepad
+
+import "strings"
 
 // Kind is which mark the playtime title draws for a connected controller.
 type Kind int
@@ -38,7 +40,7 @@ type Pad struct {
 }
 
 // kindOf picks the mark. Sony's pads share the DualSense drawing; only the
-// DualSense report layout has a battery reading.
+// DualSense and Switch Pro report layouts have a battery reading.
 func kindOf(vid, pid uint16) Kind {
 	switch {
 	case vid == vidSony && (pid == pidDualShock4 || pid == pidDualShock4v2 || pid == pidDualSense || pid == pidDualSenseEdge):
@@ -78,6 +80,26 @@ func readsDualSenseBattery(vid, pid uint16) bool {
 	return vid == vidSony && (pid == pidDualSense || pid == pidDualSenseEdge)
 }
 
+func readsSwitchBattery(vid, pid uint16) bool {
+	return vid == vidNintendo && pid == pidSwitchPro
+}
+
+// wiredConnection reports whether a device's instance chain is a USB cable.
+// The first decisive node wins: USB is a cable, Bluetooth is not. An Xbox
+// dongle is also USB, but its charge comes from XInput, not this chain.
+func wiredConnection(ids []string) bool {
+	for _, id := range ids {
+		up := strings.ToUpper(id)
+		switch {
+		case strings.HasPrefix(up, `USB\`):
+			return true
+		case strings.HasPrefix(up, `BTHENUM\`), strings.HasPrefix(up, `BTHLE\`):
+			return false
+		}
+	}
+	return false
+}
+
 // batteryFromReport reads a DualSense USB (0x01) or Bluetooth (0x31) input
 // report. The charge nibble is 0–10; a status of 2 means the pack is full.
 func batteryFromReport(report []byte) (Battery, bool) {
@@ -109,6 +131,51 @@ func batteryFromReport(report []byte) (Battery, bool) {
 		percent = 100
 	}
 	return Battery{Known: true, Percent: percent, Charging: status == 1}, true
+}
+
+// batteryFromSwitchReport reads a Switch Pro standard input report (0x21 or
+// 0x30–0x33). The high nibble is five charge steps, and its low bit means the
+// pack is charging. A simple 0x3F report has no charge byte and is not a zero.
+func batteryFromSwitchReport(report []byte) (Battery, bool) {
+	if len(report) < 3 {
+		return Battery{}, false
+	}
+	switch report[0] {
+	case 0x21, 0x30, 0x31, 0x32, 0x33:
+	default:
+		return Battery{}, false
+	}
+	nibble := report[2] >> 4
+	level := int(nibble >> 1)
+	if level > 4 {
+		return Battery{}, false
+	}
+	return Battery{Known: true, Percent: level * 25, Charging: nibble&1 == 1}, true
+}
+
+// batteryFromXInput reads an Xbox-protocol charge. Alkaline, NiMH, and unknown
+// are the four real steps. A wired report's level is always full and is not a
+// charge, so it stays unknown.
+func batteryFromXInput(kind, level byte) (Battery, bool) {
+	switch kind {
+	case 0x02, 0x03, 0xFF:
+	default:
+		return Battery{}, false
+	}
+	var percent int
+	switch level {
+	case 0:
+		percent = 0
+	case 1:
+		percent = 33
+	case 2:
+		percent = 66
+	case 3:
+		percent = 100
+	default:
+		return Battery{}, false
+	}
+	return Battery{Known: true, Percent: percent}, true
 }
 
 func padsEqual(a, b []Pad) bool {

@@ -141,10 +141,12 @@ var chevronRightSVG []byte
 //go:embed steam.svg
 var steamSVG []byte
 
-// The playtime title's controller marks. DualSense is a flat white face:
-// one dark center through the inner grips, black seams on both sides of the
-// touchpad, dark sticks. The others are square line drawings in currentColor.
-// The title draws them about as tall as its own type, on the same midline.
+// The playtime title's controller marks. All three are flat colored drawings,
+// shown as images so the tones survive. Switch Pro is the black body with a
+// light rim and the Super Famicom button colors. Xbox, including a third-party
+// pad on the Xbox protocol, is the black body with the green guide button and
+// the classic face colors. The title draws them about as tall as its own type,
+// on the same midline.
 var (
 	//go:embed dualsense.svg
 	dualSenseSVG []byte
@@ -204,6 +206,7 @@ func Steam() []byte { return steamSVG }
 
 // DualSense, SwitchPro and Xbox are the controller marks drawn beside the
 // playtime title. Anything that is not a DualSense or a Switch Pro uses Xbox.
+// DualSense and Switch Pro keep their own colors; Xbox takes the caller's.
 func DualSense() []byte { return dualSenseSVG }
 func SwitchPro() []byte { return switchProSVG }
 func Xbox() []byte      { return xboxSVG }

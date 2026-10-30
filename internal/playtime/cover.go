@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -55,7 +56,7 @@ func (c *covers) Want(ids []string, done func()) {
 			continue
 		}
 		c.mu.Lock()
-		if c.busy[id] || c.failed[id] || (fileExists(c.path(id)) && fileExists(c.titlePath(id))) {
+		if c.busy[id] || c.failed[id] || c.fresh(id) {
 			c.mu.Unlock()
 			continue
 		}
@@ -85,6 +86,11 @@ func (c *covers) pull(id string, done func()) {
 			err = werr
 		} else {
 			wrote = true
+			if widerThanTall(data) {
+				_ = c.writeWide(id)
+			} else {
+				_ = os.Remove(c.widePath(id))
+			}
 		}
 	}
 	c.mu.Lock()
@@ -118,6 +124,33 @@ func (c *covers) path(appID string) string {
 
 func (c *covers) titlePath(appID string) string {
 	return filepath.Join(c.dir, appID+".title")
+}
+
+// widePath remembers that the store had no portrait, so a saved header is not
+// fetched again on every open.
+func (c *covers) widePath(appID string) string {
+	return filepath.Join(c.dir, appID+".wide")
+}
+
+func (c *covers) fresh(appID string) bool {
+	if !fileExists(c.path(appID)) || !fileExists(c.titlePath(appID)) {
+		return false
+	}
+	data, err := os.ReadFile(c.path(appID))
+	if err != nil || !isImage(data) {
+		return false
+	}
+	if !widerThanTall(data) {
+		return true
+	}
+	return fileExists(c.widePath(appID))
+}
+
+func (c *covers) writeWide(appID string) error {
+	if err := os.MkdirAll(c.dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(c.widePath(appID), nil, 0o600)
 }
 
 func (c *covers) writeTitle(appID, name string) error {
@@ -157,15 +190,111 @@ func fetchSteamCover(ctx context.Context, client *httpc.Client, appID string) ([
 	if err != nil {
 		return nil, "", err
 	}
-	name, header, err := storeListing(appID, details.Payload)
+	name, header, listErr := storeListing(appID, details.Payload)
+	candidates := portraitURLs(appID, header)
+	if items, itemsErr := client.GetBytes(ctx, libraryItemsURL(appID), nil); itemsErr == nil {
+		if capsule, capErr := libraryCapsuleURL(items.Payload); capErr == nil {
+			candidates = uniqueURLs(append([]string{capsule}, candidates...))
+		}
+	}
+	if len(candidates) == 0 {
+		if listErr == nil {
+			listErr = fmt.Errorf("playtime: store has no cover for %s", appID)
+		}
+		return nil, name, listErr
+	}
+	image, err := fetchFirstImage(ctx, client, candidates)
 	if err != nil {
 		return nil, name, err
 	}
-	if !allowedCoverURL(header) {
-		return nil, name, fmt.Errorf("playtime: cover address for %s is not a steam image", appID)
+	return image, name, nil
+}
+
+// libraryItemsURL asks Steam which portrait file this game actually has.
+// Newer games keep it behind a hash, so a fixed library_600x900.jpg 404s.
+func libraryItemsURL(appID string) string {
+	query := `{"ids":[{"appid":` + appID + `}],"context":{"language":"schinese","country_code":"CN"},"data_request":{"include_assets":true}}`
+	return "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json=" + url.QueryEscape(query)
+}
+
+// libraryCapsuleURL builds the 2:3 library image named by a GetItems response.
+func libraryCapsuleURL(payload []byte) (string, error) {
+	var body struct {
+		Response struct {
+			StoreItems []struct {
+				Assets struct {
+					Format  string `json:"asset_url_format"`
+					Capsule string `json:"library_capsule"`
+				} `json:"assets"`
+			} `json:"store_items"`
+		} `json:"response"`
 	}
-	image, err := fetchFirstImage(ctx, client, []string{header})
-	return image, name, err
+	if err := json.Unmarshal(payload, &body); err != nil {
+		return "", fmt.Errorf("playtime: library assets: %w", err)
+	}
+	if len(body.Response.StoreItems) == 0 {
+		return "", fmt.Errorf("playtime: store has no library capsule")
+	}
+	assets := body.Response.StoreItems[0].Assets
+	if assets.Format == "" || assets.Capsule == "" || !strings.Contains(assets.Format, "${FILENAME}") {
+		return "", fmt.Errorf("playtime: store has no library capsule")
+	}
+	raw := "https://shared.akamai.steamstatic.com/store_item_assets/" + strings.Replace(assets.Format, "${FILENAME}", assets.Capsule, 1)
+	if !allowedCoverURL(raw) {
+		return "", fmt.Errorf("playtime: library capsule is not a steam image")
+	}
+	return raw, nil
+}
+
+// portraitURLs tries a 2:3 library image before the landscape header.
+// The header is only the fallback: a portrait frame crops its sides.
+func portraitURLs(appID, header string) []string {
+	var urls []string
+	if dir := steamAssetDir(header); dir != "" {
+		urls = append(urls,
+			dir+"/library_600x900_schinese.jpg",
+			dir+"/library_600x900.jpg",
+		)
+	}
+	urls = append(urls,
+		"https://cdn.akamai.steamstatic.com/steam/apps/"+appID+"/library_600x900.jpg",
+		"https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/"+appID+"/library_600x900.jpg",
+	)
+	if allowedCoverURL(header) {
+		urls = append(urls, header)
+	}
+	return uniqueURLs(urls)
+}
+
+func steamAssetDir(header string) string {
+	if !allowedCoverURL(header) {
+		return ""
+	}
+	parsed, err := url.Parse(header)
+	if err != nil {
+		return ""
+	}
+	dir := path.Dir(parsed.Path)
+	if !strings.Contains(dir, "/apps/") {
+		return ""
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	parsed.Path = dir
+	return parsed.String()
+}
+
+func uniqueURLs(urls []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(urls))
+	for _, item := range urls {
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
 }
 
 // storeListing reads the simplified-Chinese name and the header image.
@@ -253,6 +382,11 @@ func isImage(data []byte) bool {
 	}
 	_, _, err := image.DecodeConfig(bytes.NewReader(data))
 	return err == nil
+}
+
+func widerThanTall(data []byte) bool {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	return err == nil && cfg.Width > cfg.Height
 }
 
 func fileExists(path string) bool {

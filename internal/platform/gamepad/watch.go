@@ -88,7 +88,7 @@ func publish(last []Pad, changed func([]Pad), force bool) []Pad {
 // has no battery byte; the extra look is the same slow one.
 func needsBattery(pads []Pad) bool {
 	for _, pad := range pads {
-		if pad.Kind == KindDualSense {
+		if pad.Kind == KindDualSense || pad.Kind == KindSwitchPro || pad.Battery.Known {
 			return true
 		}
 	}
