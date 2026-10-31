@@ -35,3 +35,26 @@ type LoginStarter interface {
 	// could not be started.
 	StartLogin() error
 }
+
+// CredentialRefresher is a source that can replace a token the endpoint has
+// just refused. The panel tries it once; a source that cannot refresh is
+// left to surface the refusal.
+type CredentialRefresher interface {
+	RefreshCredentials(ctx context.Context) (Credentials, error)
+}
+
+// DevicePrompt is what the user has to type or open. The device code that
+// exchanges it stays with the source.
+type DevicePrompt struct {
+	UserCode        string
+	VerificationURL string
+}
+
+// DeviceLogin is a source whose credential comes from a device-code login
+// this application performs itself.
+type DeviceLogin interface {
+	BeginDeviceLogin(ctx context.Context) (DevicePrompt, error)
+	FinishDeviceLogin(ctx context.Context) error
+	CancelDeviceLogin()
+	Logout(ctx context.Context) error
+}

@@ -16,7 +16,7 @@ func (s *State) quickLayoutBlocks(c *ui.Context) {
 		}
 		first = false
 		switch id {
-		case "deepseek", "codex":
+		case "deepseek", "codex", "grok":
 			panelID, _ := s.quickPanelID(id)
 			s.panelUI.Block(c, panelID, s.dark)
 		case "anime":
@@ -31,7 +31,7 @@ func (s *State) quickLayoutBlocks(c *ui.Context) {
 
 func (s *State) quickBlockAvailable(id string) bool {
 	switch id {
-	case "deepseek", "codex":
+	case "deepseek", "codex", "grok":
 		_, found := s.quickPanelID(id)
 		return found
 	case "anime":

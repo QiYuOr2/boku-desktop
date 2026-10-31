@@ -63,6 +63,8 @@ var (
 	// there at all.
 	ErrLoginCommandMissing = errors.New("login command missing")
 	ErrLoginUnsupported    = errors.New("login cannot be started here")
+	// ErrDeviceLoginExpired is a device code the user did not finish in time.
+	ErrDeviceLoginExpired = errors.New("device login expired")
 )
 
 // ImageTranslationFailureCode is the closed set a vision model may use when

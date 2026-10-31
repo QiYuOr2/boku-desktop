@@ -32,6 +32,7 @@ import (
 	"boku/internal/panel"
 	codexpanel "boku/internal/panel/codex"
 	deepseekpanel "boku/internal/panel/deepseek"
+	grokpanel "boku/internal/panel/grok"
 	"boku/internal/platform/autostart"
 	"boku/internal/platform/gamepad"
 	"boku/internal/platform/httpc"
@@ -406,6 +407,12 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 	); err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the codex provider: %w", err)
 	}
+	if err := registry.Register(
+		grokpanel.New(client),
+		grokpanel.NewAdapter(),
+	); err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the grok provider: %w", err)
+	}
 	if err := registry.Validate(); err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
 	}
@@ -414,6 +421,10 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 	// login the Codex CLI already made, read where it lies and refreshed in
 	// memory (§9 of the security design).
 	codexLogin := codexpanel.NewLogin(codexpanel.LoginOptions{Client: client})
+	grokLogin := grokpanel.NewLogin(grokpanel.LoginOptions{Client: client, Secrets: secrets})
+	if err := grokLogin.Remember(context.Background()); err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the Grok login: %w", err)
+	}
 
 	// The panels the application shows. Adding one means adding a definition
 	// here; the panel service checks it against the provider's own contract. A
@@ -433,7 +444,13 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 			// machine, so reading it is the user's to allow.
 			Optional: true,
 		},
-	}, codexLogin)
+		{
+			Panel:              grokpanel.Panel(),
+			Metrics:            grokpanel.Metrics(),
+			OptionalMetricKeys: grokpanel.OptionalMetricKeys(),
+			Optional:           true,
+		},
+	}, codexLogin, grokLogin)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
 	}

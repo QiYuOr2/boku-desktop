@@ -18,7 +18,10 @@ type quota struct {
 	remaining, resetsIn int64
 	windowSeconds       int64
 	hasLeft, hasReset   bool
+	sawReset, sawWindow bool
 	plan                string
+	label               string
+	extra               bool
 }
 
 func read(view panel.View) quota {
@@ -37,9 +40,27 @@ func readWindows(view panel.View) []quota {
 	var plan string
 	for _, metric := range view.Metrics {
 		if metric.Unit == domain.UnitPercent && metric.ValueType == domain.ValueTypeNumber {
-			windows = append(windows, quota{})
+			windows = append(windows, quota{label: metric.Label, extra: len(windows) > 0})
 		}
 		observation, ok := view.Snapshot.Observation(metric.Key)
+		// An absent duration still occupies its slot. Otherwise a missing
+		// reset would make the following period look like a countdown.
+		if metric.ValueType == domain.ValueTypeDuration && len(windows) > 0 {
+			found := &windows[len(windows)-1]
+			switch {
+			case !found.sawReset:
+				found.sawReset = true
+				if ok {
+					found.resetsIn, found.hasReset = observation.Value.DurationSeconds()
+				}
+			case !found.sawWindow:
+				found.sawWindow = true
+				if ok {
+					found.windowSeconds, _ = observation.Value.DurationSeconds()
+				}
+			}
+			continue
+		}
 		if !ok {
 			continue
 		}
@@ -53,17 +74,22 @@ func readWindows(view panel.View) []quota {
 			continue
 		}
 		found := &windows[len(windows)-1]
-		switch {
-		case metric.Unit == domain.UnitPercent:
+		if metric.Unit == domain.UnitPercent {
 			found.remaining, found.hasLeft = observation.Value.Number()
-		case metric.ValueType == domain.ValueTypeDuration && !found.hasReset:
-			found.resetsIn, found.hasReset = observation.Value.DurationSeconds()
-		case metric.ValueType == domain.ValueTypeDuration:
-			found.windowSeconds, _ = observation.Value.DurationSeconds()
 		}
 	}
 	for i := range windows {
 		windows[i].plan = plan
+	}
+	// A later bar with no countdown of its own, such as on-demand usage that
+	// resets with the subscription window, shows that earlier countdown.
+	if len(windows) > 0 && windows[0].hasReset {
+		for i := 1; i < len(windows); i++ {
+			if windows[i].hasLeft && !windows[i].hasReset {
+				windows[i].resetsIn = windows[0].resetsIn
+				windows[i].hasReset = true
+			}
+		}
 	}
 	return windows
 }
@@ -80,7 +106,10 @@ func Account(view panel.View) string {
 }
 
 func quotaTitle(q quota, observedAt time.Time) string {
-	parts := make([]string, 0, 2)
+	parts := make([]string, 0, 3)
+	if q.extra && q.windowSeconds <= 0 && q.label != "" {
+		parts = append(parts, q.label)
+	}
 	if label := windowLabel(q.windowSeconds); label != "" {
 		parts = append(parts, label)
 	}

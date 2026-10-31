@@ -19,6 +19,8 @@ func FriendlyError(err error) string {
 		return "凭据被拒绝，请检查是否仍然有效。"
 	case errors.Is(err, domain.ErrProviderRateLimited):
 		return "请求太频繁，请稍后再试。"
+	case errors.Is(err, domain.ErrDeviceLoginExpired):
+		return "登录验证已过期，请再试一次。"
 	case errors.Is(err, domain.ErrProviderTimeout):
 		return "请求超时，请检查网络。"
 	case errors.Is(err, domain.ErrProviderUnavailable):

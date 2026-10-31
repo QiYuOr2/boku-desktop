@@ -584,6 +584,15 @@ func (p *Panels) fetch(ctx context.Context, def PanelDef) (domain.Snapshot, erro
 		return domain.Snapshot{}, err
 	}
 	result, err := provider.Fetch(ctx, creds)
+	if errors.Is(err, domain.ErrProviderUnauthorized) {
+		if source, ok := p.sources[providerID].(domain.CredentialRefresher); ok {
+			refreshed, refreshErr := source.RefreshCredentials(ctx)
+			if refreshErr != nil {
+				return domain.Snapshot{}, refreshErr
+			}
+			result, err = provider.Fetch(ctx, refreshed)
+		}
+	}
 	if err != nil {
 		return domain.Snapshot{}, err
 	}
