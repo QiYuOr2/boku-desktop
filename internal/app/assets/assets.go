@@ -129,6 +129,9 @@ var gaugeSVG []byte
 //go:embed codex.svg
 var codexSVG []byte
 
+//go:embed grok.svg
+var grokSVG []byte
+
 //go:embed tv.svg
 var tvSVG []byte
 
@@ -198,6 +201,9 @@ func Gauge() []byte { return gaugeSVG }
 
 // Codex returns the Codex product mark, drawn in the caller's current color.
 func Codex() []byte { return codexSVG }
+
+// Grok returns the Grok mark, drawn in the caller's current color.
+func Grok() []byte { return grokSVG }
 
 // TV returns the small television mark used for scheduled animation updates.
 func TV() []byte { return tvSVG }

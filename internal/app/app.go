@@ -307,6 +307,10 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the Codex mark: %w", err)
 	}
+	grokMark, err := ui.ParseSVG(assets.Grok())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the Grok mark: %w", err)
+	}
 	tvMark, err := ui.ParseSVG(assets.TV())
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the TV mark: %w", err)
@@ -500,11 +504,12 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		return nil
 	}, func() { state.refreshAsync(true) }, keyMark)
 	state.translationUI = translateui.New(translateui.Config{Service: deps.Translate, Clipboard: deps.Clipboard, Screenshot: deps.Screenshot, RegionCapture: deps.RegionCapture, Shortcuts: deps.Shortcuts, Host: state.featureHost(), Dark: func() bool { return state.dark }, Notifier: state.notifier, ConnectionsBusy: func() bool { return state.credentialUI.Form.Busy != "" }, CopyMark: copyMark, PinMark: pinMark, CloseMark: closeMark, ScreenshotMark: screenshotMark, TranslationMark: translationMark})
-	state.panelUI = panelui.New(deps.Panels, state.featureHost(), state.openSettings, deepseekMark, codexMark, gaugeMark, refreshMark)
+	state.panelUI = panelui.New(deps.Panels, state.featureHost(), state.openSettings, deepseekMark, codexMark, grokMark, gaugeMark, refreshMark)
 	state.preferencesUI = preferencesui.New(deps.Autostart, state.featureHost())
 	state.layoutUI = preferencesui.NewLayout(quickLayout, deps.QuickWindowLayoutStore, state.featureHost(), layoutMark, eyeMark, eyeOffMark, gripMark, map[string]presentation.PanelMark{
 		"deepseek": state.panelUI.ProviderMark("deepseek"),
 		"codex":    state.panelUI.ProviderMark("codex"),
+		"grok":     state.panelUI.ProviderMark("grok"),
 		"anime":    {SVG: tvMark},
 		"bilibili": {SVG: bilibiliMark},
 		"playtime": {SVG: steamMark},

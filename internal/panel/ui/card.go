@@ -160,6 +160,12 @@ func (s *State) providerMark(providerID string) presentation.PanelMark {
 			bar = presentation.ColorTextSoft
 		}
 		return presentation.PanelMark{SVG: s.codexMark, Tile: presentation.CodexTile, Ink: presentation.CodexInk, Bar: bar, Scale: 4.0 / 3.0}
+	case "grok":
+		bar := codexBlack
+		if s.dark {
+			bar = presentation.ColorTextSoft
+		}
+		return presentation.PanelMark{SVG: s.grokMark, Tile: presentation.CodexTile, Ink: presentation.CodexInk, Bar: bar}
 	default:
 		return presentation.PanelMark{SVG: s.gaugeMark, Tile: presentation.ColorMuted, Ink: presentation.ColorTextMuted, Bar: presentation.ColorTextMuted}
 	}
@@ -176,6 +182,10 @@ func (s *State) providerMark(providerID string) presentation.PanelMark {
 func (s *State) quotaBody(c *ui.Context, view panel.View) {
 	switch {
 	case view.NeedsCredentials():
+		if s.panelService.HasDeviceLogin(view.Panel.ProviderID) {
+			s.deviceLogin(c, view)
+			return
+		}
 		ui.Column(c).FillWidth().Gap(float32(10)).Children(func() {
 			presentation.Notice(c, presentation.NotePlain, "还没有登录：这个额度来自本机已经登录好的命令行工具。")
 			s.loginAction(c, view)
@@ -202,7 +212,7 @@ func (s *State) quotaBody(c *ui.Context, view panel.View) {
 		mark := s.providerMark(view.Panel.ProviderID)
 		presentation.ProgressBar(c, used, mark.Bar, label, "已用额度")
 		windows := readWindows(view)
-		if len(windows) > 1 && windows[1].hasLeft && windows[1].hasReset {
+		if len(windows) > 1 && windows[1].hasLeft {
 			long := windows[1]
 			used := 100 - long.remaining
 			ui.Column(c).FillWidth().Gap(float32(4)).Children(func() {
@@ -228,6 +238,43 @@ func (s *State) quotaBody(c *ui.Context, view panel.View) {
 	if s.loginNotice != "" {
 		presentation.Notice(c, presentation.NotePlain, s.loginNotice)
 	}
+}
+
+func (s *State) deviceLogin(c *ui.Context, view panel.View) {
+	if s.device.open != "" {
+		page := s.device.open
+		s.device.open = ""
+		c.OpenURL(page)
+	}
+	ui.Column(c).FillWidth().Gap(float32(10)).Children(func() {
+		if s.device.busy && s.device.providerID == view.Panel.ProviderID && s.device.code != "" {
+			presentation.Notice(c, presentation.NotePlain, "在验证页输入 "+s.device.code+"，完成后这里会自己刷新。")
+			ui.Row(c).FillWidth().Gap(float32(8)).Children(func() {
+				if s.device.url != "" {
+					if button := presentation.DesignButton(c, "打开验证页", presentation.ButtonPrimary); button.Clicked() {
+						c.OpenURL(s.device.url)
+					}
+				}
+				if button := presentation.DesignButton(c, "取消", presentation.ButtonSecondary); button.Clicked() {
+					s.cancelDeviceLogin(view.Panel.ProviderID)
+				}
+				ui.Spacer(c)
+			})
+		} else if s.device.busy && s.device.providerID == view.Panel.ProviderID {
+			presentation.Notice(c, presentation.NotePlain, "正在向 xAI 申请验证码…")
+		} else {
+			presentation.Notice(c, presentation.NotePlain, "登录 Grok 后查看订阅额度。令牌只发给 auth.x.ai 和 cli-chat-proxy.grok.com。")
+			ui.Row(c).FillWidth().Gap(float32(8)).Children(func() {
+				if button := presentation.DesignButton(c, "登录 Grok", presentation.ButtonPrimary); button.Clicked() {
+					s.startDeviceLogin(view.Panel.ProviderID, view.Panel.ID)
+				}
+				ui.Spacer(c)
+			})
+		}
+		if s.device.notice != "" {
+			presentation.Notice(c, presentation.NoteDanger, s.device.notice)
+		}
+	})
 }
 
 // loginAction is the way to the login a quota panel is waiting for: the tool's

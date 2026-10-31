@@ -16,6 +16,7 @@ import (
 	"boku/internal/logging"
 	panelcodex "boku/internal/panel/codex"
 	paneldeepseek "boku/internal/panel/deepseek"
+	panelgrok "boku/internal/panel/grok"
 	"boku/internal/preferences"
 	"boku/internal/translate"
 )
@@ -49,7 +50,7 @@ func TestServicesLoadAndPersistQuickWindowLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(again.Stop)
-	if reloaded.Order()[4] != "anime" || reloaded.Visible("codex") || reloaded.Visible("bilibili") {
+	if reloaded.Order()[len(reloaded.Order())-1] != "anime" || reloaded.Visible("codex") || reloaded.Visible("bilibili") {
 		t.Fatalf("saved layout=%v", reloaded.Order())
 	}
 	contents, err := os.ReadFile(path)
@@ -101,14 +102,17 @@ func TestServicesAssembleThePanels(t *testing.T) {
 	}
 
 	listed := panels.List()
-	if len(listed) != 2 {
-		t.Fatalf("the application has %d panels, want the balance and the quota: %+v", len(listed), listed)
+	if len(listed) != 3 {
+		t.Fatalf("the application has %d panels, want the balance, Codex and Grok: %+v", len(listed), listed)
 	}
 	if listed[0].ProviderID != contractdeepseek.ProviderID {
 		t.Errorf("the first panel's provider = %q, want %q", listed[0].ProviderID, contractdeepseek.ProviderID)
 	}
 	if listed[1].ProviderID != panelcodex.ProviderID {
 		t.Errorf("the second panel's provider = %q, want %q", listed[1].ProviderID, panelcodex.ProviderID)
+	}
+	if listed[2].ProviderID != panelgrok.ProviderID {
+		t.Errorf("the third panel's provider = %q, want %q", listed[2].ProviderID, panelgrok.ProviderID)
 	}
 
 	descriptor, err := panels.Descriptor(contractdeepseek.ProviderID)

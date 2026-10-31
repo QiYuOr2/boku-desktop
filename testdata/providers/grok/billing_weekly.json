@@ -1,0 +1,13 @@
+{
+  "config": {
+    "creditUsagePercent": 42.5,
+    "tier": "SuperGrok",
+    "currentPeriod": {
+      "type": "USAGE_PERIOD_TYPE_WEEKLY",
+      "start": "2026-10-24T00:00:00Z",
+      "end": "2026-10-31T00:00:00Z"
+    },
+    "billingPeriodEnd": "2026-10-31T00:00:00Z",
+    "onDemandCap": { "val": 0 }
+  }
+}

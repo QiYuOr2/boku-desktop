@@ -11,13 +11,14 @@ const (
 	quickBlockPlaytime     = "playtime"
 	quickBlockDeepSeek     = "deepseek"
 	quickBlockCodex        = "codex"
+	quickBlockGrok         = "grok"
 	quickBlockBilibili     = "bilibili"
 	quickBlockAnime        = "anime"
 	quickLayoutKey         = "quickWindowLayout"
 	quickLayoutSectionName = "quick-window-layout"
 )
 
-var defaultQuickBlockOrder = []string{quickBlockPlaytime, quickBlockDeepSeek, quickBlockCodex, quickBlockAnime, quickBlockBilibili}
+var defaultQuickBlockOrder = []string{quickBlockPlaytime, quickBlockDeepSeek, quickBlockCodex, quickBlockGrok, quickBlockAnime, quickBlockBilibili}
 
 type QuickWindowLayout struct {
 	order  []string

@@ -917,3 +917,51 @@ func TestTestProviderChecksWithoutStoring(t *testing.T) {
 		t.Errorf("no credentials: error = %v", err)
 	}
 }
+
+type retrySource struct {
+	refreshed bool
+}
+
+func (retrySource) ProviderID() string { return "fake" }
+func (retrySource) Credentials(context.Context) (domain.Credentials, error) {
+	return domain.Credentials{ProviderID: "fake", Secrets: map[string]string{"apiKey": "old"}}, nil
+}
+func (s *retrySource) RefreshCredentials(context.Context) (domain.Credentials, error) {
+	s.refreshed = true
+	return domain.Credentials{ProviderID: "fake", Secrets: map[string]string{"apiKey": "new"}}, nil
+}
+
+type onceUnauthorized struct{ fakeProvider }
+
+func (p *onceUnauthorized) Fetch(ctx context.Context, creds domain.Credentials) (domain.FetchResult, error) {
+	p.mu.Lock()
+	p.calls++
+	call := p.calls
+	p.last = creds
+	result := p.result
+	p.mu.Unlock()
+	if call == 1 {
+		return domain.FetchResult{}, domain.ErrProviderUnauthorized
+	}
+	return result, nil
+}
+
+func TestUnauthorizedFetchRefreshesOnce(t *testing.T) {
+	provider := &onceUnauthorized{fakeProvider: *newFakeProvider()}
+	source := &retrySource{}
+	reg := newRegistry()
+	reg.add(provider, fakeAdapter{id: "fake"})
+	panels, err := NewPanels(reg, newMemoryStore(), NewSection(), nil, []PanelDef{testDef()}, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := panels.Refresh(context.Background(), testDef().Panel.ID); err != nil {
+		t.Fatalf("refresh failed: %v", err)
+	}
+	if !source.refreshed || provider.count() != 2 {
+		t.Fatalf("refreshed %v calls %d", source.refreshed, provider.count())
+	}
+	if got := provider.credentials().Secrets["apiKey"]; got != "new" {
+		t.Fatalf("second token = %q", got)
+	}
+}

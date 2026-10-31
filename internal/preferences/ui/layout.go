@@ -138,7 +138,7 @@ func (s *LayoutState) SetOffer(offer func(string) bool) {
 }
 
 func (s *LayoutState) entries() []quickLayoutEntry {
-	entries := make([]quickLayoutEntry, 0, 5)
+	entries := make([]quickLayoutEntry, 0, 6)
 	for _, id := range s.layout.Order() {
 		if s.offer != nil && !s.offer(id) {
 			continue
@@ -150,6 +150,9 @@ func (s *LayoutState) entries() []quickLayoutEntry {
 			title, subtitle = "DeepSeek 额度", "API 余额"
 		case "codex":
 			title, subtitle = "Codex 额度", "本机账号用量"
+			mark.Tile, mark.Ink = presentation.CodexTile, presentation.CodexInk
+		case "grok":
+			title, subtitle = "Grok 额度", "订阅额度"
 			mark.Tile, mark.Ink = presentation.CodexTile, presentation.CodexInk
 		case "anime":
 			title, subtitle = "动画更新", "Bangumi 今日放送"

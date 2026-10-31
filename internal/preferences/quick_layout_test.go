@@ -66,7 +66,7 @@ func TestQuickWindowLayoutDefaultsAndMoves(t *testing.T) {
 		t.Fatalf("default order = %v, want %v", got, want)
 	}
 	layout.MoveBefore(quickBlockBilibili, quickBlockCodex)
-	want := []string{quickBlockPlaytime, quickBlockDeepSeek, quickBlockBilibili, quickBlockCodex, quickBlockAnime}
+	want := []string{quickBlockPlaytime, quickBlockDeepSeek, quickBlockBilibili, quickBlockCodex, quickBlockGrok, quickBlockAnime}
 	if got := layout.Order(); !slices.Equal(got, want) {
 		t.Errorf("moved order = %v, want %v", got, want)
 	}
@@ -75,7 +75,7 @@ func TestQuickWindowLayoutDefaultsAndMoves(t *testing.T) {
 func TestQuickWindowLayoutMoveToEnd(t *testing.T) {
 	layout := NewQuickWindowLayout()
 	layout.MoveToEnd(quickBlockCodex)
-	want := []string{quickBlockPlaytime, quickBlockDeepSeek, quickBlockAnime, quickBlockBilibili, quickBlockCodex}
+	want := []string{quickBlockPlaytime, quickBlockDeepSeek, quickBlockGrok, quickBlockAnime, quickBlockBilibili, quickBlockCodex}
 	if got := layout.Order(); !slices.Equal(got, want) {
 		t.Errorf("moved order = %v, want %v", got, want)
 	}
@@ -92,7 +92,7 @@ func TestQuickWindowLayoutNormalizesStoredValues(t *testing.T) {
 	if err := layout.Decode(map[string]json.RawMessage{quickLayoutKey: raw}); err != nil {
 		t.Fatalf("Decode failed: %v", err)
 	}
-	want := []string{quickBlockPlaytime, quickBlockCodex, quickBlockDeepSeek, quickBlockAnime, quickBlockBilibili}
+	want := []string{quickBlockPlaytime, quickBlockCodex, quickBlockDeepSeek, quickBlockGrok, quickBlockAnime, quickBlockBilibili}
 	if got := layout.Order(); !slices.Equal(got, want) {
 		t.Errorf("order = %v, want %v", got, want)
 	}

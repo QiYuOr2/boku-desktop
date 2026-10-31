@@ -1,0 +1,6 @@
+{
+  "config": {
+    "creditUsagePercent": 10,
+    "onDemandCap": { "val": 100 }
+  }
+}

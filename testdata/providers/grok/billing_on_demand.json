@@ -1,0 +1,11 @@
+{
+  "config": {
+    "creditUsagePercent": 10,
+    "currentPeriod": {
+      "type": "MONTHLY",
+      "end": "2026-11-30T00:00:00Z"
+    },
+    "onDemandCap": { "val": 2000 },
+    "onDemandUsed": { "val": 500 }
+  }
+}
