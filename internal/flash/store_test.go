@@ -111,7 +111,7 @@ func TestCorruptFileIsNeverOverwritten(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, FileName)
 	store := NewStore(path)
-	for _, content := range []string{"broken", `{"version":2,"entries":[]}`, `{"version":1,"entries":[{"id":"01950000-0000-7000-8000-000000000001","text":"a","createdAt":"2026-10-30T03:55:49Z","updatedAt":"2026-10-30T03:55:49Z"},{"id":"01950000-0000-7000-8000-000000000001","text":"b","createdAt":"2026-10-30T03:55:50Z","updatedAt":"2026-10-30T03:55:50Z"}]}`, `{"version":1,"entries":[{"id":"not-a-uuid","text":"a","createdAt":"2026-10-30T03:55:49Z","updatedAt":"2026-10-30T03:55:49Z"}]}`, `{"version":1,"entries":[{"id":"01950000-0000-7000-8000-000000000001","text":"","createdAt":"2026-10-30T03:55:49Z","updatedAt":"2026-10-30T03:55:49Z","audioFileName":"nope.m4a"}]}`} {
+	for _, content := range []string{"broken", `{"version":2,"entries":[]}`, `{"version":1,"entries":[{"id":"01950000-0000-7000-8000-000000000001","text":"a","createdAt":"2026-10-30T03:55:49Z","updatedAt":"2026-10-30T03:55:49Z"},{"id":"01950000-0000-7000-8000-000000000001","text":"b","createdAt":"2026-10-30T03:55:50Z","updatedAt":"2026-10-30T03:55:50Z"}]}`, `{"version":1,"entries":[{"id":"not-a-uuid","text":"a","createdAt":"2026-10-30T03:55:49Z","updatedAt":"2026-10-30T03:55:49Z"}]}`, `{"version":1,"entries":[{"id":"01950000-0000-7000-8000-000000000001","text":"","createdAt":"2026-10-30T03:55:49Z","updatedAt":"2026-10-30T03:55:49Z","audioFileName":"nope.m4a"}]}`, `{"version":1,"entries":[{"id":"01950000-0000-7000-8000-000000000001","text":"a","createdAt":"2026-10-30T03:55:49Z","updatedAt":"2026-10-30T03:55:49Z","audioDurationSeconds":-1}]}`, `{"version":1,"entries":[{"id":"01950000-0000-7000-8000-000000000001","text":"a","createdAt":"2026-10-30T03:55:49Z","updatedAt":"2026-10-30T03:55:49Z","waveform":[1,2]}]}`} {
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -139,5 +139,29 @@ func TestCaseInsensitiveDuplicateIsUnreadable(t *testing.T) {
 	}
 	if _, err := NewStore(path).List(); err == nil {
 		t.Fatal("duplicate cases were accepted")
+	}
+}
+
+func TestEditKeepsVoiceShape(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	peaks := strings.TrimSuffix(strings.Repeat("8,", 96), ",")
+	original := `{"version":1,"entries":[{"id":"01950000-0000-7000-8000-000000000001","text":"","createdAt":"2026-10-30T03:55:49Z","updatedAt":"2026-10-30T03:55:49Z","audioFileName":"01950000-0000-7000-8000-000000000002.m4a","audioDurationSeconds":12,"waveform":[` + peaks + `]}]}`
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(path)
+	saved, err := store.SaveText("转写", "01950000-0000-7000-8000-000000000001", time.Date(2026, 10, 30, 4, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if saved.AudioDurationSeconds != 12 || len(saved.Waveform) != 96 || saved.Waveform[0] != 8 || saved.AudioFileName == "" {
+		t.Fatalf("saved = %+v", saved)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"audioDurationSeconds":12`) || !strings.Contains(string(body), `"waveform":[`) {
+		t.Fatalf("file = %s", body)
 	}
 }
