@@ -1,11 +1,11 @@
 // Package flash stores text flashes in the same JSON document Apple writes.
 //
-// The file stays version 1. Apple's decoder ignores a source it has not been
-// taught, then its next save drops unknown keys, so Apple must know source
-// before the two sides write one file. Times are whole UTC seconds: Apple's
-// ISO-8601 decoder rejects a fractional second. Identifiers are kept in the
-// case they were stored in; comparison is case-insensitive, rewriting case
-// would make one note look like two.
+// The file stays version 1. Apple's decoder ignores a field it has not been
+// taught, then its next save drops unknown keys, so both sides must know
+// source, audioDurationSeconds, and waveform before they write one file.
+// Times are whole UTC seconds: Apple's ISO-8601 decoder rejects a fractional
+// second. Identifiers are kept in the case they were stored in; comparison is
+// case-insensitive, rewriting case would make one note look like two.
 package flash
 
 import (
@@ -43,13 +43,15 @@ var (
 
 // Entry is one flash. AudioFileName is the file name only, never a path.
 type Entry struct {
-	ID            string
-	Text          string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	DeletedAt     *time.Time
-	AudioFileName string
-	Source        string
+	ID                   string
+	Text                 string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	DeletedAt            *time.Time
+	AudioFileName        string
+	AudioDurationSeconds int
+	Waveform             []int
+	Source               string
 }
 
 // Store is the flashes document. A failed read refuses every later write.
@@ -161,13 +163,15 @@ type document struct {
 }
 
 type fileEntry struct {
-	ID            string   `json:"id"`
-	Text          string   `json:"text"`
-	CreatedAt     utcTime  `json:"createdAt"`
-	UpdatedAt     utcTime  `json:"updatedAt"`
-	DeletedAt     *utcTime `json:"deletedAt,omitempty"`
-	AudioFileName string   `json:"audioFileName,omitempty"`
-	Source        string   `json:"source,omitempty"`
+	ID                   string   `json:"id"`
+	Text                 string   `json:"text"`
+	CreatedAt            utcTime  `json:"createdAt"`
+	UpdatedAt            utcTime  `json:"updatedAt"`
+	DeletedAt            *utcTime `json:"deletedAt,omitempty"`
+	AudioFileName        string   `json:"audioFileName,omitempty"`
+	AudioDurationSeconds *int     `json:"audioDurationSeconds,omitempty"`
+	Waveform             []int    `json:"waveform,omitempty"`
+	Source               string   `json:"source,omitempty"`
 }
 
 type utcTime time.Time
@@ -236,6 +240,15 @@ func (raw fileEntry) entry() (Entry, error) {
 	if text == "" && raw.AudioFileName == "" {
 		return Entry{}, fmt.Errorf("empty")
 	}
+	if raw.AudioFileName == "" && (raw.AudioDurationSeconds != nil || raw.Waveform != nil) {
+		return Entry{}, fmt.Errorf("audio shape")
+	}
+	if raw.AudioDurationSeconds != nil && *raw.AudioDurationSeconds < 1 {
+		return Entry{}, fmt.Errorf("duration")
+	}
+	if raw.Waveform != nil && !validWaveform(raw.Waveform) {
+		return Entry{}, fmt.Errorf("waveform")
+	}
 	created := time.Time(raw.CreatedAt)
 	updated := time.Time(raw.UpdatedAt)
 	if created.IsZero() || updated.IsZero() {
@@ -247,7 +260,11 @@ func (raw fileEntry) entry() (Entry, error) {
 		CreatedAt:     created,
 		UpdatedAt:     updated,
 		AudioFileName: raw.AudioFileName,
+		Waveform:      raw.Waveform,
 		Source:        raw.Source,
+	}
+	if raw.AudioDurationSeconds != nil {
+		entry.AudioDurationSeconds = *raw.AudioDurationSeconds
 	}
 	if raw.DeletedAt != nil {
 		deleted := time.Time(*raw.DeletedAt)
@@ -268,7 +285,12 @@ func (s *Store) write(entries []Entry) error {
 			CreatedAt:     utcTime(entry.CreatedAt),
 			UpdatedAt:     utcTime(entry.UpdatedAt),
 			AudioFileName: entry.AudioFileName,
+			Waveform:      entry.Waveform,
 			Source:        entry.Source,
+		}
+		if entry.AudioDurationSeconds > 0 {
+			seconds := entry.AudioDurationSeconds
+			item.AudioDurationSeconds = &seconds
 		}
 		if entry.DeletedAt != nil {
 			deleted := utcTime(*entry.DeletedAt)
@@ -295,6 +317,18 @@ func validID(id string) bool {
 func validAudioName(name string) bool {
 	stem, ok := strings.CutSuffix(name, ".m4a")
 	return ok && uuidPattern(stem)
+}
+
+func validWaveform(samples []int) bool {
+	if len(samples) != 96 {
+		return false
+	}
+	for _, sample := range samples {
+		if sample < 0 || sample > 100 {
+			return false
+		}
+	}
+	return true
 }
 
 func uuidPattern(value string) bool {
