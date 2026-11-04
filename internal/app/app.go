@@ -35,6 +35,8 @@ import (
 	"boku/internal/domain"
 	"boku/internal/flash"
 	flashui "boku/internal/flash/ui"
+	"boku/internal/live"
+	liveui "boku/internal/live/ui"
 	"boku/internal/panel"
 	panelui "boku/internal/panel/ui"
 	"boku/internal/platform/autostart"
@@ -103,6 +105,9 @@ type Deps struct {
 	// Flash is the text-flash document. A State without one draws no capture
 	// line and no history.
 	Flash *flash.Service
+	// Live is the local speech translation. A State without one draws no
+	// float window and binds no shortcut for it.
+	Live *live.Service
 	// Screenshot opens the platform region selector and returns the chosen PNG.
 	Screenshot domain.ScreenshotDevice
 	// RegionCapture reads physical desktop pixels. When present, the app
@@ -209,6 +214,8 @@ type State struct {
 	translate         *translate.Translate
 	translationUI     *translateui.State
 	flashUI           *flashui.State
+	liveUI            *liveui.State
+	liveMark          *ui.SVG
 	version           string
 	quit              func()
 	appearance        *Appearance
@@ -394,6 +401,10 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the translation mark: %w", err)
 	}
+	liveMark, err := ui.ParseSVG(assets.Live())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the live translation mark: %w", err)
+	}
 	// The sidebar reaches every section, including the two that had no mark
 	// of their own: the key section and the about box. The key is the
 	// design's own drawing for the page that configures services, and the
@@ -485,6 +496,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		pinMark:           pinMark,
 		closeMark:         closeMark,
 		translationMark:   translationMark,
+		liveMark:          liveMark,
 		keyMark:           keyMark,
 		infoMark:          infoMark,
 		layoutMark:        layoutMark,
@@ -534,7 +546,22 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 			CommandMark: commandMark,
 			ReturnMark:  returnMark,
 		})
-		state.translationUI.SetExtraRebind(state.flashUI.Rebind)
+	}
+	if deps.Live != nil {
+		state.liveUI = liveui.New(liveui.Config{
+			Service:      deps.Live,
+			Host:         state.featureHost(),
+			Dark:         func() bool { return state.dark },
+			OpenSettings: state.openSettings,
+			Mark:         liveMark,
+			CloseMark:    closeMark,
+			Tray:         func() *mygo.Tray { return state.tray },
+		})
+	}
+	if state.flashUI != nil {
+		state.translationUI.SetExtraRebind(func(register func(string, func()) error, text, screenshot string) {
+			state.flashUI.Rebind(register, text, screenshot)
+		})
 	}
 	state.bilibiliUI.AttachHost(state.featureHost())
 	state.animeUI.AttachHost(state.featureHost(), deps.Secrets)
@@ -678,6 +705,9 @@ func (s *State) refresh(after func()) {
 		after = nil
 	}
 	if s.translationUI != nil && s.translationUI.Repaint(refreshCallback(after)) {
+		after = nil
+	}
+	if s.liveUI != nil && s.liveUI.Repaint(refreshCallback(after)) {
 		after = nil
 	}
 	if after != nil {

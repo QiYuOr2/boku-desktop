@@ -16,10 +16,10 @@ func (s *State) SettingsView(c *ui.Context, head *ui.Handle, design presentation
 	}
 	settings := s.clipboard.Settings()
 	s.design.Inset(c, func() {
-		s.design.Stacked(c, float32(16), func() {
+		s.design.Stacked(c, presentation.GroupGap, func() {
 			s.design.SectionHead(c, head, s.design.Mark, s.design.ColorStoneInk, "剪贴板", "监听与预览设置")
 
-			s.design.Stacked(c, float32(12), func() {
+			s.design.Stacked(c, presentation.RowGap, func() {
 				s.design.Notice(c, false, "剪贴板内容可能包含密码、验证码与私人对话；默认不读取。")
 
 				monitor := settings.Monitoring
@@ -43,7 +43,7 @@ func (s *State) SettingsView(c *ui.Context, head *ui.Handle, design presentation
 						selected = index
 					}
 				}
-				s.design.Stacked(c, float32(8), func() {
+				s.design.Stacked(c, presentation.FieldGap, func() {
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 						s.design.SectionLabel(c, "记录范围")
 						ui.Spacer(c)
@@ -52,10 +52,9 @@ func (s *State) SettingsView(c *ui.Context, head *ui.Handle, design presentation
 							s.setClipboardHistorySize(sizes[selected])
 						}
 					})
-					s.design.Notice(c, false, "只保留最近 "+strconv.Itoa(settings.KeepsHistory())+
-						" 条；缩短范围会立刻丢弃更早的记录。")
+					s.design.Notice(c, false, "缩短范围会立刻丢弃更早的记录。")
 					if !settings.Monitoring {
-						s.design.Notice(c, false, "关闭监听后不再读取剪贴板，历史里已有的记录仍然保留。")
+						s.design.Notice(c, false, "已有记录仍然保留。")
 					}
 				})
 
@@ -109,18 +108,14 @@ func intervalLabel(settings clipboard.Settings) string {
 	return strconv.Itoa(int(interval/time.Millisecond)) + " 毫秒"
 }
 
-// setClipboardMonitoring flips the switch and says what happened, so the
-// user is not left guessing whether it worked.
+// setClipboardMonitoring flips the switch. The checkbox shows the result;
+// this only reports a write that did not stick.
 func (s *State) setClipboardMonitoring(enabled bool) {
 	err := s.clipboard.SetMonitoring(context.Background(), enabled)
-	settings := s.clipboard.Settings()
-	switch {
-	case err != nil:
+	if err != nil {
 		s.clipboardStatus = "开关没能写进设置文件：" + s.design.FriendlyError(err) + "（本次运行内已生效）"
-	case settings.Monitoring:
-		s.clipboardStatus = "已开始读取剪贴板。"
-	default:
-		s.clipboardStatus = "已停止读取剪贴板。"
+	} else {
+		s.clipboardStatus = ""
 	}
 	s.host.Refresh()
 }
@@ -129,14 +124,10 @@ func (s *State) setClipboardMonitoring(enabled bool) {
 // clipboard line.
 func (s *State) setClipboardRegionVisible(visible bool) {
 	err := s.clipboard.SetRegionVisible(context.Background(), visible)
-	settings := s.clipboard.Settings()
-	switch {
-	case err != nil:
+	if err != nil {
 		s.clipboardStatus = "开关没能写进设置文件：" + s.design.FriendlyError(err) + "（本次运行内已生效）"
-	case settings.RegionVisible:
-		s.clipboardStatus = "快捷窗口底部会显示剪贴板内容。"
-	default:
-		s.clipboardStatus = "快捷窗口底部不再显示剪贴板内容。"
+	} else {
+		s.clipboardStatus = ""
 	}
 	s.host.Refresh()
 }

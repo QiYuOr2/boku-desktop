@@ -164,13 +164,12 @@ func (s *State) searchCard(c *ui.Context) {
 			SingleLine().
 			FillWidth().
 			Height(float32(presentation.HeightControl)).
-			// The line box is centered, but the CJK ink sits low in it.
-			// 4 under the line lifts the glyphs into the middle of the control.
-			Padding(0, float32(12), float32(4), float32(12)).
+			Padding(0, float32(12)).
 			Background(ui.Transparent).
 			Border(0, ui.Transparent).
 			FocusRing(false).
 			FontSize(presentation.SizeBody).
+			FixedLineHeight(presentation.InputLineHeight(presentation.SizeBody)).
 			TextColor(presentation.ColorInputValue)
 	})
 }
@@ -294,9 +293,9 @@ func composerChrome() (inset, radius float32) {
 // SettingsView is the shortcut row on the settings page.
 func (s *State) SettingsView(c *ui.Context, head *ui.Handle) {
 	presentation.Inset(c, func() {
-		presentation.Stacked(c, float32(16), func() {
+		presentation.Stacked(c, presentation.GroupGap, func() {
 			presentation.SectionHead(c, head, s.mark, presentation.ColorStoneInk, "闪念", "快捷记录")
-			presentation.Stacked(c, float32(8), func() {
+			presentation.Stacked(c, presentation.FieldGap, func() {
 				presentation.SectionLabel(c, "快捷键")
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(12)).Children(func() {
 					ui.Text(c, "记一条闪念").FontSize(presentation.SizeBody).TextColor(presentation.ColorTextSoft).SingleLine().Grow(1)

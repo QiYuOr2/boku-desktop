@@ -28,6 +28,7 @@ import (
 	"boku/internal/credential"
 	"boku/internal/domain"
 	"boku/internal/flash"
+	"boku/internal/live"
 	"boku/internal/logging"
 	"boku/internal/panel"
 	codexpanel "boku/internal/panel/codex"
@@ -101,7 +102,7 @@ func main() {
 	}
 
 	quickWindowLayout := preferences.NewQuickWindowLayout()
-	panels, animeUpdates, bilibiliUpdates, secrets, clipboard, translate, own, appearance, prefs, playtimeRecorder, flashes, err := services(userData, version, quickWindowLayout)
+	panels, animeUpdates, bilibiliUpdates, secrets, clipboard, translate, own, appearance, prefs, playtimeRecorder, flashes, liveSession, err := services(userData, version, quickWindowLayout)
 	if err != nil {
 		log.Fatalf("boku: %v", err)
 	}
@@ -145,6 +146,13 @@ func main() {
 			state.Refresh()
 		}
 	})
+	if liveSession != nil {
+		liveSession.SetChanged(func() {
+			if state != nil {
+				state.Refresh()
+			}
+		})
+	}
 
 	state, err = app.New(mygo.App, app.Deps{
 		Panels:        panels,
@@ -155,6 +163,7 @@ func main() {
 		Playtime:      playtimeRecorder,
 		Translate:     translate,
 		Flash:         flashes,
+		Live:          liveSession,
 		RegionCapture: regioncapture.New(),
 		// What the settings window calls after the user adds a service of
 		// their own: the translator for it has to exist before the next
@@ -252,6 +261,9 @@ func main() {
 		quitBilibili()
 		// A shortcut left bound belongs to a process that no longer exists:
 		// the next launch would find it taken by itself.
+		if liveSession != nil {
+			liveSession.Close()
+		}
 		state.UnregisterShortcuts()
 		state.Destroy()
 	})
@@ -306,7 +318,7 @@ func main() {
 // mismatched provider and adapter, or a panel that breaks its provider's
 // contract, is a startup error and worth catching without a graphical
 // session.
-func services(userData, version string, layouts ...*preferences.QuickWindowLayout) (*panel.Panels, *anime.Service, *bilibili.Service, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, *ownServices, *preferences.Appearance, *settings.Store, *playtime.Recorder, *flash.Service, error) {
+func services(userData, version string, layouts ...*preferences.QuickWindowLayout) (*panel.Panels, *anime.Service, *bilibili.Service, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, *ownServices, *preferences.Appearance, *settings.Store, *playtime.Recorder, *flash.Service, *live.Service, error) {
 	quickWindowLayout := preferences.NewQuickWindowLayout()
 	if len(layouts) > 0 && layouts[0] != nil {
 		quickWindowLayout = layouts[0]
@@ -323,11 +335,11 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 	// in a log or an error, and a window that says plainly what the file is.
 	secretStore, err := credential.Open(filepath.Join(userData, credential.FileName))
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
 	}
 	secrets, err := credential.NewSecrets(secretStore)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the credential store: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the credential store: %w", err)
 	}
 
 	// The application's own settings and the clipboard history, next to the
@@ -349,6 +361,7 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 	// written through the same store.
 	appearance := preferences.NewAppearanceSection()
 	flashSettings := flash.NewSection()
+	liveSettings := live.NewSection()
 	prefs, err := settings.New(
 		filepath.Join(userData, "settings.json"),
 		clipboardSettings,
@@ -360,22 +373,27 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 		playtimeSettings,
 		appearance,
 		quickWindowLayout,
+		liveSettings,
 	)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
 	}
 	// The file is read once, here: a frame must not read it, and neither
 	// must a service that already has its settings in memory.
 	if err := prefs.Load(context.Background()); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the settings: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the settings: %w", err)
 	}
 	flashes, err := flash.Open(filepath.Join(userData, flash.FileName), flashSettings, prefs, domain.SystemClock{})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open flashes: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open flashes: %w", err)
+	}
+	liveSession, err := live.Open(filepath.Join(userData, live.ModelsDirName), filepath.Join(userData, live.GlossaryFileName), liveSettings, prefs, domain.SystemClock{})
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open live translation: %w", err)
 	}
 	history, err := clipboard.NewHistory(filepath.Join(userData, "clipboard_history.json"))
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the clipboard history: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the clipboard history: %w", err)
 	}
 
 	// Public Bangumi requests require an identifiable User-Agent. Keeping the
@@ -384,12 +402,12 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 	client := httpc.New(httpc.Options{UserAgent: "Boku/" + applicationVersion(version) + " (+https://github.com/QiYuOr2/boku)"})
 	animeService, err := anime.NewWithCache(client, animeSettings, prefs, anime.NewCache(filepath.Join(userData, "anime_today.json")), secretStore)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare anime updates: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare anime updates: %w", err)
 	}
 
 	bilibiliService, err := bilibili.NewWithCache(client, bilibiliSettings, prefs, bilibili.NewCache(filepath.Join(userData, "bilibili_followed.json")))
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare Bilibili UP monitoring: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare Bilibili UP monitoring: %w", err)
 	}
 
 	// Providers and their adapters are registered in pairs: a provider
@@ -399,22 +417,22 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 		deepseekpanel.New(client),
 		deepseekpanel.NewAdapter(),
 	); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
 	}
 	if err := registry.Register(
 		codexpanel.New(client),
 		codexpanel.NewAdapter(),
 	); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the codex provider: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the codex provider: %w", err)
 	}
 	if err := registry.Register(
 		grokpanel.New(client),
 		grokpanel.NewAdapter(),
 	); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the grok provider: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the grok provider: %w", err)
 	}
 	if err := registry.Validate(); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
 	}
 
 	// The Codex quota's credential is not one of Boku's: it is the ChatGPT
@@ -423,7 +441,7 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 	codexLogin := codexpanel.NewLogin(codexpanel.LoginOptions{Client: client})
 	grokLogin := grokpanel.NewLogin(grokpanel.LoginOptions{Client: client, Secrets: secrets})
 	if err := grokLogin.Remember(context.Background()); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the Grok login: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the Grok login: %w", err)
 	}
 
 	// The panels the application shows. Adding one means adding a definition
@@ -452,11 +470,11 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 		},
 	}, codexLogin, grokLogin)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
 	}
 	// The switches are read once, here: a frame must not read a file.
 	if err := panels.LoadChoices(context.Background()); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the panel switches: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the panel switches: %w", err)
 	}
 
 	// The clipboard reads and writes on the thread the platform owns, so
@@ -484,7 +502,7 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 		Clock:    domain.SystemClock{},
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
 	}
 
 	// The translators the tool may ask. Like the panels, adding one means
@@ -493,7 +511,7 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 	// pair it with.
 	translators := translate.NewRegistry()
 	if err := translators.Register(deepseektranslator.New(client)); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek translator: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek translator: %w", err)
 	}
 	// The free engines: no key, no account, and the reason a fresh
 	// installation can press the shortcut and get an answer instead of a page
@@ -501,10 +519,10 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 	// because the settings window offers them as two choices — the user picks
 	// the engine, and that engine is the one asked.
 	if err := translators.Register(freetranslator.NewMicrosoft(client)); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free microsoft translator: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free microsoft translator: %w", err)
 	}
 	if err := translators.Register(freetranslator.NewBilibili(client)); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free bilibili translator: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free bilibili translator: %w", err)
 	}
 	// The services the user runs themselves: one translator per stored service,
 	// because each has its own id, its own address and its own name. Which ones
@@ -513,7 +531,7 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 	// they added, rather than a set written down here.
 	own := newOwnServices(client, translators, translateSettings)
 	if err := own.registerAll(); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 	}
 	translation, err := translate.NewTranslate(translate.TranslateOptions{
 		Translators: translators,
@@ -539,13 +557,13 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 		Clock:     domain.SystemClock{},
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the translation tool: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the translation tool: %w", err)
 	}
 	// Playtime is local and optional at runtime: a file that cannot be read is
 	// logged inside Open, and a desktop that cannot list processes simply
 	// never starts the recorder.
 	playtimeRecorder := playtime.Open(userData, playtimeSettings)
-	return panels, animeService, bilibiliService, secrets, clip, translation, own, appearance, prefs, playtimeRecorder, flashes, nil
+	return panels, animeService, bilibiliService, secrets, clip, translation, own, appearance, prefs, playtimeRecorder, flashes, liveSession, nil
 }
 
 // applicationVersion is the version to send as a user agent: a plain `go

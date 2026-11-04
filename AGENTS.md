@@ -23,12 +23,13 @@ Desktop 是单个 Go 进程。顶层按**功能**分包：每个功能自己拥�
 ```text
 internal/domain            实体、值对象、端口接口、错误码、Clock。零依赖
 internal/kit               纯函数（金额、文本、语言、脱敏、二维码解码）。只依赖 domain
-internal/platform          外部世界适配：httpc / sysclip / selection / atomicfile
+internal/platform          外部世界适配：httpc / sysclip / selection / atomicfile / loopback
 internal/contract/<厂商>    厂商身份常量：providerId、凭据 key、申请页
         ↑
 internal/panel             功能：面板（服务 + 注册表 + 每个厂商一棵子树）
 internal/clipboard         功能：剪贴板历史（服务 + 轮询 + 历史与图片存储）
 internal/flash             功能：闪念（JSON 文档 + 快捷键；纯文字）
+internal/live              功能：实时翻译（本地识别与翻译进程、术语、设置）
 internal/translate         功能：划词翻译（openai 协议 + 各后端）
 internal/credential        功能：凭据（服务 + 存储）
 internal/settings          功能：应用设置的存储
@@ -50,7 +51,7 @@ main.go                    唯一装配点
 - 功能可以依赖 `domain`、`kit`、`platform`、`contract`；反过来一律不许。
 - `domain`、`contract/*` 不 import 任何其它 internal 包；`kit` 只依赖 `domain`。
 - 有 I/O 的通用技术只写在 `internal/platform/*`；某个功能自己的存储写在它的包里。
-- 只有 `internal/platform/*` 与 `internal/panel/codex` 碰操作系统。
+- 只有 `internal/platform/*` 与 `internal/panel/codex` 碰操作系统 API。`internal/live` 可以 `os/exec` 启动已经下载的识别和翻译进程，但不调用采集 API，也不 import `net/http`。
 - 只有 `internal/platform/httpc` 与厂商包（`internal/panel/<vendor>`、
   `internal/translate/<backend>`）引入 `net/http`。
 - 厂商身份（`providerId`、凭据 key 名）只写在 `internal/contract/<厂商>`；面板与
@@ -169,8 +170,9 @@ testdata/       适配器测试用的原始响应样本
 - **所有出网**统一复用 `internal/platform/httpc` 的代理决策：厂商请求走它的 Client；
   受第三方 API 限制而必须使用标准库 Client 的装配代码也必须使用
   `httpc.ProxyTransport()`。不得因更新检查、下载或其他非厂商请求绕开系统代理。
-- 每个请求必须有超时与取消；默认超时 10 秒。
-- 响应体读取有上限（默认 1 MiB）。
+  例外是本机 `llama-server`：用 `httpc.NewDirect`，因为系统代理的绕过列表不含 `127.0.0.1`。
+- 每个请求必须有超时与取消；默认超时 10 秒。模型下载只靠取消，不套 10 秒上限。
+- 响应体读取有上限（默认 1 MiB）。`httpc.Download` 把模型流到临时文件，不进这个上限。
 - HTTP 错误必须翻译成领域错误，不透传响应体。
 - `ErrProviderBadResponse` 携带的响应片段必须裁剪到 ≤512 字节。
 - 网络失败不得影响本地功能与本地数据。

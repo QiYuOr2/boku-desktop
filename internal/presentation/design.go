@@ -540,15 +540,23 @@ func HeatColor(level int) ui.Color {
 }
 
 // The application's metrics, in points, taken from the design: every window
-// keeps a 20-point page edge, a section keeps 12 points between its rows, and
-// every control on a line is 36 points high.
+// keeps a 20-point page edge, a section keeps 16 points between its head and
+// its groups, 12 points between rows, and 8 points between a label and the
+// control it names. Every control on a line is 36 points high.
 const (
 	// pageEdge is the window's own margin: the room the page keeps on every
 	// side, and the room the footer's version keeps inside it.
-	PageEdge = 14.0
+	PageEdge = 20.0
 	// sectionGap is the room a section keeps above and below itself, which is
 	// what keeps the line dividing two of them from touching either.
 	SectionGap = 16.0
+	// GroupGap separates a section head from its body, and one group of
+	// controls from the next.
+	GroupGap = 16.0
+	// RowGap is the room between peer rows inside one group.
+	RowGap = 12.0
+	// FieldGap is the room between a label and the control it names.
+	FieldGap = 8.0
 
 	RadiusCard = 12.0
 	// radiusTile rounds the small square at the head of a list row.
@@ -819,7 +827,17 @@ func InputFrame(c *ui.Context, input ui.Element) ui.Element {
 		Background(ColorField).
 		Border(1, ColorBorder).
 		FontSize(SizeBody).
+		FixedLineHeight(InputLineHeight(SizeBody)).
 		TextColor(ColorInputValue)
+}
+
+// InputLineHeight is the line box of a single-line input at fontSize.
+// MyGo centers the empty string, and that line is the Latin face of the UI
+// stack. A CJK placeholder comes from a later face and is taller, but it is
+// drawn from the top of the shorter line, so it sits low. This height fits
+// those faces, and the empty line and the placeholder then share one box.
+func InputLineHeight(fontSize float32) float32 {
+	return fontSize * 1.5
 }
 
 // fieldFrame is inputFrame at the size a card's own row has room for: 32
@@ -836,6 +854,7 @@ func FieldFrame(c *ui.Context, input ui.Element) ui.Element {
 		Background(ColorField).
 		Border(1, ColorBorder).
 		FontSize(SizeSmall).
+		FixedLineHeight(InputLineHeight(SizeSmall)).
 		TextColor(ColorInputValue)
 }
 
