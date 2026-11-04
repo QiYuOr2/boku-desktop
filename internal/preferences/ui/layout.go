@@ -16,9 +16,8 @@ type quickLayoutEntry struct {
 
 func (s *LayoutState) SettingsView(c *ui.Context, head *ui.Handle) {
 	presentation.Inset(c, func() {
-		presentation.Stacked(c, float32(16), func() {
+		presentation.Stacked(c, presentation.GroupGap, func() {
 			presentation.SectionHead(c, head, s.layoutMark, presentation.ColorBrand, "悬浮窗面板", "拖拽排序 · 点击眼睛控制显示")
-			presentation.Notice(c, presentation.NotePlain, "以下区块会出现在托盘悬浮窗中。拖动卡片调整上下顺序；点击右侧眼睛图标可隐藏或显示对应区块。隐藏后该区块不占位。")
 			ui.Column(c).FillWidth().Children(func() {
 				for _, entry := range s.entries() {
 					s.quickLayoutDropZone(c, entry.id)

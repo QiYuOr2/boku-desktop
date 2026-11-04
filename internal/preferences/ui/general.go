@@ -7,22 +7,21 @@ import (
 
 func (s *State) GeneralView(c *ui.Context, head *ui.Handle, props GeneralProps) {
 	presentation.Inset(c, func() {
-		presentation.Stacked(c, float32(16), func() {
+		presentation.Stacked(c, presentation.GroupGap, func() {
 			presentation.SectionHead(c, head, props.Mark, presentation.ColorStoneInk, "通用", "启动与外观")
 
-			presentation.Stacked(c, float32(10), func() {
+			presentation.Stacked(c, presentation.RowGap, func() {
 				// The appearance is the section's first choice because it is
 				// the one the user sees before reading anything: three words
 				// in the same segmented control the clipboard's record range
 				// uses, so a choice between a few fixed things looks the same
 				// wherever it appears.
-				presentation.Stacked(c, float32(8), func() {
+				presentation.Stacked(c, presentation.FieldGap, func() {
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 						presentation.SectionLabel(c, "主题")
 						ui.Spacer(c)
 						AppearancePicker(c, props.Appearance, props.SetAppearance)
 					})
-					presentation.Notice(c, presentation.NotePlain, "自动跟随系统外观；浅色与深色固定使用。")
 					if props.AppearanceStatus != "" {
 						presentation.Notice(c, presentation.NotePlain, props.AppearanceStatus)
 					}
@@ -41,7 +40,7 @@ func (s *State) GeneralView(c *ui.Context, head *ui.Handle, props GeneralProps) 
 				s.autostartSwitch(c)
 			})
 
-			presentation.Stacked(c, float32(8), func() {
+			presentation.Stacked(c, presentation.FieldGap, func() {
 				ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 					presentation.SectionLabel(c, "数据目录")
 					ui.Spacer(c)

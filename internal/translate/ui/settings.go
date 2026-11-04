@@ -28,17 +28,17 @@ func (s *State) translateSection(c *ui.Context, head *ui.Handle) {
 	}
 	settings := s.translateSettingsOr()
 	presentation.Inset(c, func() {
-		presentation.Stacked(c, float32(16), func() {
+		presentation.Stacked(c, presentation.GroupGap, func() {
 			presentation.SectionHead(c, head, s.translationMark, presentation.ColorStoneInk, "划词翻译", "任意语言 → 中文 · 免费基础 + AI 翻译")
 
-			presentation.Stacked(c, float32(12), func() {
+			presentation.Stacked(c, presentation.RowGap, func() {
 				enabled := settings.Enabled
 				ui.Checkbox(c, &enabled, "启用划词翻译").
 					FontSize(presentation.SizeBody).
 					OnClick(func() { s.setTranslationEnabled(enabled) })
 
 				if !showsTranslationControls(settings) {
-					presentation.Notice(c, presentation.NotePlain, "划词翻译已关闭，快捷键不再占用。打开后可以在这里选择翻译服务。")
+					presentation.Notice(c, presentation.NotePlain, "快捷键不再占用。")
 					s.translateNoticeLine(c)
 					return
 				}
@@ -87,7 +87,7 @@ func showsTranslationControls(settings translate.Settings) bool {
 // the answer is about the one they made.
 func (s *State) providerPicker(c *ui.Context, settings translate.Settings) {
 	cards := pickerTranslateCards(s.translateCards())
-	presentation.Stacked(c, float32(8), func() {
+	presentation.Stacked(c, presentation.RowGap, func() {
 		presentation.SectionLabel(c, "翻译服务")
 
 		free, keyed := splitTranslateCards(cards)
@@ -107,7 +107,6 @@ func (s *State) providerPicker(c *ui.Context, settings translate.Settings) {
 				}
 			})
 		}
-		presentation.Notice(c, presentation.NotePlain, "免费服务无需密钥；AI 服务仅显示已配置 API Key 的可选。")
 	})
 }
 
@@ -245,26 +244,23 @@ func chooseTextColor(configured bool) ui.Color {
 // annotationSwitches are the Japanese enhancements: what the translator is
 // asked to say about each word.
 func (s *State) annotationSwitches(c *ui.Context, settings translate.Settings) {
-	presentation.Stacked(c, float32(10), func() {
+	presentation.Stacked(c, presentation.RowGap, func() {
 		presentation.SectionLabel(c, "日语增强（仅日语原文）")
 		furigana := settings.Furigana
 		ui.Checkbox(c, &furigana, "汉字标注片假名读音").
 			FontSize(presentation.SizeBody).
 			OnClick(func() { s.setTranslationFurigana(furigana) })
-		presentation.Notice(c, presentation.NotePlain, "例：機械語 → キカイゴ")
-
 		gloss := settings.LoanwordGloss
 		ui.Checkbox(c, &gloss, "片假名标注对应英文原词").
 			FontSize(presentation.SizeBody).
 			OnClick(func() { s.setTranslationLoanwordGloss(gloss) })
-		presentation.Notice(c, presentation.NotePlain, "例：コンパイラ → compiler")
 	})
 }
 
 // windowSwitches are the card's own behavior: whether it stays, and how long
 // it waits before closing itself.
 func (s *State) windowSwitches(c *ui.Context, settings translate.Settings) {
-	presentation.Stacked(c, float32(10), func() {
+	presentation.Stacked(c, presentation.RowGap, func() {
 		presentation.SectionLabel(c, "浮窗行为")
 		pinned := settings.Pinned
 		ui.Checkbox(c, &pinned, "默认固定（Pin）浮窗").
@@ -276,7 +272,7 @@ func (s *State) windowSwitches(c *ui.Context, settings translate.Settings) {
 			ui.Spacer(c)
 			s.closeDelayField(c, settings)
 		})
-		presentation.Notice(c, presentation.NotePlain, "浮窗失去焦点后等待这段时间再关闭；固定后不再自动关闭。")
+		presentation.Notice(c, presentation.NotePlain, "固定后不再自动关闭。")
 	})
 }
 
@@ -333,24 +329,17 @@ func isDigits(text string) bool {
 // a line saying so. The design's other keys — 朗读原文、固定浮窗、关闭浮窗 —
 // are not implemented, and are not drawn as buttons that would do nothing.
 func (s *State) shortcutSwitches(c *ui.Context) {
-	presentation.Stacked(c, float32(8), func() {
+	presentation.Stacked(c, presentation.RowGap, func() {
 		presentation.SectionLabel(c, "快捷键")
 
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(12)).Children(func() {
-			ui.Column(c).Grow(1).Children(func() {
-				ui.Text(c, "划词后弹出翻译").FontSize(presentation.SizeBody).TextColor(presentation.ColorTextSoft).SingleLine()
-				ui.Text(c, "选中文字后按此键显示浮窗").FontSize(presentation.SizeTiny).TextColor(presentation.ColorTextMuted).SingleLine()
-			})
+			ui.Text(c, "划词后弹出翻译").FontSize(presentation.SizeBody).TextColor(presentation.ColorTextSoft).SingleLine().Grow(1)
 			s.shortcutButton(c, shortcutText)
 		})
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(12)).Children(func() {
 			ui.Column(c).Grow(1).Children(func() {
 				ui.Text(c, "截图翻译").FontSize(presentation.SizeBody).TextColor(presentation.ColorTextSoft).SingleLine()
-				label := presentation.FriendlyAccelerator(s.translateSettingsOr().ScreenshotAcceleratorOr())
-				if label == "" {
-					label = "已关闭"
-				}
-				ui.Text(c, "框选屏幕后直接使用 AI 翻译 · "+label).FontSize(presentation.SizeTiny).TextColor(presentation.ColorTextMuted).SingleLine()
+				ui.Text(c, "框选后使用 AI 翻译").FontSize(presentation.SizeTiny).TextColor(presentation.ColorTextMuted).SingleLine()
 			})
 			s.shortcutButton(c, shortcutScreenshot)
 		})
@@ -383,8 +372,6 @@ func (s *State) shortcutSwitches(c *ui.Context) {
 				}
 			}
 		}
-		presentation.Notice(c, presentation.NotePlain, "点击快捷键可重新录制；与系统或其他软件冲突时请更换。")
-
 		// An inline action at the end of the block, not another full-width
 		// control: resetting is a correction to the binding above it, and a
 		// block button would read as the section's main action.

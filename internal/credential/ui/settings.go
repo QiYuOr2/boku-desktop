@@ -64,7 +64,7 @@ type TranslateCard = presentation.Connection
 
 func (s *State) ApiKeySection(c *ui.Context, head *ui.Handle) {
 	presentation.Inset(c, func() {
-		presentation.Stacked(c, float32(16), func() {
+		presentation.Stacked(c, presentation.GroupGap, func() {
 			presentation.SectionHeadSmall(c, head, s.keyMark, presentation.ColorStoneInk, "API Key", "配置各 AI 服务密钥")
 
 			// Only the services that have a key: this section is a key form,
@@ -73,7 +73,7 @@ func (s *State) ApiKeySection(c *ui.Context, head *ui.Handle) {
 			// user is deciding what to translate with rather than what to
 			// type.
 			cards := KeyedTranslateCards(s.TranslateCards())
-			presentation.Stacked(c, float32(12), func() {
+			presentation.Stacked(c, presentation.RowGap, func() {
 				for _, card := range cards {
 					s.ApiKeyCard(c, card)
 				}

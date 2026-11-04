@@ -17,6 +17,7 @@ func TestMarksAreSVGDocuments(t *testing.T) {
 		"Lightbulb":  Lightbulb(),
 		"Command":    Command(),
 		"Return":     Return(),
+		"Live":       Live(),
 	}
 	for name, data := range marks {
 		t.Run(name, func(t *testing.T) {

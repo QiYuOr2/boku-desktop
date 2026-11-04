@@ -56,6 +56,7 @@ const (
 	sectionQuickLayout
 	sectionGeneral
 	sectionAbout
+	sectionLive
 )
 
 // settingsPage is one section of the settings page and the sidebar entry that
@@ -79,8 +80,11 @@ func (s *State) settingsPages() []*settingsPage {
 	pages := []*settingsPage{
 		{kind: sectionAPIKey, name: "API Key", mark: s.keyMark, build: s.credentialUI.ApiKeySection},
 		{kind: sectionTranslate, name: "划词翻译", mark: s.translationMark, build: s.translateSection},
-		{kind: sectionClipboard, name: "剪贴板", mark: s.clipboardMark, build: s.clipboardSection},
 	}
+	if s.liveUI != nil {
+		pages = append(pages, &settingsPage{kind: sectionLive, name: "实时翻译", mark: s.liveMark, build: s.liveSection})
+	}
+	pages = append(pages, &settingsPage{kind: sectionClipboard, name: "剪贴板", mark: s.clipboardMark, build: s.clipboardSection})
 	if s.flashUI != nil {
 		pages = append(pages, &settingsPage{kind: sectionFlash, name: "闪念", mark: s.flashMark, build: s.flashSection})
 	}
@@ -251,8 +255,12 @@ func (s *State) settingsAim(c *ui.Context, kind settingsSectionKind, sections []
 	if s.settingsAiming && s.settingsAimAt == kind {
 		return
 	}
-	index := int(kind)
-	if index >= len(sections) {
+	// Kind is not the page index. 实时翻译 is inserted after 划词翻译, and 闪念
+	// is optional, so the enum order and the list the sidebar draws are not
+	// the same list. Using the ordinal scrolled 实时翻译 to whichever section
+	// happened to sit at that number.
+	index, ok := settingsSectionIndex(kind, sections)
+	if !ok {
 		return
 	}
 	box := c.Resolve(sections[index].box)
@@ -261,6 +269,15 @@ func (s *State) settingsAim(c *ui.Context, kind settingsSectionKind, sections []
 	}
 	s.settingsAiming, s.settingsAimAt = true, kind
 	s.settingsScroll.ScrollTo(0, s.settingsScroll.Y+box.Bounds().Y-settingsAnchor, ui.Smooth)
+}
+
+func settingsSectionIndex(kind settingsSectionKind, sections []settingsSectionBox) (int, bool) {
+	for index, section := range sections {
+		if section.kind == kind {
+			return index, true
+		}
+	}
+	return 0, false
 }
 
 // sectionInView is the section the sidebar marks open: the last one whose
@@ -438,7 +455,7 @@ func (s *State) generalSection(c *ui.Context, head *ui.Handle) {
 // version.
 func (s *State) aboutSection(c *ui.Context, head *ui.Handle) {
 	presentation.Inset(c, func() {
-		presentation.Stacked(c, float32(16), func() {
+		presentation.Stacked(c, presentation.GroupGap, func() {
 			presentation.SectionHead(c, head, s.infoMark, presentation.ColorStoneInk, "关于", "版本与构建")
 
 			ui.Column(c).FillWidth().

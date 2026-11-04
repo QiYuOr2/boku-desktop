@@ -93,6 +93,8 @@ var (
 	closeSVG []byte
 	//go:embed translate.svg
 	translateSVG []byte
+	//go:embed live.svg
+	liveSVG []byte
 	//go:embed command.svg
 	commandSVG []byte
 	//go:embed return.svg
@@ -179,6 +181,9 @@ func Return() []byte  { return returnSVG }
 // Translate returns the mark that heads the translation section: the
 // application's own drawing rather than a brand's.
 func Translate() []byte { return translateSVG }
+
+// Live returns the realtime-translation mark.
+func Live() []byte { return liveSVG }
 
 // Clipboard returns the clipboard mark as the SVG document it is.
 func Clipboard() []byte { return clipboardSVG }
