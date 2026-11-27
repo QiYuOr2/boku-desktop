@@ -4,10 +4,8 @@ import "strings"
 
 const translateInstruction = "将以下文本翻译为中文，注意**只需要输出翻译后的结果，不要额外解释**："
 
-// Prompt is the single user message. A hit uses the model card's terminology
-// template, including the bold markers. A miss uses the default template.
-// The two are never combined, and there is no system message and no previous
-// sentence.
+// Prompt 生成唯一的 user 消息。命中术语时用模型卡片的术语模板（含粗体标记），
+// 未命中用默认模板；两者永不合并，也没有 system 消息和上一句上下文。
 func Prompt(sentence string, terms []Entry) string {
 	sentence = strings.TrimSpace(sentence)
 	if len(terms) == 0 {

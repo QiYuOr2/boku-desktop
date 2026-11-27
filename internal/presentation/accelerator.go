@@ -7,9 +7,8 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// AcceleratorOf spells a key press the way the platform shortcut API reads it.
-// Shift alone is refused: Shift+A is how a capital letter is typed, and taking
-// it would take that key from every other application.
+// AcceleratorOf 按平台快捷键 API 的读法拼写按键。单独的 Shift 会被拒绝：
+// Shift+A 是输入大写字母的方式，把它当成快捷键会从其他应用手里抢走该键。
 func AcceleratorOf(ev ui.InputEvent) (string, bool) {
 	name, ok := acceleratorNames[ev.Key]
 	if !ok {
@@ -34,14 +33,12 @@ func AcceleratorOf(ev ui.InputEvent) (string, bool) {
 	return strings.Join(append(parts, name), "+"), true
 }
 
-// ModifierKey reports a modifier pressed on its own. The framework reports it
-// as an unknown key with its bit set, rather than as a key of its own.
+// ModifierKey 判断是否单独按下了修饰键。框架把它报告成一个置位的未知键，
+// 而不是独立的按键。
 func ModifierKey(key ui.Key) bool { return key == ui.KeyUnknown }
 
-// acceleratorNames is what each key is called in an accelerator. It is written
-// down rather than derived, because the framework's own table is internal, and
-// a binding spelled the way its parser does not read fails in front of the user.
-// A key that is not here cannot be bound.
+// acceleratorNames 是每个键在快捷键里的名字。这里手写而非推导，因为框架自己的
+// 表是内部的，而拼成解析器读不懂的写法会在用户面前出错。不在表里的键无法绑定。
 var acceleratorNames = map[ui.Key]string{
 	ui.KeyEnter:        "Enter",
 	ui.KeyBackspace:    "Backspace",
@@ -118,7 +115,7 @@ var acceleratorNames = map[ui.Key]string{
 	ui.KeyZ:            "Z",
 }
 
-// ModifierHint is what the recorder says when a key press has no usable modifier.
+// ModifierHint 是录键器在按键没有可用修饰键时给出的提示。
 func ModifierHint() string {
 	if runtime.GOOS == "darwin" {
 		return "需要一个带 Command（⌘）或 Control 的组合键。"
@@ -126,8 +123,8 @@ func ModifierHint() string {
 	return "需要一个带 Ctrl / Alt / Super 的组合键。"
 }
 
-// ShortcutPlatformNote is what settings say about Linux, where the binding is
-// made by the desktop portal rather than by the application itself.
+// ShortcutPlatformNote 是设置里关于 Linux 的说明：那里由桌面门户而非应用自身
+// 完成绑定。
 func ShortcutPlatformNote() string {
 	if runtime.GOOS == "linux" {
 		return "Linux / Wayland 下快捷键由桌面门户绑定，可能需要系统确认。"
@@ -135,24 +132,24 @@ func ShortcutPlatformNote() string {
 	return ""
 }
 
-// FriendlyAccelerator writes a binding the way a person reads it. Command on
-// macOS, Ctrl on the others, and "CmdOrCtrl" resolves to whichever the platform uses.
+// FriendlyAccelerator 按人阅读的方式书写绑定：macOS 上是 Command，其它平台是
+// Ctrl，"CmdOrCtrl" 解析为当前平台对应的那个。
 func FriendlyAccelerator(accelerator string) string {
 	return FriendlyAcceleratorFor(accelerator, runtime.GOOS)
 }
 
-// FriendlyAcceleratorFor is FriendlyAccelerator with the platform passed in.
+// FriendlyAcceleratorFor 是显式传入平台的 FriendlyAccelerator。
 func FriendlyAcceleratorFor(accelerator, goos string) string {
 	return strings.Join(acceleratorParts(accelerator, goos), " + ")
 }
 
-// CompactAccelerator is the same names without spaces around the plus, so a
-// three-key combination fits in the recorder field.
+// CompactAccelerator 是同样的名字但加号两边不带空格，好让三键组合塞进录键器
+// 输入框。
 func CompactAccelerator(accelerator string) string {
 	return CompactAcceleratorFor(accelerator, runtime.GOOS)
 }
 
-// CompactAcceleratorFor is CompactAccelerator with the platform passed in.
+// CompactAcceleratorFor 是显式传入平台的 CompactAccelerator。
 func CompactAcceleratorFor(accelerator, goos string) string {
 	return strings.Join(acceleratorParts(accelerator, goos), "+")
 }
@@ -172,7 +169,7 @@ func acceleratorParts(accelerator, goos string) []string {
 				part = "Command"
 			}
 		case strings.EqualFold(part, "Super") && goos == "darwin":
-			// The framework reads Command as Super; a person reads it as Command.
+			// 框架把 Command 读作 Super；人则把它读作 Command。
 			part = "Command"
 		}
 		parts[index] = part

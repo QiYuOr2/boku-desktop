@@ -1,4 +1,4 @@
-// Package bilibili watches explicitly configured public creator profiles.
+// Package bilibili 监视用户显式配置的公开 UP 主页。
 package bilibili
 
 import (
@@ -27,21 +27,18 @@ var apiBaseURL = bilibili.APIBaseURL
 var liveBaseURL = bilibili.LiveBaseURL
 
 const (
-	// dynamicFeedPath is the space feed, the one endpoint that answers a
-	// creator's latest post without a login. It is protected by WBI signing.
+	// dynamicFeedPath 是 space feed，唯一能在未登录下返回 UP 最新动态的接口。它受
+	// WBI 签名保护。
 	dynamicFeedPath = "/x/polymer/web-dynamic/v1/feed/space"
 
-	// riskControlCode is Bilibili's "signature rejected" code. It is retried
-	// once with fresh keys, because the keys rotate roughly daily.
+	// riskControlCode 是 B 站的「签名被拒」码。密钥大约每天轮换，所以会用新密钥重试一次。
 	riskControlCode = -352
 
-	// feedAttempts bounds how many times an empty answer is retried before it
-	// is believed. Bilibili answers a throttled anonymous request with an
-	// empty list rather than an error, so one empty answer proves nothing.
+	// feedAttempts 限制空结果在被采信前重试多少次。B 站对被限流的匿名请求返回空列表
+	// 而非错误，因此一次空结果说明不了什么。
 	feedAttempts = 3
 
-	// feedRetryPause is the pause between those attempts. It is short because
-	// a refresh runs on a timer and several creators share it.
+	// feedRetryPause 是这些尝试之间的停顿。它很短，因为刷新跑在定时器上且多个 UP 共享。
 	feedRetryPause = 400 * time.Millisecond
 )
 
@@ -51,7 +48,7 @@ type Service struct {
 	store   StoreSettings
 	now     func() time.Time
 	session *session
-	// cache holds the last known row of each followed creator between runs.
+	// cache 保存每个关注 UP 最近一次的行，跨运行保留。
 	cache     *Cache
 	mu        sync.RWMutex
 	items     []domain.FollowedUpdate
@@ -60,7 +57,7 @@ type Service struct {
 	err       error
 	stop      context.CancelFunc
 	emit      func(previous, current []domain.FollowedUpdate)
-	// covers holds the fetched avatar of each creator, keyed by UID.
+	// covers 保存已抓取的每个 UP 头像，按 UID 索引。
 	covers map[int64][]byte
 }
 
@@ -73,11 +70,10 @@ func New(client *httpc.Client, section *Section, store StoreSettings) (*Service,
 	return service, nil
 }
 
-// NewWithCache is New with the on-disk record of each creator's last row.
+// NewWithCache 是带磁盘记录的 New。
 //
-// The cache is restored as soon as the service exists, so a cold start shows
-// the followed creators rather than an empty block while the first refresh is
-// in flight. It is a cache: an unreadable file is a miss, never a failure.
+// 服务一创建就恢复缓存，让冷启动显示已关注的 UP 而不是一次刷新还在进行时的空块。
+// 它是缓存：无法读取的文件只是未命中，绝不是失败。
 func NewWithCache(client *httpc.Client, section *Section, store StoreSettings, cache *Cache) (*Service, error) {
 	service, err := New(client, section, store)
 	if err != nil {
@@ -88,7 +84,7 @@ func NewWithCache(client *httpc.Client, section *Section, store StoreSettings, c
 	return service, nil
 }
 
-// restore puts the cached rows on screen before any network answer.
+// restore 在任何网络应答之前把缓存的行放上屏幕。
 func (s *Service) restore() {
 	settings := s.section.Settings()
 	if len(settings.UIDs) == 0 {
@@ -104,15 +100,14 @@ func (s *Service) restore() {
 	s.mu.Unlock()
 }
 
-// persist writes the current rows, so this run's answers survive the next
-// start. A failure is logged by the caller and never fails a refresh: the data
-// is on screen either way.
+// persist 写入当前的行，让本次的应答在下次启动后仍在。失败由调用方记日志，绝不让刷新
+// 失败：数据无论如何已经显示在屏幕上。
 func (s *Service) persist(items []domain.FollowedUpdate, at time.Time) error {
 	return s.cache.Save(items, at)
 }
 
-// Avatar returns the fetched avatar bytes of one creator, or nil. The
-// presentation turns these into bitmaps off the view path.
+// Avatar 返回某个 UP 已抓取的头像字节，没有则为 nil。展示层在视图路径之外把它们
+// 转成位图。
 func (s *Service) Avatar(uid int64) []byte {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -124,9 +119,8 @@ func (s *Service) Settings() Settings {
 	return s.section.Settings()
 }
 
-// SetEmit installs the observer called after a successful refresh. It is used
-// by the presentation to decide whether a new live session or activity earns
-// a notification; the service never imports a window or notification API.
+// SetEmit 安装成功刷新后调用的观察者。展示层用它判断新开播或新动态是否值得提醒；
+// 服务从不 import 窗口或通知 API。
 func (s *Service) SetEmit(emit func(previous, current []domain.FollowedUpdate)) {
 	s.mu.Lock()
 	s.emit = emit
@@ -164,12 +158,10 @@ func (s *Service) ConfigureSettings(ctx context.Context, settings Settings) erro
 	return nil
 }
 
-// applyFollowedList drops what belongs to creators the user no longer follows.
+// applyFollowedList 丢弃属于已不再关注 UP 的内容。
 //
-// Removing a creator from the settings has to remove them from the block *and*
-// from the record on disk: a row that describes someone the user dropped is
-// data they asked to be gone, and leaving it behind means it comes back the
-// next time the file is read.
+// 从设置中移除 UP 必须同时从块和磁盘记录中移除：描述用户已丢弃对象的行是对方要求
+// 删除的数据，留着意味着下次读文件时它又回来。
 func (s *Service) applyFollowedList(uids []int64) {
 	followed := make(map[int64]bool, len(uids))
 	for _, uid := range uids {
@@ -215,10 +207,8 @@ func (s *Service) RefreshIfNeeded(ctx context.Context) error {
 	return s.Refresh(ctx)
 }
 
-// Start keeps the configured public profiles fresh while the tray app runs.
-// A minute tick is intentionally the smallest supported refresh interval; the
-// current setting is checked on every tick, so saving a new interval needs no
-// second scheduler or process restart.
+// Start 在托盘应用运行期间保持已配置的公开主页新鲜。一分钟的 tick 是刻意选择的最小
+// 刷新间隔；每次 tick 都重新读取当前设置，所以保存新的间隔无需第二个调度器或重启进程。
 func (s *Service) Start(ctx context.Context) {
 	s.mu.Lock()
 	if s.stop != nil {
@@ -242,7 +232,7 @@ func (s *Service) Start(ctx context.Context) {
 	}()
 }
 
-// Stop ends the monitor's ticker before the application exits.
+// Stop 在应用退出前结束监视器的 ticker。
 func (s *Service) Stop() {
 	s.mu.Lock()
 	stop := s.stop
@@ -291,13 +281,11 @@ func (s *Service) Refresh(ctx context.Context) error {
 		}
 		return items[i].PublishedAt.After(items[j].PublishedAt)
 	})
-	// The avatars are not part of the refresh's success: a row whose avatar
-	// could not be fetched falls back to its mark.
+	// 头像不属于刷新成功的一部分：抓不到头像的那一行回落到它的标记。
 	s.refreshAvatars(ctx, items)
 	s.record(items, nil)
-	// The record is the point of the refresh: keep the last row of each
-	// creator so the next start has something to show. A write that fails is
-	// worth a log line, not a failed refresh.
+	// 记录是刷新的重点：保留每个 UP 最后一行，让下次启动有内容可显示。写入失败值得
+	// 记一行日志，但不该让刷新失败。
 	if err := s.persist(items, s.now().UTC()); err != nil {
 		slog.Warn("the followed-UP record could not be written", "event", "bilibili_cache_unwritable", "error", err)
 	}
@@ -313,18 +301,14 @@ func previousPost(items []domain.FollowedUpdate, uid int64) (domain.FollowedUpda
 	return domain.FollowedUpdate{}, false
 }
 
-// fetchCreator answers the one row that stands for a creator.
+// fetchCreator 返回代表某个 UP 的那一行。
 //
-// The live status and the timeline are two independent questions, and both are
-// always asked. Whether a creator is streaming has nothing to do with whether
-// they posted recently: a creator who streams every day and never posts is not
-// less live than one who posts between streams. Asking the live endpoint only
-// when the timeline came back empty made a streaming creator look like a video
-// one whenever a post happened to exist.
+// 直播状态和时间线是两个独立的问题，两者始终都要问。UP 是否在直播与最近是否发帖
+// 无关：每天直播从不发帖的 UP 并不比直播间隙发帖的 UP「更不直播」。只在时间线为空时
+// 才问直播接口，会让正在直播的 UP 只要恰好有帖子就被显示成视频 UP。
 //
-// The row is the live session when there is one, because that is what is
-// happening now; otherwise it is the creator's newest post. It reports no row
-// when they are neither streaming nor posting.
+// 有直播时这一行就是直播间，因为那是当下正在发生的事；否则是 UP 最新的帖子。既不
+// 直播也不发帖时返回无行。
 func (s *Service) fetchCreator(ctx context.Context, uid int64, dynamicCount int) (domain.FollowedUpdate, bool, error) {
 	live, err := s.fetchLive(ctx, uid)
 	if err != nil {
@@ -349,11 +333,10 @@ func (s *Service) fetchCreator(ctx context.Context, uid int64, dynamicCount int)
 	return newest, true, nil
 }
 
-// fetchLive asks whether the creator is streaming right now.
+// fetchLive 询问 UP 此刻是否在直播。
 //
-// It uses the endpoint that answers with the room and the creator's own name
-// and portrait together, so a live row is complete even when the timeline is
-// empty and there is no post to take a name from.
+// 它用同时返回房间、UP 名称和头像的接口，这样即使时间线为空、没有帖子可取名，直播行
+// 也是完整的。
 func (s *Service) fetchLive(ctx context.Context, uid int64) (domain.FollowedUpdate, error) {
 	endpoint := fmt.Sprintf("%s/room/v1/Room/get_status_info_by_uids?uids[]=%d", liveBaseURL, uid)
 	result, err := s.client.GetJSON(ctx, endpoint, browserHeaders())
@@ -364,7 +347,7 @@ func (s *Service) fetchLive(ctx context.Context, uid int64) (domain.FollowedUpda
 	return decodeLiveStatus(uid, result.Payload, s.now())
 }
 
-// fetchPosts asks for the creator's newest posts, pinned ones excluded.
+// fetchPosts 获取 UP 最新的帖子，不含置顶。
 func (s *Service) fetchPosts(ctx context.Context, uid int64, dynamicCount int) ([]domain.FollowedUpdate, error) {
 	payload, err := s.fetchFeed(ctx, uid)
 	if err != nil {
@@ -373,8 +356,8 @@ func (s *Service) fetchPosts(ctx context.Context, uid int64, dynamicCount int) (
 	return decodeDynamics(uid, payload, dynamicCount)
 }
 
-// liveStatusResponse is the answer of get_status_info_by_uids. The rooms are
-// keyed by UID rather than returned in an array.
+// liveStatusResponse 是 get_status_info_by_uids 的应答。房间按 UID 索引而非以数组
+// 返回。
 type liveStatusResponse struct {
 	Code int `json:"code"`
 	Data map[string]struct {
@@ -420,8 +403,7 @@ func decodeLiveStatus(uid int64, payload []byte, now time.Time) (domain.Followed
 	} else {
 		item.Summary = "正在直播"
 	}
-	// The session started at live_time, and is still going: a row about
-	// something happening now sorts above any post.
+	// 直播从 live_time 开始并持续至今：描述当下之事的行排在任何帖子之上。
 	item.PublishedAt = now.UTC()
 	if room.LiveTime > 0 {
 		item.PublishedAt = time.Unix(room.LiveTime, 0).UTC()
@@ -429,14 +411,11 @@ func decodeLiveStatus(uid int64, payload []byte, now time.Time) (domain.Followed
 	return item, nil
 }
 
-// fetchFeed asks for one creator's feed, signing the query and retrying the
-// ways the answer can come back without any items.
+// fetchFeed 为某个 UP 获取 feed，对查询签名，并重试那些没有带回任何条目的应答方式。
 //
-// Bilibili's risk control does not fail an anonymous request outright: it
-// answers `code: 0` with an empty list. An empty answer and a genuine absence
-// of activity look the same, so an empty list is retried a few times with a
-// short pause before it is believed. Only after the retries does "no items"
-// mean "this creator posted nothing".
+// B 站风控不会直接让匿名请求失败：它回 `code: 0` 加空列表。空应答与真的没有动态长得
+// 一样，所以空列表要短暂停顿后重试几次才被采信。只有重试之后「没有条目」才等于「这个
+// UP 什么都没发」。
 func (s *Service) fetchFeed(ctx context.Context, uid int64) ([]byte, error) {
 	s.session.ensureCookies(ctx)
 	params := map[string]string{
@@ -445,9 +424,8 @@ func (s *Service) fetchFeed(ctx context.Context, uid int64) ([]byte, error) {
 		"features": "itemOpusStyle",
 	}
 	var lastErr error
-	// lastEmpty keeps the last well-formed answer that carried no items. Once
-	// the retries are spent it is what the caller decodes: "this creator has
-	// nothing" is an answer, and it has to reach the decoder as one.
+	// lastEmpty 保存最后一个不含条目的良构应答。重试耗尽后由调用方解码它：
+	// 「这个 UP 什么都没有」本身是答案，必须作为答案交给解码器。
 	var lastEmpty []byte
 	for attempt := 0; attempt < feedAttempts; attempt++ {
 		if attempt > 0 {
@@ -457,14 +435,12 @@ func (s *Service) fetchFeed(ctx context.Context, uid int64) ([]byte, error) {
 		}
 		endpoint, ok := s.session.signedURL(ctx, apiBaseURL, dynamicFeedPath, params)
 		if !ok {
-			// Without keys the query cannot be signed, and an unsigned query
-			// is answered with -412 or -352 rather than data.
+			// 没有密钥就无法签名查询，而未签名的查询只会得到 -412 或 -352 而非数据。
 			return nil, badRejected("dynamic API", "the WBI keys could not be read", nil)
 		}
 		result, err := s.client.GetJSON(ctx, endpoint, s.session.headers())
 		if err != nil {
-			// A transport failure is worth one more attempt; a rejection is
-			// not, because it repeats identically.
+			// 传输失败值得再试一次；被拒绝则不值得，因为它会完全一致地重复。
 			lastErr = err
 			if errors.Is(err, domain.ErrProviderUnauthorized) ||
 				errors.Is(err, domain.ErrProviderBadResponse) {
@@ -475,8 +451,7 @@ func (s *Service) fetchFeed(ctx context.Context, uid int64) ([]byte, error) {
 		s.session.absorbCookies(result.Cookies)
 		code, message, empty := inspectFeed(result.Payload)
 		if code == riskControlCode {
-			// The keys rotated, or the signature was not accepted. Fetch a new
-			// pair and sign again; that is what makes -352 self-heal.
+			// 密钥轮换了，或签名未被接受。取一对新密钥并重新签名；这正是 -352 能自愈的原因。
 			s.session.invalidateKeys()
 			lastErr = badRejected("dynamic API", fmt.Sprintf("code %d", code), result.Payload)
 			continue
@@ -499,13 +474,12 @@ func (s *Service) fetchFeed(ctx context.Context, uid int64) ([]byte, error) {
 	return nil, nil
 }
 
-// absorbSession keeps the identity cookies a live answer handed out.
+// absorbSession 保留直播应答下发的身份 cookie。
 func (s *Service) absorbSession(cookies []string) {
 	s.session.absorbCookies(cookies)
 }
 
-// inspectFeed reads the business code out of a feed answer and reports whether
-// the list was empty.
+// inspectFeed 读出 feed 应答里的业务码，并报告列表是否为空。
 func inspectFeed(payload []byte) (code int, message string, empty bool) {
 	var page struct {
 		Code    int    `json:"code"`
@@ -520,7 +494,7 @@ func inspectFeed(payload []byte) (code int, message string, empty bool) {
 	return page.Code, page.Message, len(page.Data.Items) == 0
 }
 
-// sleepContext waits for d, or returns early when the refresh is cancelled.
+// sleepContext 等待 d，刷新被取消时提前返回。
 func sleepContext(ctx context.Context, d time.Duration) error {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
@@ -545,10 +519,9 @@ func (s *Service) record(items []domain.FollowedUpdate, err error) {
 	}
 }
 
-// dynamicPage is the space feed's answer. Its modules arrive as one object
-// keyed by module name: the author under module_author, the post body under
-// module_dynamic. This is the shape both the web and the desktop endpoint
-// return; the two differ only in which modules they bother to fill in.
+// dynamicPage 是 space feed 的应答。它的 modules 以单个对象按模块名到达：
+// module_author 放作者，module_dynamic 放帖子正文。这是 web 和 desktop 两个接口
+// 共同的形状，两者只在填充哪些模块上不同。
 type dynamicPage struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
@@ -566,19 +539,16 @@ type dynamicItem struct {
 type dynamicItemBody struct {
 	Author  dynamicAuthor  `json:"module_author"`
 	Dynamic dynamicContent `json:"module_dynamic"`
-	// Tag marks a pinned post. The object is absent (or null) on every other
-	// item, and its text is "置顶" when it is present.
+	// Tag 标记置顶帖。其他条目的该对象缺失（或为 null），存在时其文本为「置顶」。
 	Tag *struct {
 		Text string `json:"text"`
 	} `json:"module_tag"`
 }
 
-// pinned reports whether this item is a post the creator pinned to the top of
-// their timeline.
+// pinned 报告该条目是否是 UP 置顶在时间线顶部的帖子。
 //
-// A pinned post is the old one they want noticed, not the new one they just
-// made, and it arrives first in the feed. Taking the first item as "newest"
-// would therefore show a post from months ago.
+// 置顶帖是他们想让人注意的旧帖，不是刚发的新帖，且在 feed 里最先出现。把第一个条目
+// 当成「最新」就会显示几个月前的帖子。
 func (v dynamicItem) pinned() bool {
 	return v.Modules.Tag != nil && strings.TrimSpace(v.Modules.Tag.Text) != ""
 }
@@ -590,10 +560,8 @@ type dynamicAuthor struct {
 	PubTS flexInt64 `json:"pub_ts"`
 }
 
-// flexInt64 accepts a number or a string holding one. Bilibili is not
-// consistent about this: most items send pub_ts as a number, some send it as a
-// string, and one item of the wrong kind would otherwise make the whole feed
-// undecodable.
+// flexInt64 接受数字或存放数字的字符串。B 站对此并不一致：多数条目把 pub_ts 发成
+// 数字，少数发成字符串，一个类型不符的条目就会让整份 feed 无法解码。
 type flexInt64 int64
 
 func (v *flexInt64) UnmarshalJSON(data []byte) error {
@@ -604,7 +572,7 @@ func (v *flexInt64) UnmarshalJSON(data []byte) error {
 	}
 	n, err := strconv.ParseInt(text, 10, 64)
 	if err != nil {
-		// A float or an unexpected shape is not worth failing the feed over.
+		// 浮点数或意外形状不值得让整份 feed 失败。
 		*v = 0
 		return nil
 	}
@@ -612,24 +580,21 @@ func (v *flexInt64) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// dynamicContent is the post body.
+// dynamicContent 是帖子正文。
 //
-// It is a fixed object in which every kind of entry has its own slot: only the
-// one matching the item's type is filled in, and the rest are null. A post's
-// own words live in desc; a picture post written in the newer editor carries
-// them under opus.summary instead; a video, a column and a live room each carry
-// a title.
+// 它是一个固定对象，每种条目都有自己的槽位：只有与条目类型匹配的那个被填充，其余为
+// null。帖子自己的文字在 desc；用新编辑器写的图文帖把它们放在 opus.summary；视频、
+// 专栏和直播间各自带一个标题。
 type dynamicContent struct {
 	Desc struct {
 		Text string `json:"text"`
 	} `json:"desc"`
 	Major struct {
 		Archive dynamicEntry `json:"archive"`
-		// Opus is the newer picture-and-text entry, and the one that carries a
-		// picture post's words.
+		// Opus 是较新的图文条目，也是承载图文帖文字的那个。
 		Opus dynamicEntry `json:"opus"`
-		// Article is a column, Draw a set of pictures, Live a live card,
-		// Common a forwarded post's reminder, PGC a series.
+		// Article 是专栏，Draw 是一组图片，Live 是直播卡片，Common 是转发帖的
+		// 提醒，PGC 是番剧。
 		Article dynamicEntry `json:"article"`
 		Draw    dynamicEntry `json:"draw"`
 		Live    dynamicEntry `json:"live"`
@@ -638,8 +603,7 @@ type dynamicContent struct {
 	} `json:"major"`
 }
 
-// dynamicEntry is one slot of major. Every kind has a title and a summary, and
-// a few carry a bvid or an address of their own.
+// dynamicEntry 是 major 的一个槽位。每种都带标题和摘要，少数还带自己的 bvid 或地址。
 type dynamicEntry struct {
 	BVID    string `json:"bvid"`
 	Title   string `json:"title"`
@@ -650,13 +614,11 @@ type dynamicEntry struct {
 	Desc string `json:"desc"`
 }
 
-// preview is the line a row shows under the creator's name: the post's own
-// words when it has them, otherwise the title of whatever it points at.
+// preview 是行在 UP 名字下显示的文案：帖子有自己的文字就用它，否则用它指向内容的标题。
 //
-// Every entry has to end up with something. A picture post written in the
-// newer editor keeps its words in opus.summary and nowhere else, which is what
-// used to leave rows reading "发布了新动态"; a video has only a title; a
-// forwarded post has its own words, and a reminder of what it forwards.
+// 每个条目都必须有产出。用新编辑器写的图文帖只把文字放在 opus.summary，这正是过去
+// 让行显示成「发布了新动态」的原因；视频只有标题；转发帖有自己的文字，以及它所转发
+// 内容的提醒。
 func (c dynamicContent) preview() string {
 	if text := oneLine(c.Desc.Text); text != "" {
 		return text
@@ -667,8 +629,7 @@ func (c dynamicContent) preview() string {
 			return text
 		}
 	}
-	// Nothing but pictures and emotes: say what kind of post it is rather
-	// than that it is a post.
+	// 只有图片和表情：说明帖子是什么种类，而不是只说它是个帖子。
 	switch {
 	case c.Major.Live.JumpURL != "":
 		return "正在直播"
@@ -682,8 +643,7 @@ func (c dynamicContent) preview() string {
 	return ""
 }
 
-// preview is one entry's own line: its summary's text, then its title, then
-// its description — whichever is filled in first.
+// preview 是单个条目自己的文案：先摘要文字，再标题，再描述，取最先有内容的。
 func (e dynamicEntry) preview() string {
 	if text := oneLine(e.Summary.Text); text != "" {
 		return text
@@ -711,14 +671,12 @@ func decodeDynamics(uid int64, payload []byte, count int) ([]domain.FollowedUpda
 		return nil, badRejected("dynamic API", feedRejection(page.Code, page.Message), payload)
 	}
 	if len(page.Data.Items) == 0 {
-		// fetchFeed has already retried an empty answer, so this creator
-		// really has nothing to show. The caller shows the creator with no
-		// activity rather than an error.
+		// fetchFeed 已经重试过空应答，所以这个 UP 确实没有可显示的内容。调用方显示为
+		// 无动态的 UP 而非错误。
 		return nil, nil
 	}
-	// Pinned posts are dropped before the count is taken, so that asking for
-	// two posts yields two posts the creator actually wrote recently rather
-	// than a pinned one from months ago plus one real post.
+	// 置顶帖在计数之前丢弃，这样要两条就得到 UP 最近真正写过的两条，而不是几个月前的
+	// 置顶帖加一条真实帖子。
 	posts := make([]dynamicItem, 0, len(page.Data.Items))
 	for _, item := range page.Data.Items {
 		if item.pinned() {
@@ -727,7 +685,7 @@ func decodeDynamics(uid int64, payload []byte, count int) ([]domain.FollowedUpda
 		posts = append(posts, item)
 	}
 	if len(posts) == 0 {
-		// Everything on the timeline is pinned: there is still no news.
+		// 时间线上全是置顶帖：依然没有新内容。
 		return nil, nil
 	}
 	if count < 1 {
@@ -747,8 +705,7 @@ func decodeDynamics(uid int64, payload []byte, count int) ([]domain.FollowedUpda
 		if summary == "" {
 			summary = "发布了新动态"
 		}
-		// The row opens whatever the post points at when it points at
-		// something; the timeline entry is the fallback, not the default.
+		// 帖子指向什么，行就打开什么；时间线条目是兜底，不是默认。
 		url := "https://t.bilibili.com/" + v.ID
 		for _, jump := range []string{content.Major.Archive.JumpURL, content.Major.Opus.JumpURL, content.Major.Article.JumpURL, content.Major.Live.JumpURL} {
 			if jump = strings.TrimSpace(jump); jump != "" {
@@ -766,7 +723,7 @@ func decodeDynamics(uid int64, payload []byte, count int) ([]domain.FollowedUpda
 	return items, nil
 }
 
-// dynamicKind is the short label the row wears beside the creator's name.
+// dynamicKind 是行在 UP 名字旁佩戴的短标签。
 func dynamicKind(rawType string, content dynamicContent) string {
 	switch {
 	case strings.Contains(rawType, "AV") || content.Major.Archive.BVID != "":
@@ -783,7 +740,7 @@ func dynamicKind(rawType string, content dynamicContent) string {
 	return "动态"
 }
 
-// absoluteURL completes the protocol-relative addresses the feed uses.
+// absoluteURL 补全 feed 使用的协议相对地址。
 func absoluteURL(raw string) string {
 	if strings.HasPrefix(raw, "//") {
 		return "https:" + raw
@@ -791,20 +748,16 @@ func absoluteURL(raw string) string {
 	return raw
 }
 
-// oneLine folds a post's text into the single line a floater row and a system
-// notification both show. A post routinely carries newlines and blank lines,
-// which would otherwise stretch the row or break the notification's layout.
+// oneLine 把帖子文字折成浮动行和系统通知都显示的同一行。帖子常带换行和空行，否则会
+// 撑高行或破坏通知布局。
 //
-// Emote placeholders are dropped first. A post can be nothing but a row of
-// them — picture posts often are — and "[名字]" repeated six times says
-// nothing about what the creator posted, so a line with nothing left is what
-// tells the caller to fall back to the entry's title.
+// 先去掉表情占位符。帖子可能整条都是它们——图文帖常常如此——而「[名字]」重复六次
+// 说明不了 UP 发了什么，所以剩下的内容为空就是告诉调用方回落到条目标题。
 func oneLine(text string) string {
 	return strings.Join(strings.Fields(stripEmotes(text)), " ")
 }
 
-// stripEmotes removes Bilibili's bracketed emote placeholders, which stand in
-// for an image the text cannot show.
+// stripEmotes 删除 B 站方括号表情占位符，它们代表文字无法显示的图像。
 func stripEmotes(text string) string {
 	if !strings.Contains(text, "[") {
 		return text
@@ -827,10 +780,8 @@ func stripEmotes(text string) string {
 	return out.String()
 }
 
-// feedRejection turns Bilibili's business code into something a card can show.
-// The code itself always survives: -412 is a block, -352 a signature the
-// service did not accept, and they must not read the same to whoever is
-// looking at the error.
+// feedRejection 把 B 站的业务码变成卡片能展示的内容。码本身必须保留：-412 是拦截，
+// -352 是服务未接受的签名，对看错误的人必须能区分。
 func feedRejection(code int, message string) string {
 	switch code {
 	case -412:
@@ -844,9 +795,8 @@ func feedRejection(code int, message string) string {
 	return fmt.Sprintf("code %d", code)
 }
 
-// rejected names the upstream's own verdict. Bilibili answers a refused query
-// with code 0 only when it worked; anything else carries the reason, and a
-// card that shows it saves the reader from guessing at a status code.
+// rejected 点名上游自己的判定。B 站只在查询成功时回 code 0；其他都带原因，卡片展示它
+// 能省得读者去猜状态码。
 func rejected(what string, code int, message string) string {
 	if message = strings.TrimSpace(message); message != "" && message != "0" {
 		return fmt.Sprintf("%s returned code %d: %s", what, code, message)
@@ -858,17 +808,14 @@ func bad(reason string, payload []byte) error {
 	return &domain.BadResponseError{ProviderID: bilibili.ProviderID, Reason: reason, Snippet: domain.Snippet(payload)}
 }
 
-// badRejected reports the service refusing the query, naming the reason it
-// gave rather than only the status code.
+// badRejected 报告服务拒绝查询，并点名它给出的原因，而不是只给状态码。
 func badRejected(what, reason string, payload []byte) error {
 	return bad(what+" returned "+reason, payload)
 }
 
-// avatarURL turns the avatar address the feed reports into one to fetch. A
-// host-relative address is completed against the API host; an absolute http://
-// address is asked for over TLS, because plain HTTP is worth avoiding on a
-// network that inspects or rewrites traffic and the image hosts answer over
-// both.
+// avatarURL 把 feed 报告的头像地址变成可抓取的地址。主机相对地址用 API 主机补全；
+// 绝对 http:// 地址改走 TLS，因为在会检查或改写流量的网络上应尽量避免明文 HTTP，
+// 而图床在两种协议下都能应答。
 func avatarURL(raw string) string {
 	raw = strings.TrimSpace(raw)
 	switch {
@@ -884,9 +831,8 @@ func avatarURL(raw string) string {
 	return raw
 }
 
-// refreshAvatars fetches the avatar of each creator once. An avatar that cannot
-// be fetched or is not an image is not a failed refresh: the row falls back to
-// its mark, and the next refresh tries again.
+// refreshAvatars 为每个 UP 抓一次头像。抓不到或不是图片的头像不算刷新失败：该行
+// 回落到它的标记，下次刷新再试。
 func (s *Service) refreshAvatars(ctx context.Context, items []domain.FollowedUpdate) {
 	wanted := make(map[int64]string)
 	for _, item := range items {

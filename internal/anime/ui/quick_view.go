@@ -7,10 +7,7 @@ import (
 	"log/slog"
 )
 
-// animeUpdates draws today's releases. It is absent when disabled,
-// unconfigured, or there is no release. Once a request has settled, an empty
-// today stays absent even when the request failed: an optional schedule must
-// not leave an error-shaped blank region in the compact flyout.
+// 绘制今日动画更新。禁用、未配置或无更新时整块不出现；请求结束后若无更新即使请求失败也保持不出现，避免在紧凑浮窗里留下错误形状的空白区。
 func (s *ViewModel) QuickView(c *ui.Context, design presentation.ReadingDesign) {
 	s.design = design
 	if s.service == nil || !s.service.Enabled() || s.service.Username() == "" {
@@ -27,16 +24,13 @@ func (s *ViewModel) QuickView(c *ui.Context, design presentation.ReadingDesign) 
 				ui.Row(c).AlignItems(ui.Center).Gap(float32(8)).Children(func() {
 					s.design.QuickTile(c, s.design.Mark, presentation.AnimeAccent.Tile, presentation.AnimeAccent.TileInk)
 					ui.Text(c, "今日动画更新").FontSize(s.design.SizeQuickName).FontWeight(600).TextColor(s.design.PanelInk).SingleLine()
-					// Keep the count with the thing it counts. The right edge is
-					// reserved for the refresh control, as it is on quota panels.
+					// 计数徽标紧贴标题，右端留给刷新控件（与额度面板一致）。
 					ui.Box(c).Background(presentation.AnimeAccent.Tint).Radius(float32(10)).Padding(float32(2), float32(6)).Children(func() {
 						ui.Text(c, fmt.Sprintf("%d", len(updates))).FontSize(s.design.SizeQuickTiny).FontWeight(600).TextColor(presentation.AnimeAccent.Ink).SingleLine()
 					})
 				})
 				ui.Spacer(c)
-				// The refresh mark is the only loading indicator in this compact
-				// header. It already turns while a request is in flight; a second
-				// spinner beside it only makes the state look duplicated.
+				// 刷新图标是此紧凑标题里唯一的加载指示器，请求期间会自行旋转。
 				if button := s.design.RefreshButton(c, loading, err != nil && len(items) > 0); button.Clicked() && !loading {
 					s.RefreshAsync(true)
 				}
@@ -78,23 +72,14 @@ func (s *ViewModel) QuickView(c *ui.Context, design presentation.ReadingDesign) 
 	})
 }
 
-// cacheAnimeCovers converts the feature's already-fetched image bytes into
-// MyGo bitmaps on the presentation thread. It is called after a refresh, never
-// from the view, so drawing remains I/O- and decoding-free.
+// 在 presentation 线程把已抓取的图片字节转成 MyGo 位图。只在刷新后调用、从不在视图里调用，保证绘制不做 I/O 与解码。
 //
-// A cover that cannot be turned into a bitmap is not a failed refresh: the
-// release list is what the user came for, and the row falls back to its mark.
-// It is logged because a cover that never appears is otherwise unexplained —
-// the view draws the same fallback whether the bytes were missing, not an
-// image, or a format this build cannot decode.
+// 单张封面转换失败不算刷新失败，该行回退到标记图标；失败会记录日志，因为视图对有字节缺失、非图片、无法解码三种情况的回退看起来一样，否则无从得知封面为何始终不出现。
 func (s *ViewModel) PrepareCovers() {
 	if s.service == nil {
 		return
 	}
-	// A failed refresh still answers with the releases of the last one that
-	// worked, and those covers are worth caching: the view keeps drawing them.
-	// The error is logged because the covers of what is on screen will not
-	// change until a refresh succeeds, which is otherwise unexplained.
+	// 刷新失败时仍返回上一次成功的数据，其封面值得缓存，视图会继续绘制；错误会记录日志，因为屏幕上的封面在刷新成功前不会变化，否则无从解释。
 	items, _, _, viewErr := s.service.View()
 	if viewErr != nil {
 		slog.Warn("the animation releases could not be re-read; their covers are unchanged", "event", "anime_covers_unreadable", "error", viewErr)

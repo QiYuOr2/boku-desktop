@@ -63,8 +63,7 @@ func TestFetchAsksTheUsageEndpointWithTheToken(t *testing.T) {
 	}
 }
 
-// A login that names no account sends no account header: the endpoint decides
-// which account a token belongs to when it is the only one.
+// 不指明账户的登录不发送账户头：当 token 只对应一个账户时，由端点决定它属于谁。
 func TestFetchWithoutAnAccountSendsNoAccountHeader(t *testing.T) {
 	var account string
 	var present bool
@@ -268,9 +267,8 @@ func TestRefreshAccessTokenRefusals(t *testing.T) {
 }
 
 func TestExpiresAtReadsTheTokensOwnClaim(t *testing.T) {
-	// A JWT is three dot-separated base64url segments; only the payload is
-	// read, and its signature is never checked: the question is "is this
-	// worth sending", not "is this genuine".
+	// JWT 是三段以点分隔的 base64url；只读取 payload，从不校验签名：问的是
+	// 「还值不值得发送」，而非「是否真实」。
 	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"exp":1738300000}`))
 	token := "header." + payload + ".signature"
 	want := time.Unix(1738300000, 0).UTC()
@@ -285,8 +283,8 @@ func TestExpiresAtReadsTheTokensOwnClaim(t *testing.T) {
 }
 
 func TestTokenResponseNumbersAreReadAsNumbers(t *testing.T) {
-	// expires_in is a number in a JSON document whose fields are otherwise
-	// strings; decoding it as text keeps the expiry arithmetic honest.
+	// expires_in 在一份其余字段都是字符串的 JSON 里是个数字；按文本解码保持过期
+	// 计算准确。
 	var payload tokenResponse
 	if err := json.Unmarshal([]byte(`{"access_token":"t","expires_in":3600}`), &payload); err != nil {
 		t.Fatalf("Unmarshal: %v", err)

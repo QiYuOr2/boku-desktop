@@ -38,10 +38,9 @@ func TestNewRequiresItsDependencies(t *testing.T) {
 	}
 }
 
-// A second launch brings the quick window forward, but never against a tray
-// that does not exist yet: MyGo's NewFlyout refuses a flyout with neither a
-// tray nor a parent, and a launch arriving while the application is still
-// starting must not take it down.
+// 第二次启动会把快捷窗口带到前台，但绝不针对尚不存在的托盘：
+// MyGo 的 NewFlyout 拒绝既无托盘也无父窗口的 flyout，
+// 而启动过程中到来的第二次启动不能因此把它弄崩。
 func TestActivateWithoutATrayOpensNothing(t *testing.T) {
 	state := testState(t, newTestProvider(t), withCredential(newTestStore(t)), "0.1.0")
 	state.Activate()
@@ -50,7 +49,7 @@ func TestActivateWithoutATrayOpensNothing(t *testing.T) {
 	}
 }
 
-// Without a version the footer still has to say something.
+// 没有版本号时页脚仍须显示些内容。
 func TestVersionLineFallsBack(t *testing.T) {
 	state := testState(t, newTestProvider(t), withCredential(newTestStore(t)), "")
 	if got := state.versionLine(); got != "Boku dev" {
@@ -62,8 +61,7 @@ func TestVersionLineFallsBack(t *testing.T) {
 	}
 }
 
-// refreshAsync is what the interface calls; it must never block the frame,
-// and it must ask only when there is something to ask for.
+// refreshAsync 是界面调用的入口；它绝不能阻塞帧，并且只在确实有东西可请求时才请求。
 func TestRefreshAsyncDoesNotBlockAndOnlyAsksWhenNeeded(t *testing.T) {
 	provider := newTestProvider(t)
 	gate := provider.hold()
@@ -91,7 +89,7 @@ func TestRefreshAsyncDoesNotBlockAndOnlyAsksWhenNeeded(t *testing.T) {
 	}
 	release()
 
-	// Wait for the fetch to settle, then a second call must not ask again.
+	// 等取数落定，第二次调用不得再次请求。
 	deadline = time.Now().Add(2 * time.Second)
 	for state.panelService.View(deepseek.PanelID).Loading && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
@@ -106,9 +104,8 @@ func TestRefreshAsyncDoesNotBlockAndOnlyAsksWhenNeeded(t *testing.T) {
 	}
 }
 
-// Window.Update invokes its callback unconditionally. A refresh with no
-// state change must therefore still hand it a callable no-op; otherwise any
-// open settings window panics while navigating its sidebar.
+// Window.Update 会无条件调用其回调。因此即使刷新没有状态变化，也必须传给它一个可调用的空操作；
+// 否则任何打开着的设置窗口在切换侧边栏时都会 panic。
 func TestRefreshCallbackIsAlwaysCallable(t *testing.T) {
 	refreshCallback(nil)()
 

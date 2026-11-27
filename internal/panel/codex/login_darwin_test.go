@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// The script Terminal runs must start the CLI's login, not the CLI itself:
-// `open -a Terminal <binary>` would give it no arguments.
+// Terminal 运行的脚本必须启动 CLI 的登录，而非 CLI 本身：`open -a Terminal
+// <binary>` 不会给它参数。
 func TestLoginScriptRunsTheLoginCommand(t *testing.T) {
 	got := loginScript("/opt/homebrew/bin/codex")
 	want := "#!/bin/zsh\nexec '/opt/homebrew/bin/codex' login\n"
@@ -17,7 +17,7 @@ func TestLoginScriptRunsTheLoginCommand(t *testing.T) {
 	}
 }
 
-// A path with a space is still one word to the shell.
+// 含空格的路径对 shell 而言仍是单个词。
 func TestLoginScriptQuotesTheCommandPath(t *testing.T) {
 	got := loginScript("/Users/me/My Tools/codex")
 	want := "#!/bin/zsh\nexec '/Users/me/My Tools/codex' login\n"
@@ -39,8 +39,7 @@ func TestShellQuote(t *testing.T) {
 	}
 }
 
-// The process PATH is still the first answer: a terminal launch, or a test,
-// does not need the login shell.
+// 进程 PATH 仍是第一答案：终端启动或测试不需要登录 shell。
 func TestFindLoginCommandUsesPATH(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/codex"

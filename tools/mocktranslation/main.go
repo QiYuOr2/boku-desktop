@@ -11,38 +11,27 @@ import (
 	"time"
 )
 
-// Command mocktranslation is a local OpenAI-compatible translation service, for
-// trying Boku's custom-service card without signing up for anything.
+// Command mocktranslation 是本地 OpenAI 兼容翻译服务，用于在不注册任何服务的情况下
+// 试用 Boku 的自定义服务卡片。
 //
-// It is a development tool, not part of the application: nothing in
-// apps/desktop/internal imports it, and it is not in the build of the shipped
-// binary. Run it with
+// 它是开发工具，不属于应用：apps/desktop/internal 不引用它，也不进入发布二进制。
+// 用 go run ./tools/mocktranslation 启动，在 http://127.0.0.1:11434/v1 应答，
+// 即 Boku 设置里自定义服务卡片应填的地址。
 //
-//	go run ./tools/mocktranslation
+// 它只实现翻译工具所需的那部分 chat-completions 协议，返回固定译文；当请求要求
+// 逐词注解（日文设置）时，返回与真实后端一致的逐行 JSON。借此可端到端观察整条
+// 路径：设置卡片的测试按钮、剪贴板快捷键、卡片读音、以及未注解时的提示。
 //
-// and it answers on http://127.0.0.1:11434/v1 — the address to type into the
-// user's own service card in Boku's settings.
+// 它还会打印收到的每个请求，便于看到 Boku 实际发送的提示词与文本。
 //
-// What it does: it speaks just enough of the chat-completions protocol for the
-// translation tool, answers with a canned translation, and — when the request
-// asks for the piece-by-piece annotation the Japanese settings want — answers
-// with the line-per-piece JSON the real backends answer with. That is what lets
-// the whole path be watched end to end: the settings card's test button, the
-// clipboard shortcut, the card's readings, and the note when nothing was
-// annotated.
+// 参数：
 //
-// It also prints every request it receives, so the prompt and the text Boku
-// actually sends are visible rather than guessed at.
-//
-// Flags:
-//
-//	-addr      where to listen (default 127.0.0.1:11434)
-//	-key       a key to require, for trying the card's key field (default: none)
-//	-echo      answer with the text it was sent, prefixed, instead of a fixed
-//	           translation — handy for seeing which request is which
-//	-fail      fail every request with this status (0 = never fail)
-//	-delay     wait this long before answering, for watching the loading card
-//	-annotate  answer every request with pieces (default: only when asked)
+//	-addr      监听地址（默认 127.0.0.1:11434）
+//	-key       要求携带的 key，用于测试卡片的 key 字段（默认不校验）
+//	-echo      返回带前缀的原文而非固定译文，便于区分各请求
+//	-fail      用该状态码让每个请求失败（0 表示不失败）
+//	-delay     应答前等待的时长，用于观察加载卡片
+//	-annotate  每个请求都返回逐词结果（默认仅在要求时）
 func main() {
 	addr := flag.String("addr", "127.0.0.1:11434", "address to listen on")
 	key := flag.String("key", "", "require this API key (empty = accept any)")
@@ -62,8 +51,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/chat/completions", server.chatCompletions)
 	mux.HandleFunc("/v1/models", server.models)
-	// Anything else is reported rather than 404'd silently: a wrong Base URL is
-	// the most likely thing to be wrong the first time.
+	// 其它路径会明确报告而非静默 404：第一次配置时最可能出错的就是 Base URL。
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("!! %s %s — Boku asked for a path this mock does not serve; "+
 			"the Base URL should end in /v1", r.Method, r.URL.Path)
@@ -81,7 +69,6 @@ func main() {
 	}
 }
 
-// keyHint is what the startup banner says about the key field.
 func keyHint(key string) string {
 	if strings.TrimSpace(key) == "" {
 		return "（留空即可，本服务不校验）"
@@ -97,7 +84,6 @@ type server struct {
 	annotate bool
 }
 
-// chatRequest is the part of the request this mock reads.
 type chatRequest struct {
 	Model    string `json:"model"`
 	Stream   bool   `json:"stream"`
@@ -146,8 +132,8 @@ func (s *server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		writeChat(w, body.Model, imageAnswer())
 		return
 	}
-	// What was asked is printed, because the point of this mock is to see what
-	// Boku sends: the prompt is what decides the shape of the answer.
+	// 打印收到的内容：本 mock 的意义就在于看到 Boku 实际发送的提示词，
+	// 提示词决定应答形态。逐词结果由提示词里要求字段判定。
 	wantsPieces := strings.Contains(system, `"s"`) || strings.Contains(system, `"t"`)
 	log.Printf(">> model=%q wantsPieces=%v text=%q", body.Model, wantsPieces || s.annotate, text)
 	if system != "" {
@@ -158,18 +144,16 @@ func (s *server) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	writeChat(w, body.Model, content)
 }
 
-// stringContent reads a text-only chat message. Image messages have an array
-// content value; treating that array as text used to make this local mock
-// reject the very screenshot request it exists to exercise.
+// stringContent 读取纯文本消息。图片消息的 content 是数组，
+// 若把数组当文本处理，会让本 mock 拒绝它本应支持的截图请求。
 func stringContent(raw json.RawMessage) string {
 	var text string
 	_ = json.Unmarshal(raw, &text)
 	return text
 }
 
-// userContent reads either a conventional text message or the standard
-// OpenAI-compatible multimodal content array. The mock deliberately does not
-// retain or print the data URL: it only confirms that Boku sent an image.
+// userContent 读取普通文本消息或 OpenAI 兼容的多模态 content 数组。
+// 这里刻意不保留也不打印 data URL，只确认 Boku 发送了图片。
 func userContent(raw json.RawMessage) (string, bool) {
 	if text := stringContent(raw); text != "" {
 		return text, false
@@ -202,9 +186,7 @@ func writeImageStream(w http.ResponseWriter, model string) {
 	_, _ = fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":%s}}]}\n\ndata: [DONE]\n\n", answer)
 }
 
-// answer is what the service answers with: a canned translation, or the text
-// it was sent when -echo is on, and the piece-by-piece annotation when one was
-// asked for.
+// answer 返回应答：固定译文，或 -echo 时的原文，或要求逐词时的注解结果。
 func (s *server) answer(text string, pieces bool) string {
 	if !pieces {
 		if s.echo {
@@ -212,10 +194,9 @@ func (s *server) answer(text string, pieces bool) string {
 		}
 		return cannedTranslation(text)
 	}
-	// One JSON object per line, which is the shape the tool's own prompt asks
-	// for and openai.ParseAnnotation reads. The example is the one the prompt
-	// itself uses, so a Japanese source gets readings and a loanword gloss and
-	// the card has something to draw.
+	// 每行一个 JSON 对象，这是工具提示词要求的形态，也是 openai.ParseAnnotation
+	// 读取的形态。示例即提示词自带的例子，让日文原文带读音与外来语注释，
+	// 卡片才有内容可画。
 	if strings.Contains(text, "回想") || strings.Contains(text, "モード") {
 		return strings.Join([]string{
 			`{"s":"【","t":"【"}`,
@@ -225,8 +206,7 @@ func (s *server) answer(text string, pieces bool) string {
 			`{"s":"】","t":"】"}`,
 		}, "\n")
 	}
-	// Anything else: one piece per rune-free chunk, so the card still draws a
-	// column rather than an empty answer.
+	// 其它情况：整段作为一个结果，避免卡片显示空答案。
 	return strings.Join([]string{
 		`{"s":"` + jsonEscape(text) + `","t":"【mock 逐词】` + jsonEscape(text) + `"}`,
 	}, "\n")
@@ -249,8 +229,7 @@ func (s *server) authorized(r *http.Request) bool {
 	return strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ") == s.key
 }
 
-// writeChat answers in the shape the OpenAI-compatible translators read: a
-// choices array whose first message carries the content.
+// writeChat 按 OpenAI 兼容翻译器读取的格式应答：choices 数组的首条消息带内容。
 func writeChat(w http.ResponseWriter, model, content string) {
 	if strings.TrimSpace(model) == "" {
 		model = "mock-translate"
@@ -278,9 +257,7 @@ func writeJSON(w http.ResponseWriter, value any) {
 	}
 }
 
-// cannedTranslation is a translation of the sentences the tool's own test
-// button and the usual clipboard text use, so that a run of the mock looks like
-// a real one.
+// cannedTranslation 覆盖工具测试按钮和常见剪贴板文本，让本 mock 的表现接近真实。
 func cannedTranslation(text string) string {
 	trimmed := strings.TrimSpace(text)
 	switch {
@@ -295,8 +272,7 @@ func cannedTranslation(text string) string {
 	}
 }
 
-// firstLine is a prompt's first line, for the log: the whole prompt is long and
-// its first line is what says which one it is.
+// firstLine 取提示词首行用于日志：完整提示词很长，首行即可辨别是哪一条。
 func firstLine(text string) string {
 	if index := strings.IndexByte(text, '\n'); index >= 0 {
 		return text[:index]
@@ -304,12 +280,12 @@ func firstLine(text string) string {
 	return text
 }
 
-// jsonEscape quotes a string as JSON, for building an answer by hand.
+// jsonEscape 把字符串转义为 JSON，用于手工拼装应答。
 func jsonEscape(text string) string {
 	encoded, err := json.Marshal(text)
 	if err != nil {
 		return text
 	}
-	// Strip the surrounding quotes: the caller adds its own around the field.
+	// 去掉首尾引号：调用方会自行在字段两侧加引号。
 	return string(encoded[1 : len(encoded)-1])
 }

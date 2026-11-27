@@ -4,16 +4,15 @@ package sysclip
 
 import "syscall"
 
-// user32 is the window manager: the clipboard's write counter comes from it,
-// and so does the sequence number every Windows clipboard reader compares.
+// user32 提供剪贴板的写计数器（GetClipboardSequenceNumber），
+// 也是所有 Windows 剪贴板读取方比较的序列号来源。
 var (
 	user32                         = syscall.NewLazyDLL("user32.dll")
 	procGetClipboardSequenceNumber = user32.NewProc("GetClipboardSequenceNumber")
 )
 
-// clipboardChangeCount is the clipboard's write counter. The system raises it
-// every time the clipboard is written to, whoever wrote it; a value of zero
-// means the system did not answer, not that the clipboard has never changed.
+// clipboardChangeCount 返回剪贴板写计数器：系统每次写入都会递增，无论谁写。
+// 返回 0 表示系统没有给出答案，而不是剪贴板从未变化。
 func clipboardChangeCount() uint32 {
 	value, _, _ := procGetClipboardSequenceNumber.Call()
 	return uint32(value)

@@ -10,34 +10,28 @@ import (
 	updateui "boku/internal/update/ui"
 )
 
-// This file is the update check as the presentation knows it: the check
-// dialog, the one line the tray menu gains while an update is ready, and the
-// notice that says so when the application is not on screen.
+// 本文件是表现为层所见的更新检查：检查对话框、更新就绪时托盘菜单多出的一行，
+// 以及应用不在屏幕上时告知就绪的通知。
 //
-// What the presentation knows about updating is the interface below and
-// nothing else. Whether a release is newer, what it is called, how it is
-// downloaded and how it is signed are decided in internal/update, over
-// MyGo's own updater; this package imports neither, because a view that knew
-// what a feed is would be a view that talks to one.
+// 表现为层只知道下面这个接口，别的一概不知。是否有更新、叫什么、如何下载、如何签名，
+// 都在 internal/update 里基于 MyGo 自带更新器决定；本包不 import 它们，因为一个知道
+// 订阅源是什么的视图就会去跟它对话。
 //
-// A State with no service is a build without one — a test, or an assembly
-// that wired nothing: no row is drawn, nothing checks on its own and the
-// menu is what it always was. Nothing here is allowed to fail because of it.
+// 没有服务的 State 是没有更新的构建——测试，或没装配任何东西的装配：不绘制该行、不自行
+// 检查、菜单保持原样。此处任何东西都不许因此失败。
 
 type UpdateService = updateui.Service
 
-// desktopNotifier is how the presentation puts a notice on the desktop. It is
-// an interface for one reason: the system's notification needs a running
-// application, and what to say — and how often — is worth testing where
-// there is none.
+// desktopNotifier 是表现为层放置桌面通知的方式。做成接口只为一个原因：系统通知需要
+// 运行中的应用，而该说什么、多久一次值得在没有窗口时测试。
 type desktopNotifier interface {
-	// Supported reports whether the desktop can show a notice.
+	// Supported 报告桌面能否显示通知。
 	Supported() bool
-	// Notify shows one notice, and runs open when it is clicked.
+	// Notify 显示一条通知，被点击时运行 open。
 	Notify(id, title, body string, open func())
 }
 
-// mygoNotifier is the real one: the framework's own notifications module.
+// mygoNotifier 是真实的实现：框架自带的通知模块。
 type mygoNotifier struct{}
 
 func (mygoNotifier) Supported() bool { return mygo.NotificationsSupported() }
@@ -51,8 +45,7 @@ func (mygoNotifier) Notify(id, title, body string, open func()) {
 	})
 	notice.OnClick(open)
 	if err := notice.Show(); err != nil {
-		// The check dialog still says what is ready: a desktop that will not
-		// show a notice is not a failed update.
+		// 检查对话框仍会说明已就绪的内容：桌面无法显示通知并不算更新失败。
 		slog.Warn("the update notice could not be shown", "error", err)
 	}
 }
@@ -108,11 +101,9 @@ func (s *State) updateCheckDialogView(c *ui.Context) {
 func updateMenuLabel(state domain.UpdateState) (string, bool) { return updateui.MenuLabel(state) }
 func updateVersion(version string) string                     { return updateui.Version(version) }
 
-// updateMenuItems is the tray menu's updating line: one item while an update
-// is ready, and nothing at all otherwise.
+// updateMenuItems 是托盘菜单的更新行：更新就绪时一项，否则完全没有。
 //
-// The click only starts a goroutine, because a menu callback runs on the main
-// thread and the install writes files and restarts the application.
+// 点击只启动一个 goroutine，因为菜单回调运行在主线程，而安装要写文件并重启应用。
 func (s *State) updateMenuItems() []*mygo.MenuItem {
 	if s.updates == nil {
 		return nil

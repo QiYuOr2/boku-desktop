@@ -8,13 +8,10 @@ import (
 	"strings"
 )
 
-// ApplicationName is the name the application is installed as — the name of
-// the Start Menu shortcut, the name in the Run key, and the name a person
-// reads in Task Manager.
+// ApplicationName 返回应用安装时的名字——开始菜单快捷方式名、Run 键名、任务管理器中人读到的名字。
 //
-// It is the running program's own name, without its extension, rather than a
-// constant: the development build is called "Boku Dev", and a login start for
-// it must not share the installed application's Run value.
+// 它取运行中程序自身去掉扩展名的名字而非常量：开发版叫 "Boku Dev"，它的登录启动不能与已安装应用的
+// Run 值共用。
 func ApplicationName() string {
 	exe, err := os.Executable()
 	if err != nil {

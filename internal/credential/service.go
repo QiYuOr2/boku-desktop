@@ -1,7 +1,3 @@
-// This file is the action the interface takes on credentials: list the names
-// that exist, mask a value down to its last characters, store one, forget
-// one. The file they are kept in is store.go, and the package comment there
-// says what the protection is worth today.
 package credential
 
 import (
@@ -15,18 +11,13 @@ import (
 	"boku/internal/kit"
 )
 
-// Secrets stores and reads the credentials providers need. It owns the
-// naming rule — a credential is stored as "<providerId>.<key>" — so the rest
-// of the application never spells a name out.
-//
-// A value goes in, and comes back out only as the one value asked for or
-// masked to its last four characters.
+// Secrets 存取厂商所需的凭据。
+// 它持有命名规则：凭据按 "<providerId>.<key>" 存储，其余代码不自行拼名字。
 type Secrets struct {
 	store domain.SecretStore
 	now   func() time.Time
 }
 
-// NewSecrets returns the service over a store.
 func NewSecrets(store domain.SecretStore) (*Secrets, error) {
 	if store == nil {
 		return nil, fmt.Errorf("%w: no secret store", domain.ErrInvalidArgument)
@@ -34,9 +25,7 @@ func NewSecrets(store domain.SecretStore) (*Secrets, error) {
 	return &Secrets{store: store, now: func() time.Time { return time.Now().UTC() }}, nil
 }
 
-// Path names the file the credentials live in, for the interface to show.
-// An empty path means the store keeps them somewhere without a name of its
-// own.
+// Path 返回凭据文件路径供界面展示；空路径表示存储端没有具名文件。
 func (s *Secrets) Path() string {
 	named, ok := s.store.(interface{ Path() string })
 	if !ok {
@@ -45,7 +34,7 @@ func (s *Secrets) Path() string {
 	return named.Path()
 }
 
-// Names returns the names of a provider's stored credentials, sorted.
+// Names 返回某厂商已存凭据的名称，已排序。
 func (s *Secrets) Names(ctx context.Context, providerID string) ([]string, error) {
 	all, err := s.store.List(ctx)
 	if err != nil {
@@ -61,8 +50,7 @@ func (s *Secrets) Names(ctx context.Context, providerID string) ([]string, error
 	return names, nil
 }
 
-// Set stores one credential of a provider. The creation time of a first
-// version survives an update: the store keeps it.
+// Set 写入一个凭据；更新时保留首次创建的 createdAt，由存储端维护。
 func (s *Secrets) Set(ctx context.Context, providerID, credentialKey, value string) error {
 	providerID = strings.TrimSpace(providerID)
 	credentialKey = strings.TrimSpace(credentialKey)
@@ -78,7 +66,7 @@ func (s *Secrets) Set(ctx context.Context, providerID, credentialKey, value stri
 	})
 }
 
-// Get returns one credential. Its value is for a request, not for a view.
+// Get 返回一个凭据的明文值，仅供发请求使用，不得展示到界面。
 func (s *Secrets) Get(ctx context.Context, providerID, credentialKey string) (string, error) {
 	secret, err := s.store.Get(ctx, domain.CredentialKey(providerID, credentialKey))
 	if err != nil {
@@ -87,15 +75,12 @@ func (s *Secrets) Get(ctx context.Context, providerID, credentialKey string) (st
 	return secret.Text(), nil
 }
 
-// Delete removes one credential.
 func (s *Secrets) Delete(ctx context.Context, providerID, credentialKey string) error {
 	return s.store.Delete(ctx, domain.CredentialKey(providerID, credentialKey))
 }
 
-// Masked returns a credential as the interface may show it: its last four
-// characters. A credential that is not stored is not an error — it is the
-// normal state before the user configures anything — and answers with "",
-// false.
+// Masked 返回界面可展示的掩码（末四位）。未存储凭据不算错误——用户尚未配置时
+// 就是这种正常状态——返回 "", false。
 func (s *Secrets) Masked(ctx context.Context, providerID, credentialKey string) (string, bool, error) {
 	secret, err := s.store.Get(ctx, domain.CredentialKey(providerID, credentialKey))
 	if errors.Is(err, domain.ErrSecretNotFound) {

@@ -2,8 +2,7 @@
 
 package gamepad
 
-// Connected is empty off Windows: the playtime mark only knows the HID
-// enumeration implemented here.
+// 非 Windows 平台返回空：游玩时长标记只认识此处的 HID 枚举实现。
 func Connected() []Pad {
 	note(nil)
 	return nil

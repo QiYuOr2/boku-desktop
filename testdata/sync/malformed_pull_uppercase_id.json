@@ -1,0 +1,62 @@
+{
+  "changes": [
+    {
+      "cursor": "c-41",
+      "entityType": "diary_entry",
+      "entityId": "0198B000-0000-7000-8000-0000000000E1",
+      "version": 3,
+      "operation": "upsert",
+      "payload": {
+        "title": "河边",
+        "markdown": "今天走到了河边，风很大。",
+        "diaryDateKey": "2026-11-20",
+        "createdAt": "2026-11-20T01:00:00Z",
+        "updatedAt": "2026-11-21T08:00:00Z",
+        "tags": [
+          "散步"
+        ],
+        "attachments": [
+          {
+            "attachmentId": "0198b000-0000-7000-8000-0000000000a1",
+            "originalName": "IMG_0001.HEIC",
+            "width": 4032,
+            "height": 3024,
+            "addedAt": "2026-11-20T01:00:05Z"
+          }
+        ],
+        "linkCards": [],
+        "location": {
+          "place": "宇治",
+          "capturedAt": "2026-11-20T01:00:00Z"
+        },
+        "weather": null
+      }
+    },
+    {
+      "cursor": "c-42",
+      "entityType": "diary_entry",
+      "entityId": "0198b000-0000-7000-8000-0000000000e2",
+      "version": 1,
+      "operation": "upsert",
+      "payload": {
+        "title": "",
+        "markdown": "补记。",
+        "diaryDateKey": "2026-11-19",
+        "createdAt": "2026-11-20T01:00:00Z",
+        "updatedAt": "2026-11-20T02:00:00Z",
+        "tags": [
+          "散步"
+        ],
+        "attachments": [],
+        "linkCards": [],
+        "location": {
+          "place": "宇治",
+          "capturedAt": "2026-11-20T01:00:00Z"
+        },
+        "weather": null
+      }
+    }
+  ],
+  "nextCursor": "c-42",
+  "hasMore": true
+}

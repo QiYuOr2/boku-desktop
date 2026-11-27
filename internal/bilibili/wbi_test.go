@@ -7,8 +7,8 @@ import (
 )
 
 func TestMixinKeyMatchesTheWireTable(t *testing.T) {
-	// The table's first entries are 46,47,18,2…, so a 64-character key made of
-	// the alphabet maps to the same permutation the protocol specifies.
+	// 表的前几项是 46,47,18,2…，所以由该字母表构成的 64 字符密钥会映射成协议规定的
+	// 同一置换。
 	orig := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+/"
 	got := mixinKey(orig)
 	if len(got) != 32 {
@@ -38,8 +38,7 @@ func TestSignWBIAddsTimestampAndSignature(t *testing.T) {
 	}
 }
 
-// The signature must depend on the parameters and the keys; a change to either
-// has to change the digest, otherwise the test above would pass on a stub.
+// 签名必须同时依赖参数和密钥；改变任一都必须改变摘要，否则上面的测试会在桩上也通过。
 func TestSignWBIDependsOnParamsAndKeys(t *testing.T) {
 	keys := wbiKeys{imgKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", subKey: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}
 	now := time.Unix(1700000000, 0)

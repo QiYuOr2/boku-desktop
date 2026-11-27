@@ -15,17 +15,15 @@ import (
 	"boku/internal/domain"
 )
 
-// newService builds a service over the fake, with a directory of its own and
-// the schedule out of the way: a test that drives Check itself wants no
-// timer of the service's.
+// newService 在 fake 之上构建服务，带自己的目录并让调度靠边：自己驱动 Check
+// 的测试不想要服务的定时器。
 func newService(t *testing.T, f *fakeUpdater, opts ...func(*Options)) *Service {
 	t.Helper()
 	options := Options{
 		Current: "0.1.0-beta.5",
 		Dir:     t.TempDir(),
 		Updater: f,
-		// A negative FirstDelay is "the loop makes no check of its own",
-		// which is what a test that calls Check itself wants.
+		// 负的 FirstDelay 表示「循环不自行检查」，正是自己调 Check 的测试所需。
 		FirstDelay: -1,
 		Interval:   time.Hour,
 	}
@@ -51,9 +49,7 @@ func withDelays(first, interval time.Duration) func(*Options) {
 	return func(o *Options) { o.FirstDelay, o.Interval = first, interval }
 }
 
-// A service is assembled from a feed and a directory, and refuses to be
-// assembled from neither: a service that checked nothing would be a state
-// that never moves.
+// 服务由发布源与目录装配而成，二者缺一即拒绝：什么都不查的服务就是永远不动的状态。
 func TestNewRequiresAFeedAndADirectory(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -69,8 +65,7 @@ func TestNewRequiresAFeedAndADirectory(t *testing.T) {
 	}
 }
 
-// A fresh service has not looked at the feed yet, and says so: the row for
-// Idle draws nothing.
+// 全新服务尚未询问发布源，状态如实：Idle 行不绘制任何东西。
 func TestAFreshServiceIsIdle(t *testing.T) {
 	s := newService(t, newFakeUpdater())
 	if state := s.State(); state.Status != domain.UpdateIdle {
@@ -78,9 +73,8 @@ func TestAFreshServiceIsIdle(t *testing.T) {
 	}
 }
 
-// The happy path: a newer release is found, its archive is really there at
-// the size the release said, and the state ends Ready with the version and
-// the notes the row shows.
+// 正常路径：发现更新的 release，归档确实以发布声明的尺寸存在，状态以 Ready
+// 结束并带上行要显示的版本与说明。
 func TestCheckReachesReady(t *testing.T) {
 	f := newFakeUpdater()
 	payload := []byte(strings.Repeat("boku ", 1024))
@@ -106,8 +100,7 @@ func TestCheckReachesReady(t *testing.T) {
 	if state.Detail != "" {
 		t.Errorf("a ready state carries a detail: %q", state.Detail)
 	}
-	// The archive was asked for once: this check fetches it to learn that it
-	// is there. The install is the updater's, and it downloads again.
+	// 归档被请求一次：本次检查取它来确认存在。安装是 updater 的事，它会再下一次。
 	if _, fetches, _ := f.counts(); len(fetches) != 1 {
 		t.Errorf("the archive was fetched %d times, want once: %v", len(fetches), fetches)
 	}
@@ -116,7 +109,7 @@ func TestCheckReachesReady(t *testing.T) {
 	}
 }
 
-// Being up to date is a state, not an error, and it fetches nothing.
+// 已是最新是一种状态而非错误，且不取任何文件。
 func TestCheckUpToDateFetchesNothing(t *testing.T) {
 	f := newFakeUpdater()
 	s := newService(t, f)
@@ -135,9 +128,8 @@ func TestCheckUpToDateFetchesNothing(t *testing.T) {
 	}
 }
 
-// A build that cannot update itself is quiet about it: the status is
-// Unsupported, the error is its own name, the feed is never asked and
-// nothing is written at warn level.
+// 不能自更新的构建对此保持安静：状态为 Unsupported，错误是其专属名字，发布源
+// 从不被询问，warn 级也无输出。
 func TestUnsupportedIsNotAFailure(t *testing.T) {
 	f := newFakeUpdater()
 	f.enabled = false
@@ -158,8 +150,7 @@ func TestUnsupportedIsNotAFailure(t *testing.T) {
 	}
 }
 
-// Start on a build that cannot update itself starts no timer: a goroutine
-// waking up every day to learn the same thing is noise.
+// 不能自更新的构建上 Start 不建定时器：每天醒来学到同一件事只是噪音。
 func TestUnsupportedStartsNoLoop(t *testing.T) {
 	f := newFakeUpdater()
 	f.enabled = false
@@ -174,9 +165,8 @@ func TestUnsupportedStartsNoLoop(t *testing.T) {
 	}
 }
 
-// A release the feed could not describe is a failure, and its detail is this
-// package's own words: a manifest URL or a response body never reaches the
-// page.
+// 发布源描述不清的 release 是失败，其 detail 是本包自己的话：清单 URL 或响应体
+// 绝不进入页面。
 func TestAFailedCheckSaysWhyWithoutQuotingTheFeed(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -229,9 +219,7 @@ func TestAFailedCheckSaysWhyWithoutQuotingTheFeed(t *testing.T) {
 	}
 }
 
-// An archive that cannot be downloaded, or that is not the size the release
-// promised, is a failure of the check: the restart is not offered for a
-// release that is not really there.
+// 无法下载、或大小与承诺不符的归档是检查失败：release 并不真存在，就不提供重启。
 func TestAnArchiveThatIsNotThereIsAFailure(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -285,8 +273,7 @@ func TestAnArchiveThatIsNotThereIsAFailure(t *testing.T) {
 	}
 }
 
-// Two checks at once ask the feed once: the second is the same question.
-// Two checks at once ask the feed once: the second is the same question.
+// 同时进行的两次检查只询问发布源一次：第二次是同一个问题。
 func TestChecksInFlightAreSingleFlight(t *testing.T) {
 	gate := make(chan struct{})
 	f := newFakeUpdater()
@@ -296,9 +283,8 @@ func TestChecksInFlightAreSingleFlight(t *testing.T) {
 
 	first := make(chan error, 1)
 	go func() { first <- s.Check(context.Background()) }()
-	// Wait until the first check is really inside the feed, not merely
-	// started: a second check that arrives before it is in flight is not the
-	// case under test.
+	// 等第一次检查真正进入发布源，而不只是开始：在其进入前到达的第二次检查
+	// 不是被测的情形。
 	<-blocking.entered
 	for i := 0; i < 3; i++ {
 		if err := s.Check(context.Background()); err != nil {
@@ -314,8 +300,7 @@ func TestChecksInFlightAreSingleFlight(t *testing.T) {
 	}
 }
 
-// blockingUpdater is the fake with its feed gated, so that a second check is
-// made while the first is still waiting.
+// blockingUpdater 是发布源被闸门卡住的 fake，以便在第一次仍在等待时发起第二次检查。
 type blockingUpdater struct {
 	f       *fakeUpdater
 	gate    chan struct{}
@@ -342,20 +327,19 @@ func (b blockingUpdater) Install(ctx context.Context, version string) error {
 	return b.f.Install(ctx, version)
 }
 
-// The timer: the first check waits FirstDelay, and a check that has just run
-// is not run again before the interval.
+// 定时器：首次检查等 FirstDelay，刚跑过的检查在间隔到期前不再运行。
 func TestTheLoopWaitsBeforeAsking(t *testing.T) {
 	f := newFakeUpdater()
 	s := newService(t, f, withDelays(200*time.Millisecond, time.Hour))
 	s.Start(context.Background())
 	defer s.Stop()
 
-	// Before the first delay has passed, nothing was asked.
+	// 首个延迟未过前，什么都没问。
 	time.Sleep(80 * time.Millisecond)
 	if releases, _, _ := f.counts(); releases != 0 {
 		t.Fatalf("the feed was asked %d times before the first delay", releases)
 	}
-	// After it, exactly one check.
+	// 之后恰好检查一次。
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		if releases, _, _ := f.counts(); releases == 1 {
@@ -368,14 +352,14 @@ func TestTheLoopWaitsBeforeAsking(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	// And not a second time while the interval has not passed.
+	// 间隔未过前不再问第二次。
 	time.Sleep(150 * time.Millisecond)
 	if releases, _, _ := f.counts(); releases != 1 {
 		t.Errorf("the loop asked %d times, want once until the interval", releases)
 	}
 }
 
-// Stop ends the loop, and a service that was never started stops cleanly.
+// Stop 结束循环；从未启动的服务也能干净停止。
 func TestStopIsSafeBeforeAndAfterStart(t *testing.T) {
 	s := newService(t, newFakeUpdater())
 	s.Stop()
@@ -390,8 +374,8 @@ func TestStopIsSafeBeforeAndAfterStart(t *testing.T) {
 	}
 }
 
-// State is read from the drawing thread while a check runs on another: the
-// race detector is what this is for, and the answer has to be a real state.
+// 检查在另一 goroutine 运行时从绘制线程读 State：这正是给竞态检测器用的，
+// 且答案必须是真实状态。
 func TestStateIsReadableDuringACheck(t *testing.T) {
 	f := newFakeUpdater()
 	payload := []byte(strings.Repeat("x", 64))
@@ -424,7 +408,7 @@ func TestStateIsReadableDuringACheck(t *testing.T) {
 	wg.Wait()
 }
 
-// counter counts calls from any goroutine.
+// counter 统计来自任意 goroutine 的调用。
 type counter struct {
 	mu sync.Mutex
 	n  int
@@ -442,8 +426,7 @@ func (c *counter) get() int {
 	return c.n
 }
 
-// The directory the service owns is collected, not grown: what is left there
-// is a download of an update the updater keeps nowhere.
+// 服务的目录被清理而非累积：留在这里的是 updater 不保留的下载残留。
 func TestTheServiceCollectsItsDirectory(t *testing.T) {
 	dir := t.TempDir()
 	leftover := filepath.Join(dir, "0.1.0-beta.4")

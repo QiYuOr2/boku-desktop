@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-// The translation contract is what a translator must answer, and what the
-// application refuses to show: an empty answer is a failure at the boundary,
-// not an empty window.
+// 翻译契约是翻译器必须给出的回答，也是应用拒绝显示的东西：空回答在边界
+// 处就是失败，而不是一个空窗口。
 
 func TestTranslationRequestValidate(t *testing.T) {
 	cases := []struct {
@@ -66,9 +65,8 @@ func TestTranslationRequestValidate(t *testing.T) {
 	}
 }
 
-// An answer with no translation is not an answer: a translator that returns
-// nothing must become a visible failure rather than a window with a blank
-// half.
+// 没有译文的回答不算回答：返回空内容的翻译器必须变成可见的失败，而不是
+// 半窗空白的窗口。
 func TestTranslationResultValidate(t *testing.T) {
 	at := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 	good := TranslationResult{
@@ -136,8 +134,7 @@ func TestTranslatorDescriptorValidate(t *testing.T) {
 		t.Fatalf("Validate() = %v, want nil", err)
 	}
 
-	// A translator whose address is the user's to name is valid without an
-	// endpoint: the setting is the address.
+	// 地址由用户指定的翻译器无需 endpoint 也有效：该设置就是地址。
 	bySetting := good
 	bySetting.ID, bySetting.Endpoint, bySetting.BaseURLSetting = "custom", "", "custom.baseURL"
 	if err := bySetting.Validate(); err != nil {
@@ -165,8 +162,7 @@ func TestTranslatorDescriptorValidate(t *testing.T) {
 	}
 }
 
-// A translator that runs on the user's own machine works without a key, and
-// the descriptor is what says so.
+// 运行在用户本机的翻译器无需密钥，描述符正是说明这一点的依据。
 func TestTranslatorDescriptorNeedsCredential(t *testing.T) {
 	local := TranslatorDescriptor{
 		ID:                   "custom",
@@ -205,8 +201,8 @@ func TestLanguageNameAndValid(t *testing.T) {
 	if got := LangThai.Name(); got != "ไทย" {
 		t.Errorf("LangThai.Name() = %q", got)
 	}
-	// A code this build has no word for is named by itself, so a translator
-	// may answer with one without the window going blank.
+	// 本构建没有对应名称的语言代码以其自身命名，以免翻译器返回此类代码
+	// 时窗口变成空白。
 	if got := Language("sv").Name(); got != "sv" {
 		t.Errorf("Language(\"sv\").Name() = %q, want the code itself", got)
 	}

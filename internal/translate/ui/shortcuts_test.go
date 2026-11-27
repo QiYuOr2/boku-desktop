@@ -15,11 +15,8 @@ import (
 	"boku/internal/translate"
 )
 
-// The global shortcut is the tool's way in, and the rules around it are worth
-// testing where neither a running application nor a graphical session exists:
-// a callback that returns at once, a failure that is shown rather than
-// swallowed, a binding that is released before it is taken again, and a
-// binding that is put back when the platform refuses the new one.
+// 全局快捷键是工具的入口，其规则值得在没有运行应用也没有图形会话的环境里测：
+// 回调立刻返回、失败要显示而非吞掉、重新绑定前先释放旧绑定、平台拒绝新绑定时恢复旧绑定。
 
 func TestRegisterShortcutsBindsTheDefault(t *testing.T) {
 	state, _, shortcuts := testStateWith(t)
@@ -35,18 +32,13 @@ func TestRegisterShortcutsBindsTheDefault(t *testing.T) {
 	if !state.shortcut.registered {
 		t.Error("the window does not know the shortcut is bound")
 	}
-	// The recorder previews the binding itself, so a successful registration
-	// needs no duplicate status line below it.
 	if text, kind := state.shortcutLine(); text != "" || kind != presentation.NotePlain {
 		t.Errorf("the bound shortcut still draws %q (kind %d)", text, kind)
 	}
 }
 
-// The key press runs on the main thread, with the whole application waiting on
-// it, so it must return at once: the translation itself is a network request,
-// and a request is never waited out on the thread that draws. The assertion is
-// a timeout, which is what makes it a test of the rule rather than of the code
-// that happens to be there.
+// 按键回调在主线程执行，整个应用都在等它，所以必须立刻返回：翻译本身是网络请求，
+// 绝不能在绘制线程上等它完成。断言用超时，这样测的是规则本身，而非碰巧存在的代码。
 func TestShortcutCallbackReturnsAtOnce(t *testing.T) {
 	state, translate, card := translateState(t)
 	gate := make(chan struct{})
@@ -78,7 +70,6 @@ func TestShortcutCallbackReturnsAtOnce(t *testing.T) {
 		t.Error("the card the callback asked for was not shown")
 	}
 	release()
-	// Run the focus and result callbacks on the test's main thread, as Window.Update does.
 	for range 2 {
 		select {
 		case update := <-card.updates:
@@ -92,8 +83,7 @@ func TestShortcutCallbackReturnsAtOnce(t *testing.T) {
 	}
 }
 
-// A registration the platform refuses is visible and does not stop the
-// application: §6 of the tool design.
+// 平台拒绝的注册要可见，且不阻断应用：工具设计 §6。
 func TestRegisterShortcutsReportsAFailure(t *testing.T) {
 	state, _, shortcuts := testStateWith(t)
 	shortcuts.failWith(errors.New("already registered by another application"))
@@ -114,9 +104,8 @@ func TestRegisterShortcutsReportsAFailure(t *testing.T) {
 	}
 }
 
-// Rebinding releases what is held before it takes the new combination: the
-// platform has one call that releases them all, and a binding left behind
-// belongs to a process that no longer answers.
+// 重新绑定会在占用新组合前释放已有绑定：平台只有一个释放全部的调用，遗留的绑定会
+// 属于一个不再响应的进程。
 func TestRebindingReleasesBeforeItRegisters(t *testing.T) {
 	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
@@ -138,7 +127,7 @@ func TestRebindingReleasesBeforeItRegisters(t *testing.T) {
 	if note, kind := state.shortcutNote(); note != "" || kind != presentation.NotePlain {
 		t.Errorf("an accepted change still draws %q (kind %d)", note, kind)
 	}
-	// What was bound is remembered, so that the next launch registers it.
+	// 绑定会被记住，供下次启动注册。
 	settings, err := state.translateSettings()
 	if err != nil {
 		t.Fatalf("Settings failed: %v", err)
@@ -148,20 +137,15 @@ func TestRebindingReleasesBeforeItRegisters(t *testing.T) {
 	}
 }
 
-// A combination another application holds leaves the binding that was there:
-// a user who tries one has not asked to lose the shortcut they had.
+// 别的应用占用的组合会保留原有绑定：用户尝试一下，不等于想丢掉原来的快捷键。
 func TestRebindingPutsTheOldBindingBackOnFailure(t *testing.T) {
 	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
-	// The first registration is the one that is already there; everything
-	// after it is refused, which is the shape of a combination another
-	// application holds.
 	shortcuts.refuseAfter(0)
 	state.applyShortcut("Ctrl+Alt+J")
 
-	// The new combination was refused, and the binding that was there was put
-	// back and refused too: nothing is bound, and the window says so rather
-	// than claiming a binding nobody has.
+	// 新组合被拒，原有的绑定又被放回也被拒：什么都没绑定，窗口如实说明，
+	// 而不是谎称有一个没人持有的绑定。
 	if shortcuts.refused() == 0 {
 		t.Fatal("the platform never refused anything, so the rollback was not exercised")
 	}
@@ -197,7 +181,7 @@ func TestResetShortcutPutsTheDefaultBack(t *testing.T) {
 	}
 }
 
-// The application releases its binding on the way out.
+// 应用退出时释放其绑定。
 func TestUnregisterShortcutsReleasesEverything(t *testing.T) {
 	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
@@ -212,16 +196,13 @@ func TestUnregisterShortcutsReleasesEverything(t *testing.T) {
 	}
 }
 
-// Recording reads a complete combination and binds it. A modifier on its own
-// and a key with no modifier are refused with a word rather than registered:
-// one is not a combination, and the other would take that key from every
-// application on the machine.
+// 录制会读取一个完整组合并绑定。单独的修饰键、以及无修饰键的按键，都会给出说明而不是注册：
+// 前者不是组合，后者会从机器上每个应用手里夺走那个键。
 func TestRecordingBindsACombination(t *testing.T) {
 	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
 	state.beginShortcutCapture()
 
-	// A modifier on its own: not a combination.
 	if !state.captureShortcut(ui.InputEvent{Kind: ui.InputKeyDown, Key: ui.KeyUnknown, Mods: ui.Ctrl}) {
 		t.Error("the modifier press was not taken, so it would act on the window behind")
 	}
@@ -232,7 +213,6 @@ func TestRecordingBindsACombination(t *testing.T) {
 		t.Error("refusing a modifier stopped the recording")
 	}
 
-	// A key with no modifier: refused, and still recording.
 	state.captureShortcut(ui.InputEvent{Kind: ui.InputKeyDown, Key: ui.KeyT})
 	modifier := "Ctrl"
 	if runtime.GOOS == "darwin" {
@@ -245,7 +225,6 @@ func TestRecordingBindsACombination(t *testing.T) {
 		t.Error("refusing a bare key stopped the recording")
 	}
 
-	// A whole combination: bound.
 	state.captureShortcut(ui.InputEvent{Kind: ui.InputKeyDown, Key: ui.KeyT, Mods: ui.Ctrl | ui.Alt})
 	if state.shortcut.recording {
 		t.Error("the recording did not stop when it had a combination")
@@ -255,7 +234,6 @@ func TestRecordingBindsACombination(t *testing.T) {
 	}
 }
 
-// Escape cancels the recording without binding anything.
 func TestRecordingCancelsOnEscape(t *testing.T) {
 	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
@@ -272,8 +250,7 @@ func TestRecordingCancelsOnEscape(t *testing.T) {
 	}
 }
 
-// Nothing is read while the window is not recording: a key pressed elsewhere
-// in the settings window is not a binding.
+// 不在录制时什么都不读：设置窗口别处按下的键不是绑定。
 func TestCaptureIgnoresKeysWhileNotRecording(t *testing.T) {
 	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
@@ -286,12 +263,8 @@ func TestCaptureIgnoresKeysWhileNotRecording(t *testing.T) {
 	}
 }
 
-// A tool that starts switched off takes no shortcut at launch.
-//
-// A global shortcut is a key this process holds against every other
-// application on the machine. Binding one for a tool the user has turned off
-// denies them the combination for a feature that will not run — so "off" has to
-// mean the key was never taken.
+// 启动即关闭的工具不占用任何快捷键：全局快捷键是本进程对机器上其他所有应用持有的键，
+// 为已关闭的工具绑定它会让用户白白失去该组合——所以「关」意味着键根本没被占用。
 func TestNoShortcutIsBoundWhileTheToolStartsOff(t *testing.T) {
 	state, _, shortcuts := testStateWith(t)
 	if err := state.translate.SetEnabled(t.Context(), false); err != nil {
@@ -308,10 +281,8 @@ func TestNoShortcutIsBoundWhileTheToolStartsOff(t *testing.T) {
 	}
 }
 
-// Turning the tool off releases the key, and turning it back on takes it again.
-//
-// It is what makes the switch mean what it says: the two states a user can be
-// in are "off, and the key is free" and "on, and the key opens it".
+// 关闭工具释放按键，再打开则重新占用。这让开关名副其实：
+// 用户只有两种状态——「关，且键空闲」和「开，且键能唤起」。
 func TestTheSwitchTakesAndReleasesTheShortcut(t *testing.T) {
 	state, _, shortcuts := testStateWith(t)
 	state.RegisterShortcuts()
@@ -319,7 +290,6 @@ func TestTheSwitchTakesAndReleasesTheShortcut(t *testing.T) {
 		t.Fatalf("the shortcut did not start bound: %q", got)
 	}
 
-	// Off: the key goes back to the system.
 	state.setTranslationEnabled(false)
 	if got := shortcuts.bound(); got != "" {
 		t.Errorf("the key is still held after the tool was turned off: %q", got)
@@ -327,12 +297,11 @@ func TestTheSwitchTakesAndReleasesTheShortcut(t *testing.T) {
 	if state.shortcut.registered {
 		t.Error("the window still thinks the shortcut is bound")
 	}
-	// And pressing it does nothing, because there is nothing bound to press.
+	// 此时按下也不会有动作，因为没有绑定可触发。
 	if fn := shortcuts.callback(); fn != nil {
 		t.Error("a callback survived the release")
 	}
 
-	// On again: the same key, bound to the same action.
 	state.setTranslationEnabled(true)
 	if got := shortcuts.bound(); got != translate.DefaultAccelerator {
 		t.Errorf("the key was not taken again: bound %q", got)
@@ -345,9 +314,7 @@ func TestTheSwitchTakesAndReleasesTheShortcut(t *testing.T) {
 	}
 }
 
-// A switched-off tool draws the switch and nothing else: a page of controls for
-// a tool that is not running invites the user to configure a thing that will
-// not happen.
+// 关闭的工具只画开关：为未运行的工具铺满设置会诱使用户去配置一件不会发生的事。
 func TestASwitchedOffToolDrawsOnlyItsSwitch(t *testing.T) {
 	state, fixture, _ := translateState(t)
 	if err := fixture.service.SetEnabled(t.Context(), false); err != nil {
@@ -357,12 +324,10 @@ func TestASwitchedOffToolDrawsOnlyItsSwitch(t *testing.T) {
 	if settings.Enabled {
 		t.Fatal("the tool is on, so this test is about the wrong state")
 	}
-	// The rule the section draws by: everything but the switch is behind it.
-	// What it looks like is accepted at runtime; this is the decision.
+	// 该 section 的规则：除开关外的一切都藏在其后。外观由运行时验收，这里只测这个判断。
 	if showsTranslationControls(settings) {
 		t.Error("a switched-off tool still draws the controls that configure it")
 	}
-	// An enabled tool draws them.
 	if err := fixture.service.SetEnabled(t.Context(), true); err != nil {
 		t.Fatalf("SetEnabled failed: %v", err)
 	}

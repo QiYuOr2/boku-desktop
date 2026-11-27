@@ -14,14 +14,10 @@ import (
 	"boku/internal/kit"
 )
 
-// startQRRecognition is the quick window's QR action: the same native region
-// selection the screenshot translation uses, followed by a local read of the
-// QR code in the chosen pixels, shown in the same card.
+// 快捷窗口的二维码动作：用与截图翻译相同的系统选区，在本地读取所选像素中的二维码，结果显示在同一张卡片。
 //
-// Nothing leaves the machine. A QR code is often a login code, a payment
-// code or a personal link, so the picture is never sent to a translator — it
-// is decoded here and only the text is kept, in memory, for as long as the
-// card shows it.
+// 数据不出本机。二维码常是登录码、支付码或个人链接，图片绝不发给翻译器——只在此本地解码，
+// 仅在内存中保留文本，直到卡片关闭。
 func (s *State) startQRRecognition() {
 	if s.screenshot == nil {
 		return
@@ -29,9 +25,7 @@ func (s *State) startQRRecognition() {
 	requestedAt := s.cursorPoint()
 	startedAt := time.Now()
 	slog.Info("QR recognition requested", "event", "qr_recognition_requested", "source", "quick_window")
-	// The card's pin is the translation card's setting, since it is the same
-	// card. A build with no translation tool still scans: the QR read does
-	// not depend on a service.
+	// 卡片钉住与否沿用翻译卡片的设置（本就是同一张卡片）。没有翻译工具也能扫码：识码不依赖服务。
 	pinned := false
 	if s.translate != nil {
 		if settings, err := s.translate.Settings(); err == nil {
@@ -48,9 +42,7 @@ func (s *State) startQRRecognition() {
 		image, err := capture.Capture(ctx)
 		cancel()
 		if err != nil {
-			// Esc, a click without a usable rectangle, and replacing an
-			// in-flight picker are normal ways out of the app-owned selection
-			// UI. They leave no card behind.
+			// 按 Esc、点出无效矩形、替换进行中的选区，都是退出应用自绘选区 UI 的正常方式，不留下卡片。
 			if errors.Is(err, context.Canceled) {
 				slog.Info("QR recognition capture cancelled", "event", "qr_recognition_cancelled", "duration", time.Since(startedAt))
 				return
@@ -67,14 +59,11 @@ func (s *State) startQRRecognition() {
 			return
 		}
 		slog.Info("QR recognition captured", "event", "qr_captured", "imageBytes", len(image), "duration", time.Since(startedAt))
-		// The preview is for the user's eyes; a screen that cannot be drawn
-		// as a preview must not cost them the text, so its error is ignored
-		// rather than treated as a failed read.
+		// 预览只给人看；无法生成预览不能连累文本，因此忽略其错误而非当作读取失败。
 		preview, _ := ui.DecodeBitmap(image)
 		text, decodeErr := decode(image)
 		s.onMain(func() {
-			// The selection took time, so the card is anchored where the
-			// pointer is now, like the screenshot translation's.
+			// 选区耗时较久，卡片锚定在指针当前位置，与截图翻译一致。
 			anchor := s.cursorPoint()
 			if decodeErr != nil || strings.TrimSpace(text) == "" {
 				failure := "没有识别到二维码。"
@@ -97,8 +86,7 @@ func (s *State) startQRRecognition() {
 				})
 				return
 			}
-			// Only the length is logged. What the code says is the user's
-			// data, and the card is the only place it belongs.
+			// 只记录长度。识别内容属于用户数据，只应出现在卡片里。
 			slog.Info("QR code decoded", "event", "qr_recognition_completed", "chars", len([]rune(text)), "duration", time.Since(startedAt))
 			s.showTranslation(anchor, translationState{
 				status:  translateQRReady,
@@ -111,9 +99,6 @@ func (s *State) startQRRecognition() {
 	}()
 }
 
-// qrFailure says what a failed capture means in the card's own words. The
-// shared translator errors already have user-facing sentences; the one case
-// that does not is a build whose platform cannot read the screen.
 func qrFailure(err error) string {
 	switch {
 	case errors.Is(err, domain.ErrImageTranslateUnavailable):

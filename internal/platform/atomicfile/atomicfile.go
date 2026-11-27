@@ -1,14 +1,9 @@
-// Package atomicfile writes a file the way a configuration file has to be
-// written: through a temporary file in the same directory, renamed into
-// place.
+// Package atomicfile 以配置文件应有的方式写文件：先在同目录写临时文件，再改名到目标位置。
 //
-// A reader therefore sees either the previous contents or the new ones, never
-// half of either — which is what a settings file, a clipboard history or a
-// credential file all need, since a crash mid-write must not cost the user
-// what was there before.
+// 因此读取方只会看到旧内容或新内容，不会看到写了一半的文件；写入中途崩溃也不会
+// 丢失用户原有数据。
 //
-// It holds no state and knows nothing about what is being written: the stores
-// that use it name themselves in the error they wrap around it.
+// 本包不持有状态，也不知道写的是什么：使用它的存储会在自己包裹的错误里标明来源。
 package atomicfile
 
 import (
@@ -18,19 +13,16 @@ import (
 )
 
 const (
-	// FileMode is what a written file is restricted to. On Windows this
-	// permission bit does not decide access — an ACL does — so it is a
-	// request rather than a boundary; see §4 of the security design.
+	// FileMode 是写出文件请求的权限。Windows 上访问控制由 ACL 决定，
+	// 这个权限位只是请求而非安全边界。
 	FileMode = 0o600
-	// DirMode is what a directory created for a written file gets.
-	DirMode = 0o700
+	DirMode  = 0o700
 )
 
-// Write writes data to path, creating the directory if it is not there.
+// Write 把 data 写到 path，目录不存在时一并创建。
 //
-// The temporary file is created beside the destination rather than in the
-// system temporary directory: a rename across file systems is a copy, and a
-// copy is exactly the half-written file this exists to avoid.
+// 临时文件建在目标同目录，而不是系统临时目录：跨文件系统的改名实际是复制，
+// 而复制正是本包要避免的半写文件。
 func Write(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, DirMode); err != nil {

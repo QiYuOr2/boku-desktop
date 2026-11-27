@@ -1,13 +1,10 @@
-// Package presentation contains the boundary shared by the application Shell
-// and feature-specific UI packages.
+// Package presentation 是应用 Shell 与各功能 UI 包共享的边界。
 package presentation
 
-// Host is the small set of application-shell capabilities a feature UI may
-// request. It deliberately contains callbacks rather than MyGo windows or an
-// app.State pointer: feature UI must be reusable without importing the Shell.
+// Host 是功能 UI 可以请求的一小组 Shell 能力。它刻意只包含回调，而不是 MyGo
+// 窗口或 app.State 指针：功能 UI 必须在 import Shell 的情况下可复用。
 //
-// Every callback is optional so a feature view remains usable in isolated UI
-// tests. A nil callback is a no-op.
+// 每个回调都是可选的，这样功能视图在隔离的 UI 测试中仍可用；nil 回调为空操作。
 type Host struct {
 	RequestRefresh func()
 	RunOnMain      func(func())

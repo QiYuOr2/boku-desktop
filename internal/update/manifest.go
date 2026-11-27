@@ -9,19 +9,15 @@ import (
 	"boku/internal/domain"
 )
 
-// maxManifestBytes bounds the update manifest this application reads. It is
-// MyGo's own limit for the file (internal/update.MaxManifestSize): a
-// manifest larger than this is not the file the release published.
+// maxManifestBytes 限制本应用读取的更新清单大小，与 MyGo 对该文件的限制一致
+// （internal/update.MaxManifestSize）：超过它就不是发布物所发的清单。
 const maxManifestBytes = 1 << 20
 
-// manifest is the MyGo update manifest, update-<target>.json, as
-// `mygo build` writes it. The shape is the release's, not this
-// application's: it is decoded here, at the boundary, and becomes a Release
-// with the names this package uses.
+// manifest 是 `mygo build` 写出的 MyGo 更新清单 update-<target>.json。它的形态
+// 属于发布物而非本应用：在边界处解码，转成本包命名的 Release。
 //
-// Only the fields a release needs are kept. date, previous and deltas are
-// the updater's own business — they feed the delta path this application
-// does not take — and a manifest carrying them is read without complaint.
+// 只保留 release 需要的字段。date、previous、deltas 是 updater 自己的事务——
+// 它们服务于本应用不走的增量路径——带这些字段的清单照常读取。
 type manifest struct {
 	Version   string `json:"version"`
 	Notes     string `json:"notes"`
@@ -30,20 +26,16 @@ type manifest struct {
 	Signature string `json:"signature"`
 }
 
-// DecodeManifest reads a MyGo update manifest and turns it into the release
-// this application installs.
+// DecodeManifest 读取 MyGo 更新清单，转成本应用安装的 release。
 //
-// It is the whole of the two feeds' contract: a manifest that cannot be
-// read — not JSON, not an object, missing the version or the archive, with
-// a size that cannot be a file — is domain.ErrProviderBadResponse and never
-// a release with zero values in it. The reason it carries is trimmed to
-// domain.MaxSnippetBytes and names a field rather than quoting the body.
+// 它覆盖两个发布源契约的全部：无法读取的清单（非 JSON、非对象、缺 version
+// 或归档、大小不可能是文件）一律为 domain.ErrProviderBadResponse，绝不是一个
+// 字段全零的 release。携带的原因是截断到 domain.MaxSnippetBytes 的、指明字段
+// 而非引用正文的内容。
 //
-// digest is the SHA-256 of the archive, in lowercase hex, computed by
-// whoever verified the manifest's signature: the manifest signs a digest,
-// not a URL, and this package has no public key. It is what binds the bytes
-// on disk to the release, and it may be empty when the platform cannot
-// verify it, in which case the download is checked for its size alone.
+// digest 是归档的 SHA-256（小写十六进制），由核验清单签名的一方算出：清单签的是
+// 摘要而非 URL，本包没有公钥。它把磁盘字节与 release 绑定，平台无法核验时可为
+// 空，此时下载只按大小核对。
 func DecodeManifest(payload []byte, digest string) (*Release, error) {
 	trimmed := strings.TrimSpace(string(payload))
 	if trimmed == "" {
@@ -54,9 +46,8 @@ func DecodeManifest(payload []byte, digest string) (*Release, error) {
 	}
 	var m manifest
 	decoder := json.NewDecoder(strings.NewReader(trimmed))
-	// A manifest is an object. Anything else — a list, a string, a number —
-	// decodes into the zero value without complaint, which is exactly the
-	// zero-value success this refuses.
+	// 清单必须是对象。其它形态（列表、字符串、数字）都会无报错地解成零值，
+	// 正是这里要拒绝的零值成功。
 	if err := decoder.Decode(&m); err != nil {
 		return nil, BadRelease("body", err.Error())
 	}
@@ -79,10 +70,8 @@ func DecodeManifest(payload []byte, digest string) (*Release, error) {
 		Version: releaseVersion(m.Version),
 		Notes:   strings.TrimSpace(m.Notes),
 		Assets: []Asset{{
-			// The downloaded archive is stored under a name this
-			// application decides: the URL's own path is the release's
-			// business, and the version directory is what says which
-			// release it is.
+			// 下载的归档用本应用决定的文件名：URL 自身的路径属于发布物，版本
+			// 目录才说明是哪个 release。
 			Name:   archiveNameFor(releaseVersion(m.Version)),
 			URL:    strings.TrimSpace(m.URL),
 			Size:   m.Size,
@@ -95,20 +84,19 @@ func DecodeManifest(payload []byte, digest string) (*Release, error) {
 	return release, nil
 }
 
-// releaseVersion is the version a manifest names, as a directory name: the
-// manifest is the release's, and a leading "v" is how tags are written.
+// releaseVersion 把清单命名的版本变成目录名：清单属于发布物，前导的 "v" 只是
+// 标签的写法。
 func releaseVersion(version string) string {
 	return strings.TrimPrefix(strings.TrimSpace(version), "v")
 }
 
-// archiveNameFor is what a downloaded release is called on disk. The
-// extension is the one MyGo publishes, so that a directory listing says what
-// the file is; the version directory around it says which release it is.
+// archiveNameFor 是下载的 release 在磁盘上的名字。扩展名用 MyGo 发布的那个，
+// 使目录列表能看出文件是什么；外层的版本目录说明是哪个 release。
 func archiveNameFor(version string) string {
 	return version + ".tar.gz"
 }
 
-// DecodeManifestFrom reads a manifest from r, bounded by maxManifestBytes.
+// DecodeManifestFrom 从 r 读取清单，受 maxManifestBytes 限制。
 func DecodeManifestFrom(r io.Reader, digest string) (*Release, error) {
 	payload, err := io.ReadAll(io.LimitReader(r, maxManifestBytes+1))
 	if err != nil {

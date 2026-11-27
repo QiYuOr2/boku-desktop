@@ -9,9 +9,6 @@ import (
 	"boku/internal/presentation"
 )
 
-// shortcutButton is the same recorder the translation settings use: the binding
-// sits in a fixed field, a click waits for the next combination, and the clear
-// mark removes it. Flash has no default, so there is no reset.
 func (s *State) shortcutButton(c *ui.Context) ui.Element {
 	return presentation.ShortcutField{
 		Accelerator: s.accelerator,
@@ -42,9 +39,8 @@ func (s *State) cancelShortcutCapture() {
 	s.host.Refresh()
 }
 
-// captureShortcut reads the combination while the field is recording.
-// A lone modifier, or a key with no modifier, is refused: the first is not a
-// shortcut, and the second would take that key from every application.
+// captureShortcut 在录制时读取组合键。单独的修饰键、以及不带修饰键的按键
+// 都会被拒绝：前者不是快捷键，后者会把这颗键从所有应用那里抢走。
 func (s *State) captureShortcut(ev ui.InputEvent) bool {
 	if !s.recording || ev.Kind != ui.InputKeyDown {
 		return false
@@ -70,9 +66,8 @@ func (s *State) captureShortcut(ev ui.InputEvent) bool {
 	return true
 }
 
-// applyAccelerator stores the combination and asks the shell to register every
-// global shortcut again. A refusal puts the previous binding back: trying a
-// new one must not leave the user with none.
+// applyAccelerator 保存组合键并让 shell 重新注册所有全局快捷键。注册被拒时
+// 恢复上一个绑定：尝试新快捷键不能把用户弄成没有快捷键。
 func (s *State) applyAccelerator(accelerator string) {
 	previous := s.Accelerator()
 	s.recording = false

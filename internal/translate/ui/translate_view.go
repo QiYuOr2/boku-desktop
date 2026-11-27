@@ -11,41 +11,19 @@ import (
 	"boku/internal/domain"
 )
 
-// The translation card's view: what was selected, what it became, and the few
-// things that can be done with either.
-//
-// It follows the design's own measurements rather than the settings window's:
-// the card is 598 points wide, its two blocks are 14 points from the sides
-// with a hairline between them, its labels and badges are 10-point type, and
-// its actions are 14-point marks in 6 points of padding. The three line
-// weights of the design are all here — the hairline between the two blocks
-// (stone-100), the line above the foot (also stone-100), and the card's own
-// 1-point outline (stone-200/80).
+// translateView 绘制翻译卡片：原文、译文，以及两者的操作。
 func (s *State) translateView(c *ui.Context) {
 	s.useDesign(c)
 	c.Root().Children(func() {
-		// The card is a rounded sheet — the design's rounded-xl — and what is
-		// inside it is kept inside its shape by the part that touches its
-		// edge: the foot rounds its own two lower corners (translateFoot).
+		// 卡片不裁剪：裁剪会去掉元素的自动最小高度，flex 就会把卡片挤进窗口，
+		// 于是量到的是窗口而不是内容，而窗口正是按这个内容高度定尺寸的。
 		//
-		// The card itself is *not* clipped, and that is deliberate: clipping
-		// an element takes away the automatic minimum height it would
-		// otherwise keep, so the flex layout is free to squeeze the card into
-		// whatever window it is in — and a card that is squeezed measures the
-		// window instead of its content, which is the one number the window
-		// is then sized to.
+		// 高度上限放在卡片自身而不是窗口：超过 MaxHeight 后卡片停止增长、正文滚动，
+		// 这样一帧量到的仍是窗口应有的高度。若给窗口设上限，卡片会比窗口还高，
+		// 底部的脚跑到下边缘之外无法触达。
 		//
-		// The body scrolls and the foot does not: a translation can be longer
-		// than any card, and the foot is where the card is pinned, dragged
-		// and closed — it belongs at the bottom of the window whatever the
-		// answer's length.
-		//
-		// The cap is the card's own rather than the window's, which is what
-		// makes that work: past MaxHeight the card stops growing and its body
-		// scrolls, so what a frame measures is still what the window should
-		// be. Capping the window instead would leave the card taller than the
-		// window it is drawn in, with its foot below the bottom edge where
-		// nobody can reach it.
+		// 正文滚动而脚不滚动：翻译可能比任何卡片都长，而脚是固定、拖拽、关闭卡片的位置，
+		// 无论答案多长都应在窗口底部。
 		card := ui.Column(c).FillWidth().
 			MaxHeight(float32(translateMaxHeight)).
 			Background(presentation.ColorSurface).
@@ -55,13 +33,10 @@ func (s *State) translateView(c *ui.Context) {
 			card.Background(ui.Transparent)
 		}
 		card.Children(func() {
-			// The body takes what the foot leaves: what is in it scrolls
-			// once it needs more room than that.
 			body := ui.Scroll(c).FillWidth().Grow(1)
 			body.Children(func() {
-				// Only when there is an image: a failure before the capture
-				// (no Screen Recording permission) has none, and an empty
-				// preview box with the screenshot badge would say otherwise.
+				// 仅在已有图片时显示预览：截图前的失败（缺屏幕录制权限）没有图片，
+				// 空预览框配截图徽章会误导用户。
 				if s.translation.preview != nil {
 					s.imageTranslationPreview(c)
 				}
@@ -70,9 +45,7 @@ func (s *State) translateView(c *ui.Context) {
 					s.translateSourceBlock(c)
 					cardLine(c)
 					s.translateTargetBlock(c)
-					// The annotation is its own block, with its own hairline:
-					// it is something the user asks for, and it costs a
-					// request of its own.
+					// 注音是独立区块，有独立分隔线：它由用户主动请求，并且单独花费一次请求。
 					if s.readingsAvailable() {
 						cardLine(c)
 						s.translateReadings(c)
@@ -87,20 +60,14 @@ func (s *State) translateView(c *ui.Context) {
 					s.translateNoticeBlock(c)
 				}
 			})
-			// The line and the foot are the card's own last two rows, not
-			// part of what scrolls.
 			cardLine(c)
 			s.translateFoot(c)
 		})
-		// How tall what was just built is, which is what the window is then
-		// sized to: a short answer gets a short card.
+		// 量出刚构建内容的高度，窗口据此定尺寸。
 		s.measureCard(c, card)
 	})
 }
 
-// imageTranslationPreview keeps the image's identity on the image itself.
-// It is an overlay rather than a blue content bar, matching the screenshot
-// translation visual language and leaving the card body for the result.
 func (s *State) imageTranslationPreview(c *ui.Context) {
 	preview := ui.Box(c).FillWidth().Height(float32(160)).Shrink(0).Radius(presentation.RadiusField).Background(presentation.ColorCardFoot)
 	preview.Children(func() {
@@ -116,16 +83,10 @@ func (s *State) imageTranslationPreview(c *ui.Context) {
 	})
 }
 
-// cardLine is the hairline the design draws inside the card: stone-100,
-// inside the card's own edge rather than across its width.
 func cardLine(c *ui.Context) ui.Element {
 	return ui.Row(c).FillWidth().Height(1).Shrink(0).Background(presentation.ColorCardLine)
 }
 
-// translateSourceBlock is the design's first block: the label row at the top
-// — 原文, the language's badge, and the actions that belong to the source —
-// and the text under it, annotated word by word when the translator could say
-// how each one is read.
 func (s *State) translateSourceBlock(c *ui.Context) {
 	ui.Column(c).FillWidth().
 		Padding(float32(presentation.CardHeadTop), float32(presentation.CardEdge), float32(presentation.CardHeadEnd), float32(presentation.CardEdge)).
@@ -156,13 +117,8 @@ func (s *State) translateSourceBlock(c *ui.Context) {
 		})
 }
 
-// translateSourceText is the source itself.
-//
-// It is the text — the pieces the translator annotated, joined back into what
-// was sent — and never the annotated words: the readings live in the card's
-// own row under the translation (translateReadings), which the user opens when
-// they want them. A source that is always wearing a second line of small type
-// is harder to read than the sentence it is meant to help with.
+// translateSourceText 只显示原文文本（把标注的分片拼回原句），不显示注音词：
+// 注音放在译文下方独立的注音行里，由用户按需展开，常驻小字会更难读。
 func (s *State) translateSourceText(c *ui.Context) {
 	if s.translation.source == "" {
 		ui.Text(c, "…").FontSize(float32(presentation.SizeCardSource)).TextColor(presentation.ColorEyebrow)
@@ -176,9 +132,6 @@ func (s *State) translateSourceText(c *ui.Context) {
 		LineHeight(1.3)
 }
 
-// translateTargetBlock is the design's second block: the label row — 译文,
-// the language it went into, and the way to copy it — and the translation
-// under it.
 func (s *State) translateTargetBlock(c *ui.Context) {
 	ui.Column(c).FillWidth().
 		Padding(float32(presentation.CardBodyTop), float32(presentation.CardEdge), float32(presentation.CardBodyEnd), float32(presentation.CardEdge)).
@@ -209,12 +162,7 @@ func (s *State) translateTargetBlock(c *ui.Context) {
 		})
 }
 
-// translateQRBlock is the whole card for a QR code: the text the code held.
-//
-// It is one block rather than the translation's two, because a QR code's
-// contents are not a source that became something else — they are the answer
-// itself. The label says that, and the copy action is the only thing the card
-// can do with it.
+// translateQRBlock 是二维码卡片的全部内容：二维码识别出的文本本身，不是译文，因此只有一个区块。
 func (s *State) translateQRBlock(c *ui.Context) {
 	ui.Column(c).FillWidth().
 		Padding(float32(presentation.CardHeadTop), float32(presentation.CardEdge), float32(presentation.CardBodyEnd), float32(presentation.CardEdge)).
@@ -241,24 +189,12 @@ func (s *State) translateQRBlock(c *ui.Context) {
 		})
 }
 
-// translateReadings is the card's third block, under the translation: the row
-// that opens the annotation, and — once it is open — the words that carry
-// something to say.
-//
-// It is here rather than over the source because that is where a reader looks
-// for it: the card's job is the translation, the source is there to be
-// recognised, and the words a sentence is made of are what someone asks for
-// afterwards. It is asked of the translator only when it is opened, which is
-// why opening it shows a request in flight.
-//
-// What it shows is the words, not the sentence: a reading over a piece of kana
-// says nothing, and the sentence is already above it.
+// translateReadings 是译文下方的注音区块：打开注音的行，以及打开后显示的有内容的词。
+// 只有打开时才向翻译器请求，所以打开时会显示进行中的请求。
 func (s *State) translateReadings(c *ui.Context) {
 	if !s.readingsAvailable() {
 		return
 	}
-	// The row is the card's own width; what it opens is inset in the usual
-	// block padding, like the other two blocks' content.
 	presentation.AnnotationBlock(c, s.translation.readings, s.readingsLabel(), s.toggleReadings)
 	if !s.translation.readings {
 		return
@@ -294,10 +230,7 @@ func (s *State) translateReadings(c *ui.Context) {
 		})
 }
 
-// readingsLabel is what the row that opens the annotation says: what is behind
-// it, and — once the answer is in — how much of it there is. The count is
-// there so that the row is worth reading on its own, closed: four words behind
-// a door is an invitation, and a door with nothing said about it is not.
+// readingsLabel 是打开注音那一行的文案：答案返回后附上词数，让这一行关着时也有信息量。
 func (s *State) readingsLabel() string {
 	label := "注音"
 	if s.translation.annotation.status == annotationReady {
@@ -308,8 +241,6 @@ func (s *State) readingsLabel() string {
 	return label
 }
 
-// translateLoadingBlock is what the card shows while the translator is being
-// asked: a spinner, a word, and the shape of the paragraph that is coming.
 func (s *State) translateLoadingBlock(c *ui.Context) {
 	ui.Column(c).FillWidth().
 		Padding(float32(presentation.CardBodyTop), float32(presentation.CardEdge), float32(presentation.CardBodyEnd), float32(presentation.CardEdge)).
@@ -327,9 +258,6 @@ func (s *State) translateLoadingBlock(c *ui.Context) {
 		})
 }
 
-// translateNoticeBlock is what the card shows when there is nothing to
-// translate: one block that says what happened, in the same measurements as
-// the blocks of a real translation.
 func (s *State) translateNoticeBlock(c *ui.Context) {
 	ui.Column(c).FillWidth().
 		Padding(float32(presentation.CardBodyTop), float32(presentation.CardEdge), float32(presentation.CardBodyEnd), float32(presentation.CardEdge)).
@@ -340,9 +268,7 @@ func (s *State) translateNoticeBlock(c *ui.Context) {
 					presentation.Notice(c, presentation.NotePlain, "划词翻译已关闭，快捷键不再响应。")
 					presentation.Notice(c, presentation.NotePlain, "在设置的「划词翻译」一节里打开它。")
 				case translateUnconfigured:
-					// The service the settings name is not one this build has,
-					// or it needs a key that is not there. Either way the fix
-					// is in the settings, and the card says which service.
+					// 设置指定的服务本版本没有，或缺少所需的 key；两种情况都在设置里修。
 					presentation.Notice(c, presentation.NoteWarning, s.translation.failure)
 					presentation.Notice(c, presentation.NotePlain, "在设置的「划词翻译」里重新选一个翻译服务。")
 				case translateNoText:
@@ -383,25 +309,12 @@ func (s *State) translateNoticeBlock(c *ui.Context) {
 		})
 }
 
-// translateFoot is the card's last line: where the translation came from on
-// the left, and what can be done with the card on the right. It is the part
-// the pointer drags the card by, and the design gives it the faint stone
-// face, 10 points above and below and 12 at the sides.
+// translateFoot 是卡片最后一行：左侧来源、右侧操作，也是拖动卡片的把手。
 //
-// Its two lower corners are round, because it is the row that reaches the
-// card's bottom edge: a square row there paints over the card's own rounded
-// corners and leaves the sheet looking round on top and square underneath.
-// The radius is the card's less its 1-point outline, which is where the
-// inside of that outline is.
+// 下方两个角要圆角：这一行贴着卡片下边缘，方角会盖掉卡片自身的圆角，
+// 让卡片上圆下方。圆角半径为卡片半径减 1 点描边。
 //
-// The room above and below is 10 rather than the design's 6: the user found
-// the line sitting too close to the card's bottom edge, and a footer that
-// carries the card's actions reads better with the same room on both sides
-// (which is what the settings window's own footer uses).
-//
-// The line takes every pointer event that lands on it, which is what makes it
-// a handle; the actions beside it are their own elements and keep their own
-// clicks.
+// 整行接收落在其上的指针事件以充当把手；旁边的操作是独立元素，保留各自的点击。
 func (s *State) translateFoot(c *ui.Context) {
 	corner := float32(presentation.RadiusCard - 1)
 	foot := ui.Row(c).FillWidth().Shrink(0).
@@ -434,14 +347,9 @@ func (s *State) translateFoot(c *ui.Context) {
 	})
 }
 
-// translationOrigin is what the foot says about where the translation came
-// from: the service, and nothing more when there is none to name.
-//
-// The free tier is one entry in the settings and several endpoints behind it,
-// so what it answers with is which engine actually served this translation —
-// "免费（微软）" — and not the id of the tier. A footer that said only "free"
-// would leave the user unable to tell where their text went, which §12 of the
-// product design does not allow.
+// translationOrigin 是脚部显示的翻译来源。
+// 免费档在设置里是一个条目、背后有多个端点，所以要显示实际服务的引擎（如「免费（微软）」）而非档位 id，
+// 否则用户无法知道文本去了哪里（产品设计 §12 要求）。
 func (s *State) translationOrigin() string {
 	switch s.translation.status {
 	case translateQRReady:
@@ -473,8 +381,7 @@ func (s *State) translationOrigin() string {
 	}
 }
 
-// pinLabel is what the pin action is called, which is also what assistive
-// technology reads: a mark that only says "pin" leaves the state unsaid.
+// pinLabel 是固定操作的名称，也是辅助技术朗读的内容：只说「固定」会漏掉当前状态。
 func pinLabel(pinned bool) string {
 	if pinned {
 		return "取消固定"
@@ -482,7 +389,6 @@ func pinLabel(pinned bool) string {
 	return "固定浮窗"
 }
 
-// langName is what the card calls a language.
 func langName(code domain.Language) string {
 	if name := code.Name(); name != "" {
 		return name

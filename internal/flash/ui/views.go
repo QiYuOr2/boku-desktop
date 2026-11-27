@@ -11,12 +11,9 @@ import (
 	"boku/internal/presentation"
 )
 
-// CaptureView is the capture card. It uses the translation card's parts:
-// a rounded sheet, the text, a hairline, and a stone foot.
-//
-// The field keeps no border. A text input paints its border in the accent
-// color while focused, which turned this card into a green box. The shortcut
-// belongs to the window, so it still saves when focus is on the foot.
+// CaptureView 是捕获卡片，沿用翻译卡片的结构。
+// 输入框不画边框：聚焦时它会用强调色画边框，把这卡片变成绿框。
+// 快捷键属于窗口，所以焦点在页脚时仍能保存。
 func (s *State) CaptureView(c *ui.Context) {
 	c.OnShortcut(ui.Cmd, ui.KeyEnter, s.commitCapture)
 	if ui.Cmd != ui.Ctrl {
@@ -80,8 +77,8 @@ func (s *State) CaptureView(c *ui.Context) {
 	})
 }
 
-// smallPrimary is the capture foot's button. The label is only what assistive
-// technology reads; the words are a child, so a short row cannot clip them.
+// smallPrimary 是捕获页脚的按钮。label 只供辅助技术读取；文字是子元素，
+// 以便短行不会把它裁掉。
 func smallPrimary(c *ui.Context, label string) ui.Element {
 	b := ui.ButtonBase(c).Label(label).
 		Padding(float32(2), float32(8)).
@@ -105,11 +102,9 @@ func smallPrimary(c *ui.Context, label string) ui.Element {
 	return b
 }
 
-// HistoryView is the list of flashes, with the field that writes the next one
-// at the bottom. The window's title bar already names it.
-//
-// Command+Enter, or Ctrl+Enter where that is a different key, saves. The
-// shortcut belongs to the window, so it still saves when focus is on the list.
+// HistoryView 是闪念列表，底部是写下一则的输入框。
+// Command+Enter（在两者不同的平台上用 Ctrl+Enter）保存。快捷键属于窗口，
+// 所以焦点在列表上时仍能保存。
 func (s *State) HistoryView(c *ui.Context) {
 	c.OnShortcut(ui.Cmd, ui.KeyEnter, s.commit)
 	if ui.Cmd != ui.Ctrl {
@@ -117,8 +112,6 @@ func (s *State) HistoryView(c *ui.Context) {
 	}
 	c.OnShortcut(0, ui.KeyEscape, s.escape)
 	presentation.WindowFrame(c).Children(func() {
-		// Search and the composer sit on the list. They are the same
-		// cards as the settings page, so nothing draws a line between them.
 		ui.Scroll(c).Fill().Children(func() {
 			ui.Column(c).FillWidth().Padding(float32(62), 0, float32(148), 0).Children(func() {
 				if s.loadErr != nil {
@@ -193,9 +186,8 @@ func (s *State) historyRow(c *ui.Context, entry flash.Entry) {
 				TextColor(presentation.ColorTextFaint).
 				SingleLine()
 			ui.Spacer(c)
-			// The actions stay in the row when the pointer is elsewhere.
-			// Putting them in only while hovered changes the line's height,
-			// the text jumps, and the pointer falls off the row.
+			// 指针移开时操作仍留在行里。只在悬停时才放入会改变行高，
+			// 文字跳动，指针就滑出了这一行。
 			actions := ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(8))
 			if !hot {
 				actions = actions.Opacity(0).PassThrough()
@@ -219,9 +211,8 @@ func (s *State) historyRow(c *ui.Context, entry flash.Entry) {
 	})
 }
 
-// composer rests at the bottom of the list. It is a settings card: the
-// page's own face, a hairline, and the field's corner. On macOS it sits
-// closer to the window so its corner can follow the window's arc.
+// composer 停在列表底部。是一张设置卡片：页面底色、一条细线、输入框圆角。
+// 在 macOS 上它更贴近窗口，好让圆角顺着窗口的弧度。
 func (s *State) composer(c *ui.Context) {
 	inset, radius := composerChrome()
 	fieldCard(c).Absolute().Left(inset).Right(inset).Bottom(inset).
@@ -265,9 +256,7 @@ func (s *State) composer(c *ui.Context) {
 		})
 }
 
-// fieldCard is the search field and the composer. It is the card the
-// settings page draws around one service: the page's face, one hairline,
-// and the field's corner. No shadow and no frost.
+// fieldCard 是搜索框与输入框的外框，与设置页给单个服务画的外框一致。
 func fieldCard(c *ui.Context) ui.Element {
 	return ui.Column(c).
 		Background(presentation.ColorSurface).
@@ -275,12 +264,8 @@ func fieldCard(c *ui.Context) ui.Element {
 		Radius(presentation.RadiusField)
 }
 
-// composerChrome is how far the composer sits inside the window, and the
-// radius of its corners. macOS rounds the window by 16. A field radius
-// inside the page margin is a different center, so the gap pinches; taking
-// the whole page margin off the window radius leaves a 2pt corner, which
-// reads as a square inside the window's curve. 8 inside a 16 window is
-// the same center, and still a round corner.
+// composerChrome 给出输入框相对窗口的内缩与圆角半径。macOS 的窗口圆角为 16；
+// 圆角若与窗口同圆心才自然衔接，取 8 的内缩配 8 的圆角。
 func composerChrome() (inset, radius float32) {
 	if runtime.GOOS != "darwin" {
 		return presentation.PageEdge, presentation.RadiusField
@@ -290,7 +275,7 @@ func composerChrome() (inset, radius float32) {
 	return insetFromWindow, windowRadius - insetFromWindow
 }
 
-// SettingsView is the shortcut row on the settings page.
+// SettingsView 是设置页上的快捷键行。
 func (s *State) SettingsView(c *ui.Context, head *ui.Handle) {
 	presentation.Inset(c, func() {
 		presentation.Stacked(c, presentation.GroupGap, func() {

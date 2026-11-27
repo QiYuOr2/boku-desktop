@@ -5,13 +5,12 @@ import (
 	"strings"
 )
 
-// errNotTranslation is a response that must not replace the sentence already
-// on screen. The body is not logged: it can be the translation itself.
+// errNotTranslation 表示本次响应不能替换屏幕上已有的句子。
+// 不记录响应体：它可能就是译文本身。
 var errNotTranslation = errString("翻译没有结果")
 
-// completionBody is one chat request. There is no system message: the model
-// card says it has no default system prompt, and the terminology template is
-// already the whole user message.
+// completionBody 构造一次对话请求：不带 system 消息，
+// 因为该模型卡声明没有默认 system 提示，术语模板已是整条 user 消息。
 func completionBody(prompt string) ([]byte, error) {
 	return json.Marshal(map[string]any{
 		"messages": []map[string]string{
@@ -25,8 +24,7 @@ func completionBody(prompt string) ([]byte, error) {
 	})
 }
 
-// completionText is the assistant text. An error document is not a translation,
-// and neither is an empty body: the previous sentence stays on screen.
+// completionText 取 assistant 文本。错误文档和空响应都不算译文，此时保留屏幕上的上一句。
 func completionText(payload []byte) (string, error) {
 	var body struct {
 		Error   json.RawMessage `json:"error"`

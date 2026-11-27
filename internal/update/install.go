@@ -10,35 +10,24 @@ import (
 	"boku/internal/domain"
 )
 
-// installTimeout bounds how long the updater is given to replace the
-// installation: long enough for an archive that has to be unpacked, short
-// enough that a filesystem that hangs does not leave the offer standing for
-// the rest of the run.
+// installTimeout 限制 updater 替换安装的时间：足够解包归档，又短到文件系统
+// 卡住时不会让更新提示挂满整轮运行。
 const installTimeout = 5 * time.Minute
 
-// Install applies a ready update and restarts the application.
+// Install 应用一个就绪更新并重启应用。
 //
-// What it does and does not verify is worth being plain about. This package
-// downloads the release's archive, checks that it arrived whole and — when
-// the feed can say — that it matches the SHA-256 the manifest signs, and
-// shows the user that a version is ready. It does not apply the archive: the
-// install itself is the updater's, through Updater.Install, because that is
-// where the Ed25519 signature is checked against the public key compiled
-// into the release, and the archive is unpacked with the layout `mygo build`
-// produced. A second unpacker here would agree with the first only by luck.
+// 它核验与不核验的边界值得说明：本包下载归档、核对完整、在发布源能给时核对
+// 清单所签的 SHA-256，并告知用户版本就绪；但它不应用归档——安装由 updater 通过
+// Updater.Install 完成，Ed25519 签名在那里对编译进发布物的公钥校验，归档按
+// `mygo build` 的布局解包。在这里再写一个解包器只会与第一个碰巧一致。
 //
-// The order is the one that leaves a working application behind. The
-// updater replaces the installation first and only then is anything
-// restarted; a replace that fails leaves the running version untouched and
-// the state says so. A replace that succeeds and a restart that cannot be
-// started leaves the new version installed for the next launch. A nil
-// Relauncher is that last case — installed, not restarted — and is not an
-// error: the interface says "takes effect at the next launch" rather than
-// offering a button that does nothing.
+// 顺序以留下可运行的应用为准：updater 先替换安装，只有替换成功才重启；替换失败
+// 则运行版本原封不动，状态如实说明。替换成功但重启未能启动，则新版本已安装、
+// 下次启动生效。Relauncher 为 nil 就是最后一种——已装不重启——并非错误：界面说
+// 「下次启动生效」而不是给一个点了没用的按钮。
 //
-// It is safe to call from a goroutine: it reads and changes the state under
-// the service's lock and does its I/O outside it. It must not be called from
-// the drawing thread, which is what InstallAsync is for.
+// 可从 goroutine 调用：它在服务锁内读写状态、锁外做 I/O。不得从绘制线程调用，
+// 那是 InstallAsync 的用途。
 func (s *Service) Install(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -57,10 +46,8 @@ func (s *Service) Install(ctx context.Context) error {
 	err := s.updater.Install(installCtx, version)
 	cancel()
 
-	// Whatever happened, this release is no longer something to offer: it
-	// has been applied, or it has not and the update is not going to be
-	// installed from here. Leaving Ready would offer a restart that does
-	// nothing.
+	// 无论如何，这个 release 都不再提供：要么已应用，要么已无法从这里安装。
+	// 留在 Ready 会给出一个重启了也没用的提示。
 	s.mu.Lock()
 	s.release = nil
 	s.mu.Unlock()
@@ -70,8 +57,7 @@ func (s *Service) Install(ctx context.Context) error {
 			Version: version,
 			Detail:  "the update could not be installed",
 		})
-		// The updater's own message can name the URL it was fetching, so it
-		// is not repeated here.
+		// updater 自己的消息可能引用它请求的 URL，故不在此重复。
 		slog.Warn("the update could not be installed", "version", version)
 		return wrapUnavailable("the update could not be installed", err)
 	}
@@ -84,23 +70,21 @@ func (s *Service) Install(ctx context.Context) error {
 		})
 		return nil
 	}
-	// The archive is the last thing that could restore the replaced
-	// installation, so it stays on disk until the next launch collects it.
+	// 归档是唯一能还原被替换安装的东西，因此留在磁盘上直到下次启动清理。
 	s.set(domain.UpdateState{
 		Status:  domain.UpdateUpToDate,
 		Version: version,
 		Detail:  "the update is installed; restarting",
 	})
-	// Relaunch posts the quit to the main thread and returns: nothing after
-	// this line is needed, and it must be the last thing this method does.
+	// Relaunch 把退出投递到主线程后返回：此行之后无需再做任何事，它必须是本
+	// 方法最后一行。
 	s.relaunch.Relaunch()
 	return nil
 }
 
-// InstallAsync is Install on a goroutine of its own, reporting to done. It is
-// what a click on "restart and update" calls: the click is on the main
-// thread, and replacing an installation is I/O that must not hold it. A nil
-// done is not an error.
+// InstallAsync 在独立 goroutine 上执行 Install，结果交给 done。它是点击
+// 「重启并更新」的入口：点击在主线程，而替换安装是 I/O，不得占用主线程。done
+// 为 nil 不算错误。
 func (s *Service) InstallAsync(ctx context.Context, done func(error)) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -113,9 +97,8 @@ func (s *Service) InstallAsync(ctx context.Context, done func(error)) {
 	}()
 }
 
-// entriesUnder lists the names in a directory, which is what a test counts to
-// know that a download was made or a directory was collected. A missing
-// directory is an empty list.
+// entriesUnder 列出一个目录下的名字，供测试统计是否发生下载或目录是否被清理。
+// 目录不存在返回空列表。
 func entriesUnder(dir string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

@@ -5,19 +5,17 @@ import (
 	"time"
 )
 
-// RefreshEvery is how stale a DualSense battery may be. Plugging a controller
-// in or out is delivered by the system, not by this timer.
+// RefreshEvery 是 DualSense 电量允许的最大陈旧时间。手柄插拔由系统通知，
+// 不靠此定时器。
 const RefreshEvery = 30 * time.Second
 
-// settleEvery collapses the several HID interfaces one controller announces
-// into a single look.
+// settleEvery 把一个控制器宣告的多个 HID 接口合并为一次探测。
 const settleEvery = 300 * time.Millisecond
 
-// Watch reports the connected controllers on its own goroutine, first
-// immediately and then when one is plugged or unplugged. While a DualSense
-// is connected, its battery is read again at every, which is at least
-// RefreshEvery. Without device notifications the same interval is the only
-// look. changed is not called on the caller's goroutine.
+// Watch 在自己的 goroutine 上报已连接的控制器，先立即上报一次，之后在插拔
+// 时上报。若有 DualSense 连接，每个 every（至少 RefreshEvery）重新读取一次
+// 电量；无设备通知时同样的间隔是唯一探测。changed 不在调用方 goroutine 上
+// 调用。
 func Watch(ctx context.Context, every time.Duration, changed func([]Pad)) {
 	if ctx == nil || changed == nil {
 		return
@@ -83,9 +81,8 @@ func publish(last []Pad, changed func([]Pad), force bool) []Pad {
 	return last
 }
 
-// needsBattery is true when a later look might change a charge reading
-// without a controller being plugged in. A DualShock 4 shares this kind and
-// has no battery byte; the extra look is the same slow one.
+// needsBattery 表示在没有手柄插拔时，后续探测仍可能改变电量读数。
+// DualShock 4 同属此类且没有电量字节，额外探测同样是慢速的那次。
 func needsBattery(pads []Pad) bool {
 	for _, pad := range pads {
 		if pad.Kind == KindDualSense || pad.Kind == KindSwitchPro || pad.Battery.Known {

@@ -1,9 +1,5 @@
-// Package deepseek translates text with DeepSeek's chat completions, using
-// the same API key the balance panel uses: the user configured one account,
-// and asking them for the same key twice would be a second thing to get
-// wrong.
-//
-// It does HTTP and error translation, and it knows nothing about windows.
+// Package deepseek 用 DeepSeek 的 chat completions 翻译文本，复用余额面板的同一把 API key：
+// 同一个账号只配置一次，避免让用户重复填写同一把 key。
 package deepseek
 
 import (
@@ -19,22 +15,17 @@ import (
 )
 
 const (
-	// ProviderID is the translator's id, and the balance provider's: they
-	// are the same service and the same key, so they are the same name.
+	// ProviderID 既是翻译器的 id，也是余额 provider 的 id：同一服务、同一把 key，故同名。
 	ProviderID = contract.ProviderID
-	// defaultBaseURL is DeepSeek's own endpoint. Nothing guesses a
-	// service's address.
+	// defaultBaseURL 是 DeepSeek 自己的地址，不做任何猜测。
 	defaultBaseURL = "https://api.deepseek.com"
-	// defaultModel is the text model the tool asks. A model name is a service's
-	// own detail and it moves; it is written here so that a change is one
-	// line in one file.
+	// defaultModel 是文本模型，集中写在这里便于一处修改。
 	defaultModel = "deepseek-chat"
-	// imageModel is DeepSeek's current multimodal OpenAI-compatible model.
-	// deepseek-chat accepts text only, so image requests must name this model.
+	// imageModel 是多模态模型；deepseek-chat 只接受文本，图片请求必须指定这个模型。
 	imageModel = "deepseek-flash"
 )
 
-// Translator asks DeepSeek to translate.
+// Translator 用 DeepSeek 做翻译。
 type Translator struct {
 	client     *httpc.Client
 	baseURL    string
@@ -43,13 +34,12 @@ type Translator struct {
 	now        func() time.Time
 }
 
-// New returns the translator, talking to DeepSeek itself.
+// New 返回直接访问 DeepSeek 的翻译器。
 func New(client *httpc.Client) *Translator {
 	return NewWithBaseURL(client, defaultBaseURL)
 }
 
-// NewWithBaseURL returns the translator talking to another address. Tests
-// use it to point at an httptest server.
+// NewWithBaseURL 让翻译器访问指定地址；测试用它指向 httptest 服务器。
 func NewWithBaseURL(client *httpc.Client, baseURL string) *Translator {
 	return &Translator{
 		client:     client,
@@ -60,12 +50,11 @@ func NewWithBaseURL(client *httpc.Client, baseURL string) *Translator {
 	}
 }
 
-// ID returns the translator's id.
+// ID 返回翻译器的 id。
 func (t *Translator) ID() string { return ProviderID }
 
-// Descriptor says what the translator is called and what it needs. The
-// endpoint is the address as the settings stand now, so the interface can
-// show where the text is going before it goes.
+// Descriptor 描述翻译器的名称与所需凭据；Endpoint 取当前设置下的地址，
+// 便于界面在发送前显示文本将发往何处。
 func (t *Translator) Descriptor() domain.TranslatorDescriptor {
 	return domain.TranslatorDescriptor{
 		ID:             ProviderID,
@@ -77,9 +66,8 @@ func (t *Translator) Descriptor() domain.TranslatorDescriptor {
 	}
 }
 
-// TranslateImage asks DeepSeek's multimodal model to recognize and translate
-// visible text in one request. The image stays in memory and is never passed
-// through local OCR or persisted.
+// TranslateImage 让 DeepSeek 多模态模型在一次请求中识别并翻译图中文字。
+// 图片仅停留在内存，不经过本地 OCR，也不落盘。
 func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credentials, image []byte, target domain.Language) (domain.TranslationResult, error) {
 	if len(image) == 0 {
 		return domain.TranslationResult{}, fmt.Errorf("%w: there is no image to translate", domain.ErrInvalidArgument)
@@ -110,11 +98,10 @@ func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credential
 	return openai.ImageResult(answer, target, ProviderID, t.now())
 }
 
-// Translate asks for the translation.
+// Translate 发起翻译。
 //
-// Without a key it does not ask at all: an unauthenticated request would
-// only teach the endpoint that the key is wrong, and the window needs to say
-// "configure a key" rather than "the service refused".
+// 没有 key 时完全不发请求：未认证请求只会让接口判定 key 有误，
+// 而界面应提示「请配置 key」而非「服务拒绝」。
 func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, req domain.TranslationRequest) (domain.TranslationResult, error) {
 	if err := req.Validate(); err != nil {
 		return domain.TranslationResult{}, err
@@ -126,12 +113,10 @@ func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, re
 	return t.translate(ctx, key, req)
 }
 
-// translate is one request and one answer.
+// translate 执行一次请求并得到一个回答。
 func (t *Translator) translate(ctx context.Context, key string, req domain.TranslationRequest) (domain.TranslationResult, error) {
-	// What was selected may be longer than one request should carry. The cut
-	// is reported rather than made silently: half a translated paragraph
-	// that says nothing about its missing half is worse than a short one
-	// that says so.
+	// 选中文本可能超出单次请求上限。截断必须显式上报：只说半段却不提示少了半段，
+	// 比明确说明被截断更糟。
 	text, source, cut := openai.Prepare(req)
 	options := openai.AnnotationOptions{Furigana: req.Annotation.Furigana, LoanwordGloss: req.Annotation.LoanwordGloss}
 	content, err := openai.Translate(ctx, openai.Options{
@@ -150,7 +135,6 @@ func (t *Translator) translate(ctx context.Context, key string, req domain.Trans
 	return openai.TextResult(content, text, source, req.TargetLang, ProviderID, t.now(), options, cut)
 }
 
-// ensure the interface is satisfied where it is defined, not at the call
-// site.
+// 在接口定义处而非调用处确认接口已实现。
 var _ domain.Translator = (*Translator)(nil)
 var _ domain.ImageTranslator = (*Translator)(nil)

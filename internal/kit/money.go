@@ -1,13 +1,7 @@
-// Package kit holds the application's pure functions: no window, no network,
-// no database, no MyGo, no file. Everything here is a value in and a value
-// out, which is why the arithmetic, the text handling and the credential
-// scrubbing the application depends on live here and are tested by calling
-// them.
+// Package kit 存放应用的纯函数：不涉及窗口、网络、数据库、MyGo 或文件。
 //
-// The one dependency it is allowed is internal/domain, for the enums and
-// bounds that define what the values mean (a clip's kind, how much text is
-// kept). That package is a leaf of its own, so nothing here can reach the
-// outside world through it.
+// 唯一允许的依赖是 internal/domain，用于获取定义值含义的枚举与界限。该包本身是叶子，
+// 因此这里无法通过它接触外部世界。
 package kit
 
 import (
@@ -18,20 +12,16 @@ import (
 	"strings"
 )
 
-// MoneyPrecision is how many decimal places a currency's minor unit has: an
-// amount is stored as a whole number of them. ¥42.10 is 4210.
+// MoneyPrecision 是货币最小单位的十进制位数：金额以最小单位的整数存储，¥42.10 即 4210。
 const MoneyPrecision = 2
 
-// ErrInvalidMoney is what every ParseMoney failure wraps.
+// ErrInvalidMoney 是所有 ParseMoney 失败所包装的错误。
 var ErrInvalidMoney = errors.New("invalid money amount")
 
-// ParseMoney reads a decimal amount as text and returns it in minor units.
+// ParseMoney 解析十进制金额文本，返回最小单位。
 //
-// The amount never passes through a float: "42.10" becomes exactly 4210,
-// however large it grows. Amounts are not signed here — the interfaces the
-// application reads report balances, not debts — and "42.100" is accepted
-// only because its extra digits are zero; any other third decimal is a
-// precision error rather than a rounding.
+// 全程不经过浮点数，保证精确。此处的金额不带符号（应用读取的接口报告的是余额而非债务）。
+// "42.100" 仅在多余位为零时接受，任何非零的第三位小数都算精度错误，而不是四舍五入。
 func ParseMoney(s string) (int64, error) {
 	text := strings.TrimSpace(s)
 	if text == "" {
@@ -70,9 +60,7 @@ func ParseMoney(s string) (int64, error) {
 	return units*100 + cents, nil
 }
 
-// FormatMoney shows minor units as an amount, with the currency's symbol
-// when it has one and its code otherwise: 4210, "CNY" and 2 give "¥42.10",
-// and 840, "XYZ" and 2 give "8.40 XYZ".
+// FormatMoney 把最小单位格式化为金额：有符号的货币用符号，否则用货币代码。
 func FormatMoney(minor int64, currency string, precision int) string {
 	if precision < 0 {
 		precision = MoneyPrecision
@@ -102,8 +90,7 @@ func FormatMoney(minor int64, currency string, precision int) string {
 	}
 }
 
-// CurrencySymbol returns the sign of a currency, or "" when it has none
-// worth guessing.
+// CurrencySymbol 返回货币符号；无可用符号时返回空串。
 func CurrencySymbol(currency string) string {
 	switch strings.ToUpper(strings.TrimSpace(currency)) {
 	case "CNY", "RMB", "JPY":

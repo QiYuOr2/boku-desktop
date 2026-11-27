@@ -1,4 +1,4 @@
-// Package ui contains presentation helpers owned by clipboard history.
+// Package ui 提供剪贴板历史功能自己的展示辅助。
 package ui
 
 import (

@@ -22,10 +22,9 @@ type rect struct {
 	Left, Top, Right, Bottom int32
 }
 
-// clipTop sets the window region to the top dip of its client area.
-// SetWindowRgn takes ownership of the region when it succeeds. The redraw
-// flag stays off: the page is already painting the card, and redrawing the
-// whole window flashed.
+// clipTop 把窗口区域裁剪到客户区顶部 dip 像素。SetWindowRgn 成功后接管
+// region 的所有权；redraw 标志保持为 0，因为页面已在绘制卡片，重绘整个
+// 窗口会闪屏。
 func clipTop(window uintptr, dip int) bool {
 	if window == 0 || dip <= 0 {
 		return false

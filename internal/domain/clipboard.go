@@ -8,9 +8,8 @@ import (
 	"time"
 )
 
-// ClipKind says what a clipboard entry holds. The first four describe text
-// the user copied; the last two say that what was copied is a file list or
-// an image, which Boku records by name and never by content.
+// ClipKind 表示一条剪贴板记录的内容类型。前四种是用户复制的文本；
+// 后两种表示复制的是文件列表或图片，Boku 只按名称记录、不记录内容。
 type ClipKind string
 
 const (
@@ -22,7 +21,7 @@ const (
 	ClipKindImage ClipKind = "image"
 )
 
-// Valid reports whether the kind is one the application knows.
+// Valid 报告该类型是否为应用已知的类型。
 func (k ClipKind) Valid() bool {
 	switch k {
 	case ClipKindText, ClipKindURL, ClipKindJSON, ClipKindCode, ClipKindFile, ClipKindImage:
@@ -31,67 +30,54 @@ func (k ClipKind) Valid() bool {
 	return false
 }
 
-// ClipContent is one reading of the system clipboard, as the platform found
-// it: plain data, with no hint of which toolkit produced it.
+// ClipContent 是对系统剪贴板的一次读取，即平台所见的原始数据，
+// 不含任何来自具体工具包的痕迹。
 //
-// More than one of Text, Files, HasImage and Image can be set at once —
-// copying a file from a file manager puts its path on the clipboard as text
-// too — and Kind says which of them the user means.
+// Text、Files、HasImage 与 Image 可能同时被设置（例如从文件管理器复制文件时，
+// 路径也会以文本形式放进剪贴板），Kind 指明用户实际想要哪一种。
 type ClipContent struct {
 	Kind ClipKind
-	// Display is the one line the interface shows for this content.
+	// Display 是界面对该内容显示的单行文本。
 	Display string
-	// Text is the plain text on the clipboard, truncated to MaxClipTextBytes.
+	// Text 是剪贴板上的纯文本，截断到 MaxClipTextBytes。
 	Text string
-	// Files are the paths on the clipboard, in the order the platform gave
-	// them.
+	// Files 是剪贴板上的路径，按平台给出的顺序。
 	Files []string
-	// HasImage is set when an image is on the clipboard.
+	// HasImage 表示剪贴板上有图片。
 	HasImage bool
-	// ImageBytes is how large the bitmap on the clipboard is, when one was
-	// read.
+	// ImageBytes 是剪贴板上位图的大小（当初读到图片时）。
 	ImageBytes int
-	// Image is the bitmap itself, as PNG bytes, up to MaxClipImageBytes. It
-	// is kept — rather than only measured, which is what this did until
-	// 2026-10-15 — because a picture has to be able to go back where it came
-	// from: a click on an image in the history puts it there, and the
-	// selection tool borrows the clipboard and gives it back.
+	// Image 是位图本身，以 PNG 字节保存，上限 MaxClipImageBytes。保留它而非
+	// 仅记录尺寸，是因为图片要能放回原处：点击历史中的图片会把它写回剪贴板，
+	// 划词工具也会借用剪贴板后再还回去。
 	Image []byte
-	// ImageRef identifies the bitmap: the hash of the bytes above, which is
-	// what the history stores and compares. Two screenshots of the same
-	// size are two pictures, and only the hash can say so.
+	// ImageRef 标识该位图：上述字节的哈希，历史存储与比较都靠它。
+	// 同尺寸的两张截图是两张图，只有哈希能分辨。
 	ImageRef string
-	// HTML is the rich-text flavour of the copy, when the platform has one.
-	// The application keeps no markup: it is read for the text it shows.
+	// HTML 是复制的富文本形式（平台提供时）。应用不保留标记，只读取用于
+	// 展示的文本。
 	HTML string
-	// Observation is what the application noticed about this reading that
-	// the user should know: something it could not read, or something it
-	// had to make do without. It is in the application's own words, and it
-	// is empty when the reading was complete.
+	// Observation 是本次读取中值得用户知晓的情况：读不到的内容，或不得不
+	// 妥协的地方。用应用自己的措辞，读取完整时为空。
 	Observation string
-	// CapturedAt is when the platform was read.
+	// CapturedAt 是读取平台的时间。
 	CapturedAt time.Time
 }
 
-// WithObservation returns the reading with a note about what was noticed
-// while making it.
+// WithObservation 返回带有一条关于本次读取所察觉情况的说明的读取结果。
 func (c ClipContent) WithObservation(note string) ClipContent {
 	c.Observation = note
 	return c
 }
 
-// Valid reports whether the reading has a kind the application knows.
+// Valid 报告该读取的类型是否为应用已知的类型。
 func (c ClipContent) Valid() bool { return c.Kind.Valid() }
 
-// Unchanged reports whether two readings are the same content, which is what
-// keeps the poll from recording the same copy twice.
+// Unchanged 判断两次读取是否为相同内容，用于避免轮询重复记录同一次复制。
 //
-// A bitmap is compared by the hash of its bytes when both readings carry one:
-// comparing the size alone — which is what this did until 2026-10-15 — made
-// two different screenshots of the same size look like one picture, so the
-// second was never recorded and clicking the first put the wrong one back.
-// Readings that carry no hash (a test's, or a picture whose bytes could not be
-// read) fall back to the size.
+// 两次读取都带哈希时，位图按字节哈希比较；只比尺寸会把同尺寸的不同截图
+// 当成同一张，导致第二张不被记录，点击第一张时也放回错误的图片。
+// 没有哈希的读取（测试中的，或字节读不到的）退回按尺寸比较。
 func (c ClipContent) Unchanged(other ClipContent) bool {
 	if c.Kind != other.Kind || c.HasImage != other.HasImage ||
 		c.Display != other.Display || c.Text != other.Text {
@@ -115,79 +101,64 @@ func (c ClipContent) Unchanged(other ClipContent) bool {
 	return true
 }
 
-// ClipRecord is one reading as the application keeps it: the content, the
-// hash that identifies it, and the one line the interface draws for it.
+// ClipRecord 是应用保存的一次读取：内容、标识它的哈希，以及界面绘制的单行文本。
 //
-// It is separate from ClipContent, which is what the platform answered: a
-// record has already been classified, shortened and reduced to one line, so
-// that drawing a frame never does that work.
+// 它不同于 ClipContent（平台的原始答复）：记录已分类、截短并收敛为一行，
+// 因此绘制一帧时无需再做这些工作。
 type ClipRecord struct {
 	Kind    ClipKind
 	Content string
 	Display string
 	Hash    string
-	// Files are the paths the copy holds, when it is a file list.
+	// Files 是复制所带的路径（当其为文件列表时）。
 	Files []string
-	// ImageBytes is the size of the bitmap the copy held, when the platform
-	// offered one.
+	// ImageBytes 是复制所带位图的大小（平台提供图片时）。
 	ImageBytes int
-	// ImageRef identifies that bitmap: the hash of its bytes, which is what
-	// a click on the entry loads from the image store to put the picture
-	// back. It is empty when the copy held no picture, or when its bytes
-	// could not be read.
+	// ImageRef 标识该位图：其字节的哈希。点击该条目时据此从图片存储加载，
+	// 把图片放回剪贴板。复制不含图片或字节读不到时为空。
 	ImageRef string
-	// Note is what the reading noticed about itself, for the interface to
-	// show: something it could not read, or something it had to make do
-	// without. It is empty when the reading was complete.
+	// Note 是本次读取自我察觉的情况，供界面展示：读不到的内容或不得不妥协的
+	// 地方。读取完整时为空。
 	Note string
-	// CapturedAt is when the platform was read.
+	// CapturedAt 是读取平台的时间。
 	CapturedAt time.Time
 }
 
-// ClipboardEntry is one recorded copy: the unit of clipboard history.
+// ClipboardEntry 是一条已记录的复制，是剪贴板历史的单位。
 type ClipboardEntry struct {
 	ID string
-	// Content is what the entry puts back on the clipboard: the text for a
-	// copy, the paths for a file list, and the one line for an image.
+	// Content 是该条目要写回剪贴板的内容：文本复制为文本，文件列表为路径，
+	// 图片为单行文本。
 	Content string
-	// Display is the one line the interface shows for the entry. It is
-	// stored rather than recomputed so that drawing a list of copies is
-	// reading, not work.
+	// Display 是界面为该条目显示的单行文本。它被存储而非每次重算，
+	// 以便绘制复制列表是读取而非计算。
 	Display string
-	// Files are the paths the copy holds, when it is a file list: what a
-	// click on the entry writes back, so that pasting a copy of files
-	// pastes the files.
+	// Files 是复制所带的路径（当其为文件列表时）：点击条目时写回的内容，
+	// 使粘贴文件列表真的粘贴文件。
 	Files []string
-	// ImageBytes is the size of the bitmap the copy held, when an image was
-	// on the clipboard and was read.
+	// ImageBytes 是复制所带位图的大小（剪贴板上有图片并读到它时）。
 	ImageBytes int
-	// ImageRef is the picture this copy holds, kept in the image store
-	// rather than in the history file: a click on the entry loads it and
-	// puts the picture back on the clipboard. Empty when the copy held no
-	// picture, or when its bytes could not be read.
+	// ImageRef 是该复制持有的图片，存放在图片存储而非历史文件中：
+	// 点击条目时加载它并放回剪贴板。复制不含图片或字节读不到时为空。
 	ImageRef string
-	// Note is what the reading noticed about itself, for the interface to
-	// show. It is empty when the reading was complete.
+	// Note 是本次读取自我察觉的情况，供界面展示。读取完整时为空。
 	Note string
-	// ContentHash identifies the content for deduplication. Entries with
-	// the same hash are the same entry.
+	// ContentHash 用于去重标识内容：哈希相同的条目即同一条目。
 	ContentHash string
 	Kind        ClipKind
-	// Pinned entries stay while unpinned ones are evicted.
+	// Pinned 条目在非置顶条目被淘汰时保留。
 	Pinned bool
-	// CopiedAt is when the platform was read; CreatedAt is when the entry
-	// was written. They are separate so that pinning a copy back to the
-	// clipboard can move CopiedAt without rewriting history.
+	// CopiedAt 是读取平台的时间；CreatedAt 是条目写入的时间。两者分开，
+	// 使得把一条复制重新置顶到剪贴板时可以只改 CopiedAt 而不改写历史。
 	CopiedAt  time.Time
 	CreatedAt time.Time
-	// DeletedAt is the soft delete of the documented model. This
-	// application's store keeps no deleted entries yet; the field exists
-	// so the shape matches §7 of the domain model.
+	// DeletedAt 是文档模型中的软删除。当前应用的存储还不会保留已删除条目；
+	// 该字段存在是为了让形状与领域模型 §7 一致。
 	DeletedAt *time.Time
 }
 
-// Line is what a list shows for the entry. A stored display is used when
-// there is one; an entry from an older file is shown as its first line.
+// Line 是列表为该条目显示的内容：有存储的 Display 就用它；
+// 来自旧文件的条目则显示其首行。
 func (e ClipboardEntry) Line() string {
 	if e.Display != "" {
 		return e.Display
@@ -198,7 +169,7 @@ func (e ClipboardEntry) Line() string {
 	return e.Content
 }
 
-// Validate reports what is wrong with the entry.
+// Validate 报告该条目存在什么问题。
 func (e ClipboardEntry) Validate() error {
 	if strings.TrimSpace(e.ID) == "" {
 		return fmt.Errorf("%w: clipboard entry has no id", ErrInvalidArgument)
@@ -218,72 +189,63 @@ func (e ClipboardEntry) Validate() error {
 	return nil
 }
 
-// MaxClipTextBytes is how much text of one copy is kept. Anything longer is
-// truncated: a clipboard holding a whole file must not end up in the history.
+// MaxClipTextBytes 是单次复制保留的文本量，更长会截断：
+// 剪贴板里装着一整个文件时不能整份写进历史。
 //
-// It is a bound on the entity rather than a setting, which is why it lives
-// here and not with the clipboard feature's own configuration: what a recorded
-// copy may hold is what a ClipboardEntry is, and internal/kit — which does the
-// truncating — may only depend on this package.
+// 它是对实体的约束而非设置，因此放在这里而不在剪贴板功能的配置里：
+// 一条记录能装什么取决于 ClipboardEntry，而负责截断的 internal/kit
+// 只允许依赖本包。
 const MaxClipTextBytes = 64 << 10
 
-// MaxClipImageBytes is how large a bitmap on the clipboard is read. A larger
-// one is not read at all: the entry still says that a picture was copied,
-// without the application holding it.
+// MaxClipImageBytes 是读取剪贴板上位图的上限。更大的位图完全不读：
+// 条目仍会表示复制了图片，但应用不持有它。
 const MaxClipImageBytes = 16 << 20
 
-// ClipboardStore reads and writes clipboard history. Entries are stored
-// whole, newest first: the list is short enough that reading it costs
-// nothing, and replacing it is the whole write.
+// ClipboardStore 读写剪贴板历史。条目整体存储，新的在前：
+// 列表足够短，读取几乎无成本，替换即整个写入。
 type ClipboardStore interface {
 	LoadEntries(ctx context.Context) ([]ClipboardEntry, error)
 	SaveEntries(ctx context.Context, entries []ClipboardEntry) error
-	// SaveImage keeps the bytes of a copied picture under ref, so that a
-	// click on its entry can put the picture back. Saving the same ref twice
-	// is not an error and not a second copy.
+	// SaveImage 把复制的图片字节按 ref 保存，以便点击其条目时能放回图片。
+	// 重复保存同一 ref 不算错误，也不是第二份拷贝。
 	SaveImage(ctx context.Context, ref string, png []byte) error
-	// LoadImage returns what SaveImage kept.
+	// LoadImage 返回 SaveImage 保存的内容。
 	LoadImage(ctx context.Context, ref string) ([]byte, error)
-	// DeleteImage forgets it, which is what dropping its entry does.
+	// DeleteImage 遗忘它，删除其条目时即调用。
 	DeleteImage(ctx context.Context, ref string) error
 }
 
-// ClipboardDevice is the platform clipboard. Read runs on the thread the
-// platform requires; an implementation is responsible for that, so callers
-// may read from a goroutine.
+// ClipboardDevice 是平台剪贴板。Read 须在平台要求的线程上运行，
+// 由实现自行负责，因此调用方可以从 goroutine 中读取。
 type ClipboardDevice interface {
-	// Read returns what is on the clipboard now. ErrUnsupportedClipboardFormat
-	// means it held nothing this application can show.
+	// Read 返回当前剪贴板上的内容。ErrUnsupportedClipboardFormat
+	// 表示其中的内容本应用无法展示。
 	Read(ctx context.Context) (ClipContent, error)
-	// WriteText puts text back on the clipboard.
+	// WriteText 把文本写回剪贴板。
 	WriteText(ctx context.Context, text string) error
-	// WriteFiles puts a file list back on the clipboard: what a click on a
-	// recorded copy of files should do is copy the files again, not the
-	// text of their paths.
+	// WriteFiles 把文件列表写回剪贴板：点击一条已记录的文件复制，
+	// 应再次复制文件本身，而非其路径的文本。
 	WriteFiles(ctx context.Context, paths []string) error
-	// WriteImage puts a bitmap back on the clipboard, as the PNG bytes it
-	// was read as. A click on an image in the history is what uses it, and
-	// so is the selection tool putting back what it borrowed.
+	// WriteImage 把位图以其读入时的 PNG 字节写回剪贴板。
+	// 点击历史中的图片与划词工具还回借用的内容都会用到它。
 	WriteImage(ctx context.Context, png []byte) error
 }
 
-// ClipboardChangeCounter is an optional capability of a platform clipboard.
-// Its value changes whenever another application writes to the clipboard.
-// Consumers use it when the fact that a new copy happened matters even when
-// the bytes happen to equal the previous copy.
+// ClipboardChangeCounter 是平台剪贴板的可选能力。只要其它应用写入剪贴板，
+// 它的值就会改变。当「发生了一次新复制」这一事实重要、即使字节恰好等于上一次
+// 复制时，调用方会用到它。
 //
-// A zero value means the platform cannot provide a counter.
+// 零值表示平台无法提供计数器。
 type ClipboardChangeCounter interface {
 	ChangeCount() uint32
 }
 
-// ScreenshotDevice opens the platform region picker and returns the PNG the
-// user selected. It belongs to the platform boundary; the translation feature
-// only ever receives transient bytes.
+// ScreenshotDevice 打开平台区域选择器并返回用户选中的 PNG。
+// 它属于平台边界；翻译功能只接收临时字节。
 type ScreenshotDevice interface {
 	Capture(ctx context.Context) ([]byte, error)
 }
 
-// ErrClipboardChanged reports content that changed while it was being read,
-// so the reading is dropped rather than recorded half-way.
+// ErrClipboardChanged 表示内容在读取过程中发生了变化，
+// 因此该次读取被丢弃，而不是记录一半。
 var ErrClipboardChanged = errors.New("clipboard changed while reading")

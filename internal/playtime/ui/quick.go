@@ -1,4 +1,4 @@
-// Package ui draws the playtime block in the tray flyout.
+// Package ui 绘制托盘浮窗中的游戏时长区块。
 package ui
 
 import (
@@ -16,17 +16,18 @@ const (
 	monthCell      float32 = 20
 	monthGap       float32 = 2
 	weekBarMax     float32 = 48
-	weekPlotHeight float32 = 62 // bar, a 2pt gap, then a 12pt label
+	weekPlotHeight float32 = 62 // 柱、2pt 间隙，再加 12pt 文字
 )
 
-// Panel is the flyout block: today, this week, or one month.
+// Panel 是浮窗区块：今天、本周或某一个月。
 //
-// The choice, the week and month being shown, and which controllers sit beside
-// the title stay here. They are how the block is read, not what the recorder stores.
+// 当前视图选择、正在显示的周和月、月历选中的日期以及标题旁显示哪些手柄都保存在这里；
+// 它们只是阅读方式，不是记录器存储的内容。
 type Panel struct {
 	span        int
 	sunday      time.Time
 	month       time.Time
+	day         time.Time
 	covers      map[string]*ui.Bitmap
 	names       map[string]string
 	skip        map[string]bool
@@ -36,8 +37,7 @@ type Panel struct {
 	controllers []gamepad.Pad
 }
 
-// Draw is one frame of the block. A recorder that does not record on this
-// system draws nothing.
+// Draw 绘制区块的一帧。本系统上不记录数据的记录器不绘制任何内容。
 func (p *Panel) Draw(c *ui.Context, recorder *playtime.Recorder) {
 	if p == nil || recorder == nil || !recorder.Available() {
 		return
@@ -66,8 +66,8 @@ func (p *Panel) Draw(c *ui.Context, recorder *playtime.Recorder) {
 	})
 }
 
-// SetControllerMarks keeps the three drawings the title uses. They are parsed
-// once by the shell; a nil mark draws nothing for that kind.
+// SetControllerMarks 保存标题使用的三种图标。它们由外壳一次性解析；
+// 对应种类的图标为 nil 时不绘制。
 func (p *Panel) SetControllerMarks(dualSense, switchPro, xbox *ui.SVG) {
 	if p == nil {
 		return
@@ -77,8 +77,7 @@ func (p *Panel) SetControllerMarks(dualSense, switchPro, xbox *ui.SVG) {
 	p.xbox = xbox
 }
 
-// SetControllers replaces the controllers drawn beside the title. The caller
-// has already read them; drawing does not touch the device.
+// SetControllers 替换标题旁显示的手柄。调用方已读取过它们，绘制不会访问设备。
 func (p *Panel) SetControllers(pads []gamepad.Pad) {
 	if p == nil {
 		return
@@ -102,17 +101,16 @@ func (p *Panel) controllersRow(c *ui.Context) {
 			if mark == nil {
 				continue
 			}
-			// Glyphs sit below the line box center, so a centered mark lands high.
+			// 字形位于行框中心偏下，居中对齐的图标会显得偏高。
 			ui.Row(c).Gap(5).AlignItems(ui.Center).Top(1).Children(func() {
 				switch pad.Kind {
 				case gamepad.KindDualSense:
-					// Icon flattens an SVG to one ink color. Image keeps the
-					// shell, touchpad, and sticks.
+					// Icon 会把 SVG 压成单一墨色；Image 保留外壳、触摸板和摇杆。
 					ui.Image(c, mark).Size(18, 12).Shrink(0)
 				case gamepad.KindSwitchPro:
 					ui.Image(c, mark).Size(20, 15).Shrink(0)
 				default:
-					// Xbox-protocol pads, including third-party ones, share this mark.
+					// Xbox 协议手柄（含第三方）共用此图标。
 					ui.Image(c, mark).Size(20, 15).Shrink(0)
 				}
 				if pad.Battery.Known {
@@ -132,14 +130,14 @@ func batteryGlyph(c *ui.Context, percent int, charging bool) {
 	}
 	ink := presentation.PanelFaint
 	fill := presentation.PanelFaint
-	// High charge is the brand green. Charging is too, at any level.
+	// 电量高时用品牌绿；充电时无论电量多少也用品牌绿。
 	if charging || percent >= 60 {
 		fill = presentation.ColorBrand
 	}
 	const (
 		bodyW = float32(8)
 		bodyH = float32(12)
-		inset = float32(1.5) // border and padding, each side
+		inset = float32(1.5) // 每边的边框加内边距
 	)
 	ui.Column(c).Gap(0.5).AlignItems(ui.Center).Shrink(0).Children(func() {
 		ui.Box(c).Width(4).Height(1.5).Radius(0.8).Background(ink)
@@ -153,9 +151,8 @@ func batteryGlyph(c *ui.Context, percent int, charging bool) {
 	})
 }
 
-// Prepare turns cover files that are already on disk into bitmaps. It runs
-// on the main thread, before a frame, and never from the view: drawing can
-// happen several times for one click.
+// Prepare 把已在磁盘上的封面文件解码成位图。必须在主线程、帧之前调用，
+// 绝不能在视图里进行：一次点击可能触发多次绘制。
 func (p *Panel) Prepare(recorder *playtime.Recorder) {
 	if p == nil || recorder == nil {
 		return
@@ -192,8 +189,7 @@ func (p *Panel) Prepare(recorder *playtime.Recorder) {
 	}
 }
 
-// ShownMonth is the month the calendar shows. A panel that has not been
-// moved shows the month of now.
+// ShownMonth 是日历显示的月份。未翻动过的面板显示当前月份。
 func (p *Panel) ShownMonth(now time.Time) time.Time {
 	loc := now.Location()
 	if p == nil || p.month.IsZero() {
@@ -202,8 +198,7 @@ func (p *Panel) ShownMonth(now time.Time) time.Time {
 	return time.Date(p.month.Year(), p.month.Month(), 1, 0, 0, 0, 0, loc)
 }
 
-// ShiftMonth moves the calendar by delta months and refuses a month after
-// the one now is in.
+// ShiftMonth 按 delta 个月翻动日历，拒绝翻到当前月份之后的月份。
 func (p *Panel) ShiftMonth(now time.Time, delta int) {
 	if p == nil || delta == 0 {
 		return
@@ -217,8 +212,7 @@ func (p *Panel) ShiftMonth(now time.Time, delta int) {
 	p.month = next
 }
 
-// ShownWeek is the Sunday of the week the chart shows. A panel that has not
-// been moved shows the week of now.
+// ShownWeek 是图表显示那一周的周日。未翻动过的面板显示当前周。
 func (p *Panel) ShownWeek(now time.Time) time.Time {
 	anchor := now
 	if p != nil && !p.sunday.IsZero() {
@@ -227,8 +221,7 @@ func (p *Panel) ShownWeek(now time.Time) time.Time {
 	return weekStart(anchor, now.Location())
 }
 
-// ShiftWeek moves the chart by delta weeks and refuses a week after the one
-// now is in.
+// ShiftWeek 按 delta 周翻动图表，拒绝翻到当前周之后的周。
 func (p *Panel) ShiftWeek(now time.Time, delta int) {
 	if p == nil || delta == 0 {
 		return
@@ -245,13 +238,55 @@ func weekStart(day time.Time, loc *time.Location) time.Time {
 	return anchor.AddDate(0, 0, -int(anchor.Weekday()))
 }
 
+// ShowDay picks one day from the month calendar and switches the block to the
+// day view. A day after now is clamped to today: there is nothing to show yet,
+// and the calendar never moves past the current month either.
+func (p *Panel) ShowDay(day, now time.Time) {
+	if p == nil {
+		return
+	}
+	loc := now.Location()
+	picked := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
+	if today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc); picked.After(today) {
+		picked = today
+	}
+	p.day = picked
+	p.span = 0
+}
+
+// ShowToday drops the picked day so the day view falls back to the day it reads
+// by default: today, or the last day that was played.
+func (p *Panel) ShowToday() {
+	if p == nil {
+		return
+	}
+	p.day = time.Time{}
+	p.span = 0
+}
+
+// SelectedDay is the day the calendar picked, or the zero time when it has not
+// been clicked. A panel that has not been moved reads today's own day.
+func (p *Panel) SelectedDay() time.Time {
+	if p == nil {
+		return time.Time{}
+	}
+	return p.day
+}
+
 func (p *Panel) today(c *ui.Context, sessions []playtime.Session, now time.Time) {
-	day := now
+	loc := now.Location()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	day := today
+	// A day picked from the calendar shows that day even with no play; the
+	// default follows today and, when today is empty, the last day played.
+	if picked := p.SelectedDay(); !picked.IsZero() {
+		day = picked
+	}
 	games := playtime.GamesOn(sessions, day, now)
-	if len(games) == 0 {
+	if p.SelectedDay().IsZero() && len(games) == 0 {
 		latest, ok := playtime.LatestPlayedDay(sessions, now)
 		if !ok {
-			figure(c, "今天", 0)
+			p.figureRow(c, "今天", 0, false)
 			quiet(c, "今天还没有记录。")
 			return
 		}
@@ -262,9 +297,9 @@ func (p *Panel) today(c *ui.Context, sessions []playtime.Session, now time.Time)
 	for _, game := range games {
 		total += game.Seconds
 	}
-	figure(c, playtime.DayHeading(day, now), total)
+	p.figureRow(c, playtime.DayHeading(day, now), total, !day.Equal(today))
 	if len(games) == 0 {
-		quiet(c, "今天还没有记录。")
+		quiet(c, "这一天没有记录。")
 		return
 	}
 	dayRibbon(c, games, day)
@@ -293,6 +328,39 @@ func (p *Panel) today(c *ui.Context, sessions []playtime.Session, now time.Time)
 				})
 			})
 		}
+	})
+}
+
+// figureRow is the day view's heading: the day's name over its total, with an
+// action back to today on the right when a day other than today was picked.
+func (p *Panel) figureRow(c *ui.Context, label string, seconds int64, picked bool) {
+	ui.Row(c).FillWidth().AlignItems(ui.Start).Children(func() {
+		figure(c, label, seconds)
+		ui.Spacer(c)
+		if picked {
+			todayLink(c, func() { p.ShowToday() })
+		}
+	})
+}
+
+// todayLink is the quiet action that returns the day view to today. It sits on
+// the heading line and reads as a small text button, not a full-width control.
+func todayLink(c *ui.Context, fn func()) {
+	button := ui.ButtonBase(c).Label("回到今日").Radius(4).Cursor(ui.CursorPointer)
+	if button.Clicked() {
+		fn()
+	}
+	ink := presentation.ColorBrand
+	switch {
+	case button.Pressed():
+		button = button.Background(presentation.PanelPress)
+	case button.Hovered() || button.Focused():
+		button = button.Background(presentation.PanelHover)
+	}
+	button.Children(func() {
+		ui.Row(c).Padding(2, 4).Children(func() {
+			ui.Text(c, "回到今日").FontSize(presentation.SizeQuickFine).FontWeight(600).TextColor(ink).SingleLine()
+		})
 	})
 }
 
@@ -329,8 +397,7 @@ func (p *Panel) week(c *ui.Context, sessions []playtime.Session, now time.Time) 
 							fill = presentation.ColorBrand
 						}
 					}
-					// The label travels with its bar. A shared top row would
-					// leave a gap above every bar shorter than the tallest.
+					// 标签跟随各自的柱子；若共用一行顶部，每个较矮的柱子上方都会留空。
 					ui.Column(c).Height(weekPlotHeight).Gap(2).Justify(ui.End).AlignItems(ui.Center).Children(func() {
 						if day.Seconds > 0 {
 							ui.Text(c, shortSeconds(day.Seconds)).FontSize(presentation.SizeQuickTiny).TextColor(presentation.PanelFaint).SingleLine()
@@ -399,8 +466,8 @@ func (p *Panel) drawMonth(c *ui.Context, sessions []playtime.Session, now time.T
 	if len(games) > 3 {
 		games = games[:3]
 	}
-	// Squares stay a fixed size. The total sits at the top of the right column,
-	// and the games under it shrink so the column is no taller than the calendar.
+	// 方块保持固定尺寸。合计在右列顶部，下方的游戏随之缩小，
+	// 使右列不高于日历。
 	baseline := playtime.PlayedBaseline(cells)
 	weeks := (len(cells) + 6) / 7
 	coverW, coverH, rowGap := leaderCover(weeks, len(games))
@@ -417,7 +484,7 @@ func (p *Panel) drawMonth(c *ui.Context, sessions []playtime.Session, now time.T
 				end := min(start+7, len(cells))
 				ui.Row(c).Gap(monthGap).Children(func() {
 					for _, cell := range cells[start:end] {
-						dayCell(c, cell, today, baseline)
+						dayCell(c, cell, today, baseline, func(day time.Time) { p.ShowDay(day, now) })
 					}
 					for range 7 - (end - start) {
 						ui.Box(c).Size(monthCell, monthCell)
@@ -438,8 +505,7 @@ func (p *Panel) drawMonth(c *ui.Context, sessions []playtime.Session, now time.T
 	})
 }
 
-// periodTitle is the week or month pager. The pale face wraps the arrows and
-// the words, and only that cluster, the same way the month title does.
+// periodTitle 是周或月的翻页条：浅色底包裹箭头和文字，且只包住这一簇。
 func periodTitle(c *ui.Context, label string, canForward bool, back, forward func()) {
 	ui.Row(c).Shrink(0).AlignItems(ui.Center).Radius(6).Background(presentation.PanelField).Children(func() {
 		monthStep(c, "‹", true, back)
@@ -515,8 +581,8 @@ func (p *Panel) monthLeaders(c *ui.Context, total int64, games []playtime.GameDa
 	})
 }
 
-// leaderCover sizes the top-game rows so they fit under the month total and
-// beside the calendar. Fewer games keep a larger cover; three short months shrink.
+// leaderCover 计算榜首游戏各行的尺寸，使其能放在月合计之下、日历之旁。
+// 游戏较少时封面更大；三个游戏或较短的月份则缩小。
 func leaderCover(weeks, games int) (width, height, gap float32) {
 	const (
 		figureH float32 = 40
@@ -574,7 +640,7 @@ func heatLegend(c *ui.Context) {
 	})
 }
 
-func dayCell(c *ui.Context, cell playtime.CalendarDay, today time.Time, baseline int64) {
+func dayCell(c *ui.Context, cell playtime.CalendarDay, today time.Time, baseline int64, open func(time.Time)) {
 	if cell.Blank {
 		ui.Box(c).Size(monthCell, monthCell)
 		return
@@ -589,7 +655,16 @@ func dayCell(c *ui.Context, cell playtime.CalendarDay, today time.Time, baseline
 	if cell.Day.Equal(today) && level < 3 {
 		ink = presentation.ColorBrand
 	}
-	mark := ui.Box(c).Size(monthCell, monthCell).Radius(4).Background(presentation.HeatColor(level)).Center()
+	mark := ui.ButtonBase(c).Size(monthCell, monthCell).Radius(4).Background(presentation.HeatColor(level)).Center().Cursor(ui.CursorPointer)
+	switch {
+	case mark.Pressed():
+		mark.Background(presentation.PanelPress)
+	case mark.Hovered() || mark.Focused():
+		mark.Border(1, presentation.PanelBorder)
+	}
+	if mark.Clicked() {
+		open(cell.Day)
+	}
 	if cell.Day.Equal(today) {
 		mark.Border(1, presentation.ColorBrand)
 	}
@@ -647,9 +722,7 @@ func quiet(c *ui.Context, text string) {
 	ui.Text(c, text).FontSize(presentation.SizeQuickFine).TextColor(presentation.PanelFaint)
 }
 
-// sessionChip is one played stretch: the clock range and its length on the
-// same light face the day switch uses, so two of them can sit on a line
-// without a gap across the row. An open stretch keeps that game's color.
+// sessionChip 表示一段游玩：时钟区间和时长。未结束的时段沿用该游戏的颜色。
 func sessionChip(c *ui.Context, run playtime.Run, ink ui.Color) {
 	line := presentation.PanelFaint
 	if run.Open {
@@ -701,7 +774,7 @@ func shortSeconds(seconds int64) string {
 		}
 		return fmt.Sprintf("%dmin", minutes)
 	}
-	// Nearest tenth of an hour. 360 seconds is 0.1h; half of that rounds up.
+	// 取到小时的十分位：360 秒为 0.1h，其一半进位。
 	tenths := (seconds + 180) / 360
 	hours, fraction := tenths/10, tenths%10
 	if fraction == 0 {

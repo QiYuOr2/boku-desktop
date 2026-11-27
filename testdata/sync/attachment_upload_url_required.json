@@ -1,0 +1,12 @@
+{
+  "attachmentId": "0198b000-0000-7000-8000-0000000000a1",
+  "status": "upload_required",
+  "upload": {
+    "url": "https://storage.example.invalid/upload?signature=test",
+    "method": "PUT",
+    "headers": {
+      "Content-Type": "image/heic"
+    },
+    "expiresAt": "2026-11-24T00:15:00Z"
+  }
+}

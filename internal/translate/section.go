@@ -1,14 +1,11 @@
-// This file is the translation tool's side of settings.json.
+// 本文件是划词翻译在 settings.json 中的那一半。
 //
-// The store that owns that file knows nothing about what is in it: it hands
-// every feature the whole of the file's settings object and takes back the keys
-// each feature says it owns. This file is the translation tool's half of that —
-// which keys are its own, and how its own Settings type is written down.
+// 拥有该文件的存储在内容上一无所知：它把整份设置对象交给每个功能，再收回每个功能
+// 声明归自己所有的键。本文件是翻译工具的那一半——哪些键属于它，以及它自己的
+// Settings 类型如何写下去。
 //
-// Keeping it here rather than in internal/settings is what makes the settings
-// belong to the feature: a new switch is a change to this package and to
-// nothing else, and no other feature can reach these keys because it never has
-// the type they decode into.
+// 把它放在这里而不是 internal/settings，是为了让设置归属于功能：新增一个开关只改
+// 本包、不改别处；其它功能也碰不到这些键，因为它们从不用到这些键解码出的类型。
 package translate
 
 import (
@@ -18,9 +15,8 @@ import (
 	"time"
 )
 
-// The keys this feature owns in settings.json. They are the names
-// §8 of the storage design documents and a person may edit, so they are spelled
-// once, here, and never derived from a Go field name.
+// 本功能在 settings.json 中拥有的键。它们是存储设计 §8 里人可编辑的名字，
+// 所以只在这里拼写一次，绝不从 Go 字段名推导。
 const (
 	keyEnabled               = "translateEnabled"
 	keyAccelerator           = "translateAccelerator"
@@ -33,32 +29,27 @@ const (
 	keyCustomServices        = "translators"
 )
 
-// sectionName is what errors call this feature's settings.
+// sectionName 是错误信息里本功能设置的称呼。
 const sectionName = "translate"
 
-// customID is the translator whose settings the user fills in themselves. It is
-// named here, and not imported from the package that implements it, because the
-// file's field names are a storage decision: this package must keep reading a
-// file whose translator moved.
+// customID 是用户自己填写设置的翻译器 id。它在此处命名，而不从实现它的包导入，
+// 因为文件中的字段名是存储决定：本包必须继续读取一个翻译器已迁移过的文件。
 //
-// It is the *prefix* of the ids a user's own services are stored under, not an
-// id of its own: the user may keep several services, and each one is a separate
-// entry ("custom", "custom-2", …) so that its name and its address are its own.
-// A file written before there could be more than one holds the bare "custom",
-// and it is read as the first of them.
+// 它是用户自有服务 id 的*前缀*，而不是一个独立 id：用户可保留多个服务，每个都是
+// 单独一项（"custom"、"custom-2"……），各自的名字与地址独立。在可以有多于一个之前
+// 写下的文件只含裸 "custom"，它被读作其中第一个。
 const customID = "custom"
 
-// StoreSettings is the part of the settings store this feature needs.
+// StoreSettings 是本功能需要的设置存储那部分。
 //
-// It is declared here, and not taken from internal/settings, so that this
-// package does not depend on the storage implementation: the assembly injects
-// one, and a test injects its own.
+// 它在此处声明，而不取自 internal/settings，让本包不依赖存储实现：装配注入一个，
+// 测试注入自己的。
 type StoreSettings interface {
 	Load(ctx context.Context) error
 	Update(ctx context.Context, section string, change func() error) error
 }
 
-// customDocument is what the file holds for a user-configured translator.
+// customDocument 是文件为用户配置的翻译器保存的内容。
 type customDocument struct {
 	BaseURL       string `json:"baseURL,omitempty"`
 	DisplayName   string `json:"displayName,omitempty"`
@@ -66,33 +57,30 @@ type customDocument struct {
 	SupportsImage bool   `json:"supportsImage,omitempty"`
 }
 
-// Section is this feature's settings as the store sees them: a name, a way to
-// read the keys it owns out of the file, and a way to hand them back.
+// Section 是存储眼中本功能的设置：一个名字、一种从文件中读出自己所拥有的键的方法，
+// 以及一种把它们交回去的方法。
 type Section struct {
 	current Settings
 }
 
-// NewSection returns an empty section, holding this feature's defaults.
+// NewSection 返回一个空 section，持有本功能的默认值。
 func NewSection() *Section {
 	return &Section{current: Defaults()}
 }
 
-// Name is what errors call this section.
+// Name 是错误信息里对本 section 的称呼。
 func (s *Section) Name() string { return sectionName }
 
-// Current is the settings as they stand.
+// Current 是当前状态的设置。
 func (s *Section) Current() Settings { return s.current }
 
-// Set replaces the settings.
+// Set 替换设置。
 func (s *Section) Set(settings Settings) { s.current = settings.Normalize() }
 
-// Decode reads the translation tool's keys out of values, which holds every
-// feature's keys.
+// Decode 从 values（含所有功能的键）中读出翻译工具的键。
 //
-// A key that is not there leaves the setting as it is. That matters most for
-// the two switches whose default is on: a file from before the tool existed has
-// no key for them at all, and reading an absent key as false turned both
-// Japanese annotations off.
+// 缺席的键保持设置不变。这对两个默认开启的开关最重要：工具尚不存在时写下的文件
+// 根本没有它们的键，而把缺席的键读成 false 会关掉两个日语注释。
 func (s *Section) Decode(values map[string]json.RawMessage) error {
 	settings := s.current
 	if err := into(values, keyEnabled, &settings.Enabled); err != nil {
@@ -116,10 +104,9 @@ func (s *Section) Decode(values map[string]json.RawMessage) error {
 	if err := into(values, keyPinned, &settings.Pinned); err != nil {
 		return err
 	}
-	// The delay is read as "does the file name this key", not as "is the
-	// value non-zero": zero is a choice the user can make (MinCloseDelay),
-	// and it means the card closes at once. Reading a present zero as an
-	// absent key put every such user back on the default at the next start.
+	// 延迟按「文件是否写了这个键」来读，而非「值是否非零」：零是用户可选的值
+	// （MinCloseDelay），表示卡片立即关闭。把存在的零读成缺席的键，会让这些用户
+	// 下次启动时回到默认值。
 	if raw, present := values[keyCloseDelay]; present {
 		var delayMs int64
 		if err := json.Unmarshal(raw, &delayMs); err != nil {
@@ -131,9 +118,8 @@ func (s *Section) Decode(values map[string]json.RawMessage) error {
 	if err := into(values, keyCustomServices, &custom); err != nil {
 		return err
 	}
-	// Every entry is kept, under the id it was stored as. An entry with no
-	// address is dropped rather than kept as a nameless service: there is
-	// nothing to ask, and a row the user cannot use is a row in the way.
+	// 每项都保留在其存储 id 下。没有地址的项被丢弃，而不是作为无名服务保留：
+	// 没有可问的对象，用户用不上的行只会碍事。
 	services := make(map[string]CustomSettings, len(custom))
 	for id, own := range custom {
 		cleaned := CustomSettings{BaseURL: own.BaseURL, DisplayName: own.DisplayName, Model: own.Model, SupportsImage: own.SupportsImage}.Normalize()
@@ -147,8 +133,7 @@ func (s *Section) Decode(values map[string]json.RawMessage) error {
 	return nil
 }
 
-// Encode returns the keys the translation tool owns, ready for the store to
-// merge into the file.
+// Encode 返回翻译工具拥有的键，供存储合并进文件。
 func (s *Section) Encode() (map[string]any, error) {
 	settings := s.current.Normalize()
 	services := make(map[string]customDocument, len(settings.Custom))
@@ -169,16 +154,13 @@ func (s *Section) Encode() (map[string]any, error) {
 		keyLoanwordGloss:         settings.LoanwordGloss,
 		keyPinned:                settings.Pinned,
 		keyCloseDelay:            settings.CloseDelayOr().Milliseconds(),
-		// The map is written even when it holds nothing worth keeping: its
-		// presence is what tells a reader that this build wrote the file, and
-		// therefore that an absent key inside it is a choice rather than a
-		// version's gap.
+		// 即使 map 里没有值得保留的内容也会写出：它的存在告诉读取者这个版本写过
+		// 该文件，因此其中缺席的键是选择而非某版本的缺口。
 		keyCustomServices: services,
 	}, nil
 }
 
-// into decodes one key of a settings object, leaving out alone when the file
-// does not name it.
+// into 解码设置对象里的一个键，文件未写它时保持不动。
 func into(values map[string]json.RawMessage, key string, out any) error {
 	raw, present := values[key]
 	if !present {

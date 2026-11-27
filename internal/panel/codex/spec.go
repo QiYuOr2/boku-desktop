@@ -1,78 +1,57 @@
-// Package codex is everything this application knows about the ChatGPT
-// account the Codex CLI is logged in with: the quota panel its usage is shown
-// in, the request that reads it, the pure mapping from the service's answer to
-// the application's snapshot, and the login Boku borrows from the CLI instead
-// of asking the user for a key.
+// Package codex 描述 Codex CLI 所登录的 ChatGPT 账户：额度面板、读取请求、
+// 服务响应到快照的纯映射，以及 Boku 借用 CLI 登录凭据（而非让用户填 key）。
 //
-// It is one package because it is one vendor: the panel's definition, the
-// credential it needs and the shape of its response change together. The
-// division inside the package is by kind of code, and it is kept by review:
-// spec.go is configuration, client.go reaches the network, adapter.go is a
-// pure function of the response, login.go reads another tool's credential
-// file. Nothing in adapter.go may read the clock, open a file or make a
-// request — it is what makes the mapping testable from a fixture.
+// 按代码性质分文件：spec.go 为配置，client.go 出网，adapter.go 为纯函数映射，
+// login.go 读取其它工具的凭据文件。adapter.go 不得读时钟、开文件或发请求，
+// 以保证可用 fixture 离线测试。
 package codex
 
 import "boku/internal/domain"
 
-// ProviderID is the provider this panel reads, as registered and as named in
-// the cross-end contract (§7 of the provider contract).
+// ProviderID 为该面板读取的厂商标识，须与跨端契约一致。
 const ProviderID = "codex"
 
 const (
-	// PanelID is stable across launches: the snapshot cache and the
-	// database key on it.
+	// PanelID 跨启动稳定：快照缓存与数据库以它为键。
 	PanelID = "0198a1b2-0000-7000-8000-000000000002"
 
-	// RefreshEverySeconds is how long a quota reading stays fresh. The
-	// window is five hours long, so a few minutes is far finer than the
-	// number can move; the provider's own floor is what constrains it.
+	// RefreshEverySeconds 为额度数据的保鲜时长；受厂商自身的下限约束。
 	RefreshEverySeconds = 300
 
-	// AccessTokenCredential is the credential the provider asks for. It does
-	// not come from the secret store: it is the token the Codex CLI already
-	// logged in with, and Boku reads it where it lies (§9 of the security design).
-	// It is named here so that the descriptor, the refresh call and the
-	// error messages agree on one name.
+	// AccessTokenCredential 是 Codex CLI 已登录的 token，Boku 直接读取其所在处，
+	// 并非来自 secret store；描述符、刷新调用与错误信息统一使用此名。
 	AccessTokenCredential = "accessToken"
 
-	// AccountIDSetting is the non-sensitive half of that login: which
-	// ChatGPT account the token belongs to. It travels as a setting rather
-	// than a secret, the way Steam's id does, and it is sent as the
-	// ChatGPT-Account-Id header when the login names one.
+	// AccountIDSetting 是登录的非敏感部分：token 所属的 ChatGPT 账户。
+	// 作为 setting 而非 secret 传递；登录指明了账户时作为 ChatGPT-Account-Id 头发送。
 	AccountIDSetting = "accountId"
 )
 
-// The panel's metric keys.
+// 面板的指标 key。
 const (
-	// MetricSessionRemainingPercent is what is left of the 5-hour window,
-	// as 0..100.
+	// MetricSessionRemainingPercent 是 5 小时窗口剩余额度，取值 0..100。
 	MetricSessionRemainingPercent = "sessionRemainingPercent"
-	// MetricSessionResetsInSeconds is how long until that window resets,
-	// counted from the moment the reading was taken.
+	// MetricSessionResetsInSeconds 是窗口重置剩余秒数，自取数时刻起算。
 	MetricSessionResetsInSeconds = "sessionResetsInSeconds"
-	// MetricPlanName is the account's tier, as the service spells it.
+	// MetricPlanName 是账号等级，沿用服务端的写法。
 	MetricPlanName = "planName"
-	// Window lengths come from the response, independently of reset countdowns.
+	// 窗口长度取自响应，与重置倒计时无关。
 	MetricSessionWindowSeconds = "sessionWindowSeconds"
 	MetricLongWindowSeconds    = "longWindowSeconds"
-	// Long-window observations are optional: free accounts and responses
-	// without a secondary window only carry the session metrics.
+	// 长窗口观测可选：免费账号或无次级窗口的响应只带会话指标。
 	MetricLongWindowRemainingPercent = "longWindowRemainingPercent"
 	MetricLongWindowResetsInSeconds  = "longWindowResetsInSeconds"
 )
 
-// UsageURL is ChatGPT's own page for the account: what a quota panel is a
-// summary of. The panel's bar opens it, so it belongs next to the panel's
-// keys and titles.
+// UsageURL 是 ChatGPT 账户的额度页，面板的进度条点击后打开它。
 const UsageURL = "https://chatgpt.com/codex/settings/usage"
 
-// OptionalMetricKeys names observations the endpoint may omit.
+// OptionalMetricKeys 列出端点可能省略的观测项。
 func OptionalMetricKeys() []string {
 	return []string{MetricSessionWindowSeconds, MetricLongWindowRemainingPercent, MetricLongWindowResetsInSeconds, MetricLongWindowSeconds}
 }
 
-// Panel returns the quota panel.
+// Panel 返回额度面板。
 func Panel() domain.Panel {
 	return domain.Panel{
 		ID:           PanelID,
@@ -86,8 +65,7 @@ func Panel() domain.Panel {
 	}
 }
 
-// Metrics returns the panel's metrics, in the order they are shown: what is
-// left first, because the bar is the headline.
+// Metrics 按显示顺序返回指标：剩余额度在最前，因为进度条是主要信息。
 func Metrics() []domain.Metric {
 	return []domain.Metric{
 		{
@@ -143,7 +121,7 @@ func Metrics() []domain.Metric {
 	}
 }
 
-// Metric returns one metric by key, and whether it is the panel's.
+// Metric 按 key 返回指标，并说明它是否属于本面板。
 func Metric(key string) (domain.Metric, bool) {
 	for _, m := range Metrics() {
 		if m.Key == key {

@@ -1,4 +1,4 @@
-// Package ui owns Bilibili-monitor presentation state and formatting.
+// Package ui 负责 B站监听功能的展示状态与格式化。
 package ui
 
 import (

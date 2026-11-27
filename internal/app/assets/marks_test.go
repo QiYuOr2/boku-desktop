@@ -14,6 +14,7 @@ func TestMarksAreSVGDocuments(t *testing.T) {
 		"DualSense":  DualSense(),
 		"SwitchPro":  SwitchPro(),
 		"Xbox":       Xbox(),
+		"Diary":      Diary(),
 		"Lightbulb":  Lightbulb(),
 		"Command":    Command(),
 		"Return":     Return(),

@@ -14,51 +14,46 @@ const (
 	kindText
 )
 
-// Value is what a metric was observed to be: a number, a duration in
-// seconds, or a text. The three exclude each other, which the constructors
-// guarantee; a Value never changes shape afterwards.
+// Value 是指标被观测到的值：数字、以秒为单位的时长、或文本。三者互斥，由
+// 构造函数保证；Value 创建后形状不再改变。
 //
-// Amounts travel as integer minor units and durations as integer seconds,
-// so no Value ever holds a float.
+// 金额以整数最小货币单位传递，时长以整数秒传递，因此 Value 从不保存浮点数。
 type Value struct {
 	kind   valueKind
 	number int64
 	text   string
 }
 
-// NumberValue returns a numeric value, for units such as count, percent,
-// currency, bytes or tokens.
+// NumberValue 返回数值，用于 count、percent、currency、bytes、tokens 等单位。
 func NumberValue(n int64) Value { return Value{kind: kindNumber, number: n} }
 
-// DurationValue returns a duration, in whole seconds.
+// DurationValue 返回以整秒表示的时长。
 func DurationValue(seconds int64) Value {
 	return Value{kind: kindDuration, number: seconds}
 }
 
-// TextValue returns a text value.
+// TextValue 返回文本值。
 func TextValue(s string) Value { return Value{kind: kindText, text: s} }
 
-// Number returns the number, and whether the value is one.
+// Number 返回数字以及该值是否为数字。
 func (v Value) Number() (int64, bool) {
 	return v.number, v.kind == kindNumber
 }
 
-// DurationSeconds returns the duration in seconds, and whether the value is
-// one.
+// DurationSeconds 返回以秒计的时长以及该值是否为时长。
 func (v Value) DurationSeconds() (int64, bool) {
 	return v.number, v.kind == kindDuration
 }
 
-// Text returns the text, and whether the value is one.
+// Text 返回文本以及该值是否为文本。
 func (v Value) Text() (string, bool) {
 	return v.text, v.kind == kindText
 }
 
-// Valid reports whether the value has one of the three shapes.
+// Valid 报告该值是否具有三种形状之一。
 func (v Value) Valid() bool { return v.kind != kindNone }
 
-// Matches reports whether the value has the shape its metric's value type
-// asks for.
+// Matches 报告该值的形状是否符合其指标值类型的要求。
 func (v Value) Matches(t ValueType) bool {
 	switch t {
 	case ValueTypeNumber:
@@ -71,43 +66,41 @@ func (v Value) Matches(t ValueType) bool {
 	return false
 }
 
-// Observation is one metric, as of one moment.
+// Observation 是某一时刻的一个指标。
 type Observation struct {
 	MetricKey  string
 	Value      Value
 	ObservedAt time.Time
 }
 
-// SnapshotStatus says how much of a panel's data a snapshot carries.
+// SnapshotStatus 表示一个快照带有多完整的面板数据。
 type SnapshotStatus string
 
 const (
-	// StatusOK means every metric was fetched.
+	// StatusOK 表示所有指标都已获取。
 	StatusOK SnapshotStatus = "ok"
-	// StatusPartial means some metrics are there and something is missing:
-	// the interface shows what it has and says what it does not.
+	// StatusPartial 表示部分指标存在、部分缺失：界面显示已有的，并说明缺
+	// 了什么。
 	StatusPartial SnapshotStatus = "partial"
-	// StatusError means nothing was fetched. The interface says why and
-	// never shows 0 in place of it.
+	// StatusError 表示什么都没获取到。界面说明原因，绝不以 0 代替。
 	StatusError SnapshotStatus = "error"
 )
 
-// Snapshot is one panel's data as of one moment: the only shape a provider's
-// answer is turned into. The interface reads snapshots and nothing else.
+// Snapshot 是某一时刻一个面板的数据：provider 的应答被转换成唯一的这个形状。
+// 界面只读快照，不读别的。
 type Snapshot struct {
 	PanelID      string
 	ProviderID   string
 	ObservedAt   time.Time
 	Status       SnapshotStatus
 	Observations []Observation
-	// Message explains a partial or failed snapshot to the user.
+	// Message 向用户解释部分或失败的快照。
 	Message string
-	// Currency is the currency the values are in, for metrics that take
-	// their currency from the provider.
+	// Currency 是这些值所用的货币，供从 provider 获取货币的指标使用。
 	Currency string
 }
 
-// Observation returns the observation of one metric key.
+// Observation 返回某个指标 key 的观测值。
 func (s Snapshot) Observation(metricKey string) (Observation, bool) {
 	for _, o := range s.Observations {
 		if o.MetricKey == metricKey {
@@ -117,9 +110,8 @@ func (s Snapshot) Observation(metricKey string) (Observation, bool) {
 	return Observation{}, false
 }
 
-// MetricCurrency returns the currency a metric's values are in: the one the
-// metric names, or the one the response carried. A currency metric without
-// either cannot be shown, which is an error rather than a guess.
+// MetricCurrency 返回指标值所用的货币：指标自身指定的，或响应携带的。货币
+// 指标两者都没有时无法显示，这是错误而非猜测。
 func (s Snapshot) MetricCurrency(m Metric) (string, error) {
 	switch {
 	case m.Currency != "":
@@ -134,7 +126,7 @@ func (s Snapshot) MetricCurrency(m Metric) (string, error) {
 	}
 }
 
-// Validate reports what is wrong with the snapshot.
+// Validate 报告快照有什么问题。
 func (s Snapshot) Validate() error {
 	switch s.Status {
 	case StatusOK, StatusPartial, StatusError:

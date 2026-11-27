@@ -5,9 +5,8 @@ import (
 	"time"
 )
 
-// The record range is one of three, and anything else — a file that predates
-// the setting, or a number a person edited in — is the default rather than a
-// reason not to start.
+// 记录数量范围是三档之一，其它任何值——早于该设置的文件，或手工编辑的数字——
+// 都取默认值，而非成为不启动的理由。
 func TestTheRecordRangeIsBroughtIntoItsBounds(t *testing.T) {
 	for _, size := range HistorySizes() {
 		if !ValidHistorySize(size) {
@@ -32,16 +31,14 @@ func TestTheRecordRangeIsBroughtIntoItsBounds(t *testing.T) {
 		}
 	}
 
-	// Normalizing the range does not disturb the interval, which has its own
-	// rule.
+	// 规范化范围不会扰动间隔，后者有自己的规则。
 	settings := Settings{PollInterval: time.Second, HistorySize: 7}.Normalize()
 	if settings.Interval() != time.Second {
 		t.Errorf("Normalize changed the interval to %s", settings.Interval())
 	}
 }
 
-// The poll interval has a floor: a file that asks for a poll faster than the
-// clipboard can be read would spend the machine's time asking.
+// 轮询间隔有下限：要求比剪贴板能读的速度还快的文件，会耗尽机器的时间去询问。
 func TestThePollIntervalHasAFloor(t *testing.T) {
 	for _, interval := range []time.Duration{0, -time.Second, time.Millisecond, MinPollInterval - 1} {
 		settings := Settings{PollInterval: interval}.Normalize()
@@ -55,9 +52,8 @@ func TestThePollIntervalHasAFloor(t *testing.T) {
 	}
 }
 
-// Reads is what decides whether the clipboard is read at all: a copy is read
-// when the region is drawn and the content it would draw is being collected,
-// and either switch off means no read.
+// Reads 决定是否读取剪贴板：栏被绘制且其要绘制的内容正在采集时才读，
+// 任一个开关关闭即不读。
 func TestReadsNeedsBothSwitches(t *testing.T) {
 	cases := []struct {
 		region, monitor bool
@@ -77,8 +73,7 @@ func TestReadsNeedsBothSwitches(t *testing.T) {
 	}
 }
 
-// A fresh installation reads nothing: the clipboard is the user's, and being
-// asked before it is read is the whole point of the switch.
+// 全新安装不读取任何内容：剪贴板属于用户，读取前先询问正是开关的意义所在。
 func TestAFreshInstallationReadsNothing(t *testing.T) {
 	settings := Settings{}.Normalize()
 	if settings.Reads() {

@@ -11,55 +11,44 @@ import (
 	"unsafe"
 )
 
-// A .lnk file holds where a shortcut points. Only one part of it is read
-// here: the LinkInfo block, whose LocalBasePath and CommonPathSuffix together
-// are the target's path. The others — the ID list, the description, the
-// environment-variable block — answer questions this does not ask.
+// .lnk 文件记录快捷方式指向何处。这里只读取其中一部分：LinkInfo 块的 LocalBasePath 与 CommonPathSuffix
+// 合起来就是目标路径；其余部分（ID 列表、描述、环境变量块）不涉及这里要问的问题。
 //
-// The format is [MS-SHLLINK]. It is read rather than parsed by the shell's own
-// objects: reaching IShellLinkW from this CGO-free build means calling a COM
-// method through its vtable by hand, and on a Go thread that call is not
-// reliably safe. A reader that is wrong here returns "" and the caller falls
-// back to the running program; the shell objects would crash the process.
+// 格式见 [MS-SHLLINK]。这里自己解析而不用 shell 对象：在 CGO-free 构建中调用 IShellLinkW 需手工通过
+// vtable 调 COM 方法，而在 Go 线程上这样做并不可靠（shell 对象会令进程崩溃）。读取失败返回 ""，
+// 调用方回退到运行中的程序即可。
 //
-// Every read is bounds-checked and every failure is "not a shortcut this
-// build understands", never a panic: a .lnk is a file on the user's disk that
-// anything can write.
+// 每次读取都做边界检查，任何失败都是"不是本构建能读的快捷方式"，绝不 panic：.lnk 是用户磁盘上
+// 任何程序都能写的文件。
 
 const (
-	// lnkHeaderSize is the fixed part of the shell link header, up to and
-	// including the file-size field.
+	// lnkHeaderSize 是 shell link 头部的固定长度，直到文件大小字段（含）。
 	lnkHeaderSize = 0x4C
-	// lnkHasLinkTargetIDList and lnkHasLinkInfo are the two flag bits the
-	// walk to LinkInfo needs.
+	// lnkHasLinkTargetIDList 与 lnkHasLinkInfo 是遍历到 LinkInfo 所需的两个标志位。
 	lnkHasLinkTargetIDList = 0x00000001
 	lnkHasLinkInfo         = 0x00000002
-	// linkInfoHeaderSize is the minimum size of the LinkInfo block's own
-	// header: its size, its header size, its flags and its five offsets.
+	// linkInfoHeaderSize 是 LinkInfo 块自身头部的最小长度：大小、头大小、标志及五个偏移。
 	linkInfoHeaderSize = 0x1C
 )
 
-// errNotAShortcut is a file that is not a shortcut this build can read: the
-// caller treats it the same as "there is no shortcut".
+// errNotAShortcut 表示该文件不是本构建能读的快捷方式：调用方把它视同"没有快捷方式"。
 var errNotAShortcut = errors.New("autostart: the file is not a shortcut")
 
-// lnkTarget returns the program a shortcut points at: LocalBasePath followed
-// by CommonPathSuffix, which is how the format splits a path the two ways a
-// shortcut can be moved.
+// lnkTarget 返回快捷方式指向的程序：LocalBasePath 后接 CommonPathSuffix，即该格式把路径拆成两部分以便
+// 快捷方式被移动的方式。
 func lnkTarget(data []byte) (string, error) {
 	if len(data) < lnkHeaderSize || binary.LittleEndian.Uint32(data[0:]) != lnkHeaderSize {
 		return "", errNotAShortcut
 	}
 	flags := binary.LittleEndian.Uint32(data[20:])
 	if flags&lnkHasLinkInfo == 0 {
-		// A shortcut without LinkInfo has no path that can be read here: it
-		// may hold only an ID list, which names a program the way the shell
-		// finds it rather than by path.
+		// 没有 LinkInfo 的快捷方式在这里读不到路径：它可能只含 ID 列表，后者按 shell 查找程序的方式
+		// 而非按路径命名。
 		return "", errNotAShortcut
 	}
 	offset := lnkHeaderSize
 	if flags&lnkHasLinkTargetIDList != 0 {
-		// The ID list is preceded by its own two-byte length.
+		// ID 列表前自带两字节的长度。
 		if offset+2 > len(data) {
 			return "", errNotAShortcut
 		}
@@ -78,18 +67,14 @@ func lnkTarget(data []byte) (string, error) {
 	if headerSize < linkInfoHeaderSize || int(headerSize) > len(linkInfo) {
 		return "", errNotAShortcut
 	}
-	// The six header fields: HeaderSize, Flags, VolumeIDOffset,
-	// LocalBasePathOffset, CommonNetworkRelativeLinkOffset,
-	// CommonPathSuffixOffset.
+	// 六个头字段：HeaderSize、Flags、VolumeIDOffset、LocalBasePathOffset、
+	// CommonNetworkRelativeLinkOffset、CommonPathSuffixOffset。
 	baseOffset := binary.LittleEndian.Uint32(linkInfo[16:])
 	suffixOffset := binary.LittleEndian.Uint32(linkInfo[24:])
 
-	// Both paths are read the same way. Which encoding they are in is not
-	// taken from the block's VolumeIDAndLocalBasePath flag: Windows writes
-	// that flag for the volume fields and still writes the two paths in the
-	// system's code page, which is what an explorer-created shortcut on a
-	// Chinese Windows holds. The encoding is recognised from the bytes
-	// instead — see lnkString.
+	// 两条路径以相同方式读取。编码不能依据块中的 VolumeIDAndLocalBasePath 标志判断：Windows 为卷字段写该标志，
+	// 却仍以系统代码页写这两条路径（中文 Windows 上资源管理器创建的快捷方式就是如此）。编码改从字节识别，
+	// 见 lnkString。
 	base, err := lnkString(linkInfo, int(baseOffset))
 	if err != nil {
 		return "", err
@@ -101,20 +86,15 @@ func lnkTarget(data []byte) (string, error) {
 	if base == "" {
 		return "", errNotAShortcut
 	}
-	// The suffix is the part of the path that the shortcut's own directory
-	// does not supply; the two are written one after the other.
+	// 后缀是快捷方式所在目录不提供的那部分路径，两部分一前一后写出。
 	return base + suffix, nil
 }
 
-// lnkString reads one NUL-terminated string at offset. An offset of 0 is the
-// format's "not present", which is an empty string rather than an error.
+// lnkString 读取 offset 处的一个 NUL 结尾字符串。offset 为 0 表示格式中的"不存在"，返回空串而非错误。
 //
-// The string is either the system's ANSI code page or UTF-16, and the format
-// does not say which in a field this build can trust. So it is recognised: a
-// UTF-16 path written on a Western or Chinese Windows is full of zero bytes
-// between the ASCII letters, and an ANSI path has none there. The first two
-// cases — a letter with a zero after it, and a zero with a letter after it —
-// only happen in one of the two encodings in this position.
+// 字符串可能是系统 ANSI 代码页或 UTF-16，而格式在此处没有可靠的字段可判断。故按字节识别：
+// 西文或中文 Windows 上写出的 UTF-16 路径，ASCII 字母之间满是零字节，ANSI 路径则没有。
+// 前两种情况——字母后跟零、零后跟字母——在此位置只会在其中一种编码下出现。
 func lnkString(data []byte, offset int) (string, error) {
 	if offset == 0 {
 		return "", nil
@@ -133,9 +113,8 @@ func lnkString(data []byte, offset int) (string, error) {
 	return decodeANSI(rest[:end]), nil
 }
 
-// decodeUTF16 reads a NUL-terminated UTF-16 string. A trailing odd byte
-// cannot be part of one: it means the terminator fell off the end, which is
-// the same string.
+// decodeUTF16 读取一个 NUL 结尾的 UTF-16 字符串。末尾多出的单个奇数字节不可能属于它：那意味着终止符
+// 掉出了末尾，仍是同一字符串。
 func decodeUTF16(data []byte) string {
 	units := make([]uint16, 0, len(data)/2)
 	for index := 0; index+1 < len(data); index += 2 {
@@ -148,7 +127,7 @@ func decodeUTF16(data []byte) string {
 	return string(utf16.Decode(units))
 }
 
-// indexByte finds the first zero byte, or -1.
+// indexByte 查找第一个零字节，找不到返回 -1。
 func indexByte(data []byte, want byte) int {
 	for index, value := range data {
 		if value == want {
@@ -158,17 +137,14 @@ func indexByte(data []byte, want byte) int {
 	return -1
 }
 
-// decodeANSI decodes the system's ANSI code page by way of the Windows API:
-// a shortcut written on a Chinese Windows has Chinese in this field, and this
-// build has no table of code pages to decode it with. A failure returns the
-// bytes as they are rather than dropping the path — a garbled target still
-// names a program the user can see, and the caller only compares it.
+// decodeANSI 借 Windows API 解码系统 ANSI 代码页：中文 Windows 上写出的快捷方式此字段含中文，
+// 而本构建没有代码页表可解码。失败时按原样返回字节而非丢弃路径——乱码目标仍对应一个用户可见的程序，
+// 且调用方只做比较。
 func decodeANSI(data []byte) string {
 	if len(data) == 0 {
 		return ""
 	}
-	// MultiByteToWideChar(CP_ACP = 0, no flags, ...): the bytes are decoded the
-	// way Windows itself would decode them.
+	// MultiByteToWideChar(CP_ACP = 0, 无标志, ...)：按 Windows 自己的方式解码这些字节。
 	const (
 		cpACP   = 0
 		noFlags = 0
@@ -191,16 +167,13 @@ func decodeANSI(data []byte) string {
 	return string(utf16.Decode(buffer[:written]))
 }
 
-// trimLnkPath removes the whitespace the shell sometimes leaves around the
-// two halves it writes, so that the comparison with a real path is not
-// defeated by one space.
+// trimLnkPath 去掉 shell 有时留在它写出的两部分两端的空白，避免与真实路径比较时被一个空格破坏。
 func trimLnkPath(path string) string { return strings.TrimSpace(path) }
 
-// multiByteToWideChar is the Windows API that decodes a path written in the
-// system's ANSI code page.
+// multiByteToWideChar 是解码系统 ANSI 代码页路径所用的 Windows API。
 var multiByteToWideChar = syscall.NewLazyDLL("kernel32.dll").NewProc("MultiByteToWideChar")
 
-// pointerBytes is a pointer to the first byte, or 0 for an empty slice.
+// pointerBytes 返回指向首个字节的指针，空切片返回 0。
 func pointerBytes(data []byte) unsafe.Pointer {
 	if len(data) == 0 {
 		return nil

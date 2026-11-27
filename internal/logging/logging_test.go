@@ -32,8 +32,7 @@ func TestOpenWritesTheDaysFile(t *testing.T) {
 	mustContain(t, text, "level=INFO")
 	mustContain(t, text, `msg="boku started"`)
 	mustContain(t, text, "version=0.1.0")
-	// The sink gets what the file gets, which is what keeps the terminal of
-	// `go tool mygo dev` as informative as it was before there was a file.
+	// sink 收到的内容与文件一致，使 dev 终端的输出与有文件之前一样详尽。
 	mustContain(t, sink.String(), "boku started")
 }
 
@@ -80,8 +79,7 @@ func TestLevelDropsRecordsBelowIt(t *testing.T) {
 	mustNotContain(t, text, "an info record")
 }
 
-// A log with nowhere to write a file is what a test and an assembly without a
-// user directory get: the records still exist, they just have no file.
+// 无目录可写文件的情形出现在测试与没有用户目录的装配中：记录仍存在，只是没有文件。
 func TestWithoutADirectoryOnlyTheSinkHearsTheRecords(t *testing.T) {
 	var sink strings.Builder
 	l, err := Open(Options{Sink: &sink})
@@ -116,7 +114,7 @@ func TestRecordsAfterCloseAreDropped(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	// Neither of these may panic, and nothing more may reach the file.
+	// 这些操作都不能 panic，且关闭后不得再有内容写入文件。
 	l.Logger().Error("after the close")
 	if err := l.Close(); err != nil {
 		t.Fatalf("the second Close: %v", err)
@@ -127,9 +125,8 @@ func TestRecordsAfterCloseAreDropped(t *testing.T) {
 	mustNotContain(t, text, "after the close")
 }
 
-// Several goroutines logging at once is the normal state of this application:
-// the panel refreshes, the clipboard poll and the window all write. Each
-// record is one Write under the lock, so the file holds every line whole.
+// 多个 goroutine 同时写日志是本应用的常态：面板刷新、剪贴板轮询与窗口都会写。
+// 每条记录在锁内一次 Write 完成，因此文件里每行都是完整的。
 func TestConcurrentRecordsAllReachTheFile(t *testing.T) {
 	dir := t.TempDir()
 	l := newTestLog(t, Options{Dir: dir})
@@ -157,8 +154,8 @@ func TestConcurrentRecordsAllReachTheFile(t *testing.T) {
 	}
 }
 
-// Install is what puts main.go's `log.Fatalf` and slog's default logger in the
-// file: both are process-wide, and both have to end up here.
+// Install 让 main.go 的 log.Fatalf 与 slog 默认日志器都写入本文件：
+// 两者都是进程级的，都必须落到这里。
 func TestInstallSendsTheProcessLoggersHere(t *testing.T) {
 	keepStandardLoggers(t)
 	dir := t.TempDir()
@@ -166,7 +163,7 @@ func TestInstallSendsTheProcessLoggersHere(t *testing.T) {
 	l.Install()
 
 	slog.Info("through the default logger")
-	//nolint:staticcheck // the standard logger is what main.go's fatals use.
+	//nolint:staticcheck // main.go 的 fatal 用的是标准库日志器。
 	log.Print("boku: could not open the credential store")
 
 	text := readLog(t, filepath.Join(dir, "boku-2026-10-15.log"))

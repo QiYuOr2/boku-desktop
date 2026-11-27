@@ -8,8 +8,6 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// imageTranslationTasks is omitted entirely until there is a screenshot task;
-// an empty queue must not make the quick window taller.
 func (s *State) imageTranslationTasks(c *ui.Context) {
 	if len(s.imageTasks) == 0 {
 		return

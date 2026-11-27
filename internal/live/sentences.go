@@ -2,8 +2,8 @@ package live
 
 import "strings"
 
-// splitSentences only runs on final text. A partial's trailing punctuation
-// can move as the recognizer revises the sentence.
+// splitSentences 只处理最终文本：识别器修正句子时，partial（未定稿）末尾的标点
+// 会移动。
 func splitSentences(text string) []string {
 	var sentences []string
 	start := 0

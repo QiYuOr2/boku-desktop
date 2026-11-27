@@ -1,10 +1,6 @@
-// Command Boku is the desktop application: a tray icon whose left click
-// opens the quick window next to it.
+// Command Boku 是桌面应用：托盘图标，左键点击在其旁打开快速窗口。
 //
-// This file is the only place that assembles the application: the HTTP
-// client, the secret store, the provider registry, the use cases, the views
-// and the two windows. Everything it wires up is a package of its own, and
-// nothing below knows about anything above it.
+// 本文件是装配应用的唯一位置：HTTP 客户端、凭据存储、Provider 注册表、用例、视图与两个窗口。它装配的一切都是独立包，下层对上层一无所知。
 package main
 
 import (
@@ -26,6 +22,7 @@ import (
 	"boku/internal/bilibili"
 	"boku/internal/clipboard"
 	"boku/internal/credential"
+	"boku/internal/diary"
 	"boku/internal/domain"
 	"boku/internal/flash"
 	"boku/internal/live"
@@ -50,18 +47,13 @@ import (
 	"boku/internal/update"
 )
 
-// Name the application before Run: MyGo reads the name it registers with
-// the system when the event loop starts, which is after init.
+// 必须在 Run 之前设置应用名：MyGo 在事件循环启动时才读取注册到系统的名字，而那时 init 早已执行完。
 func init() {
 	mygo.App.SetName("Boku")
 }
 
 func main() {
-	// One process, one tray icon. A second launch hands its command line to
-	// the instance that is already running and leaves; that instance brings
-	// its quick window forward instead (§2 of the desktop design). The lock is
-	// taken before anything is opened, so a second launch costs no more than
-	// the hand-over itself.
+	// 一个进程一个托盘图标。二次启动把命令行交给已在运行的实例后退出，由该实例把快速窗口提到前面（桌面设计 §2）。锁在任何窗口开启前获取，因此二次启动的开销仅限交接本身。
 	if !mygo.App.RequestSingleInstanceLock() {
 		return
 	}
@@ -72,74 +64,46 @@ func main() {
 	}
 	version := mygo.App.Version()
 
-	// The log comes first, before anything that can fail: it is where a
-	// failure that happens before a window exists is found afterwards.
-	// the known-issues notes ask for facts before a guess, and this is the only
-	// place they are written down.
+	// 日志最先打开，先于任何可能失败的步骤：它是事后定位窗口存在前故障的地方，也是 known-issues 要求「先讲事实再猜测」时唯一记录事实之处。
 	logFile, err := startLogging(userData, version)
 	if err != nil {
-		// A log that cannot be written is one way fewer to diagnose this
-		// application, not a reason for it not to start: the records go to
-		// stderr, which is where they went before there was a file.
+		// 日志无法写入只是少了一种诊断途径，不应阻止应用启动：记录改走 stderr，与有文件之前一样。
 		log.Printf("boku: %v; this run is not being recorded", err)
 	} else {
-		// A failed flush is reported on the sink rather than dropped: it is
-		// the reason the last lines of a run — the ones a crash is about —
-		// would be missing from the file somebody is about to read. Nothing
-		// is logged through slog here, because the log is what failed; the
-		// record goes straight to stderr, which is where a failure with
-		// nowhere else to go has always gone in this file.
+		// flush 失败要直接报到 stderr 而非丢弃：它正是崩溃相关的那几行——可能从用户即将查看的文件里缺失的原因。这里不经 slog 记录，因为日志本身出了问题；记录直接写 stderr，与文件中其它无处可去的失败一致。
 		defer func() {
 			if err := logFile.Close(); err != nil {
 				fmt.Fprintf(os.Stderr, "boku: the log could not be flushed: %v\n", err)
 			}
 		}()
-		// A tray application has no console: a panic that is only printed
-		// is a crash nobody can explain. It is recorded, and then raised
-		// again unchanged — how the process ends is not this defer's
-		// business.
+		// 托盘应用没有控制台，只打印出来的 panic 就是无人能解释的崩溃。它会被记录，然后原样再次抛出——进程结束方式不归这个 defer 管。
 		defer recordPanics()
 	}
 
 	quickWindowLayout := preferences.NewQuickWindowLayout()
-	panels, animeUpdates, bilibiliUpdates, secrets, clipboard, translate, own, appearance, prefs, playtimeRecorder, flashes, liveSession, err := services(userData, version, quickWindowLayout)
+	panels, animeUpdates, bilibiliUpdates, secrets, clipboard, translate, own, appearance, prefs, playtimeRecorder, flashes, diaryService, liveSession, err := services(userData, version, quickWindowLayout)
 	if err != nil {
 		log.Fatalf("boku: %v", err)
 	}
 
-	// The update feature is assembled before any window, because the interface
-	// reads its state on the first frame, but it is not started until the
-	// application is ready: a check belongs after the tray exists, and its
-	// first look at the feed is a minute away in any case.
+	// 更新功能在任何窗口之前装配，因为界面第一帧就要读它的状态；但它直到应用就绪才启动：检查应在托盘存在之后进行，且首次查询源本就还有一分钟。
 	updates, err := newUpdates(userData, applicationVersion(version))
 	if err != nil {
-		// A build that cannot prepare the update feature is a build without
-		// one, not a build that does not start: the feature is about staying
-		// current, and refusing to run is the worst way of doing that.
+		// 无法准备更新功能的构建只是没有这个功能，并非无法启动：该功能旨在保持更新，拒绝运行是最糟的做法。
 		log.Printf("boku: %v; this run will not check for updates", err)
 		updates = nil
 	}
 
-	// The native popover appearance is a temporary macOS bridge for forced
-	// dark mode. It is injected as a small interface so that replacing it
-	// with a MyGo API later touches this assembly and nothing in the views.
+	// 原生 popover 外观是 macOS 强制深色模式的临时桥接。以小型接口注入，日后换成 MyGo API 时只改此处装配，不触及视图。
 	var popoverAppearance app.PopoverAppearance
 	if popoverappearance.Available() {
 		popoverAppearance = popoverappearance.New()
 	}
 
-	// Starting at login is the platform's own registration — a Run value on
-	// Windows, a launch agent on macOS — and it is injected rather than
-	// reached for: the settings window knows the switch, and this is the only
-	// line that knows how each desktop keeps it. On a desktop with no such
-	// registration the manager says so, and the switch says so in turn.
+	// 开机启动是平台自己的注册——Windows 上是 Run 值，macOS 上是 launch agent——以注入方式提供而非直接访问：设置窗口知道这个开关，而只有此处知道各桌面如何保存它。没有该注册项的桌面，管理器会说明，开关也随之一并说明。
 	loginStart := autostart.New()
 
-	// A clipboard reading happening on the poll's goroutine comes back
-	// here, on the main thread. The state does not exist yet when the
-	// service is built, so the callback reads it through a variable that
-	// is set a few lines below: a repaint before then is one there is
-	// nothing to repaint.
+	// 轮询 goroutine 上的剪贴板读取会回到主线程这里。构建服务时 state 尚不存在，所以回调经一个稍后赋值的变量读取：在此之前的重绘没有可重绘的内容。
 	var state *app.State
 	clipboard.SetEmit(func() {
 		if state != nil {
@@ -155,43 +119,36 @@ func main() {
 	}
 
 	state, err = app.New(mygo.App, app.Deps{
-		Panels:        panels,
-		Anime:         animeUpdates,
-		Bilibili:      bilibiliUpdates,
-		Secrets:       secrets,
-		Clipboard:     clipboard,
-		Playtime:      playtimeRecorder,
-		Translate:     translate,
-		Flash:         flashes,
-		Live:          liveSession,
-		RegionCapture: regioncapture.New(),
-		// What the settings window calls after the user adds a service of
-		// their own: the translator for it has to exist before the next
-		// translation asks one.
+		Panels:           panels,
+		Anime:            animeUpdates,
+		Bilibili:         bilibiliUpdates,
+		Secrets:          secrets,
+		Clipboard:        clipboard,
+		Playtime:         playtimeRecorder,
+		Translate:        translate,
+		Flash:            flashes,
+		Diary:            diaryService,
+		DiaryUnavailable: diaryService == nil,
+		Live:             liveSession,
+		RegionCapture:    regioncapture.New(),
+		// 设置窗口在用户添加自建服务后调用：它的翻译器必须在下一次翻译询问前存在。
 		RegisterOwnServices: own.registerAll,
 		Shortcuts:           app.MyGoShortcuts(),
 		Version:             version,
 		Quit:                mygo.App.Quit,
-		// The theme is the presentation's own setting: it is stored with the
-		// features' keys, but only this window knows what the modes mean.
+		// 主题是 presentation 自己的设置：与各功能的键存在一起，但只有此窗口知道各模式的含义。
 		Appearance:             appearance,
 		AppearanceStore:        prefs,
 		QuickWindowLayout:      quickWindowLayout,
 		QuickWindowLayoutStore: prefs,
 		ApplyAppearance: func(mode app.AppearanceMode) {
 			mygo.Theme.SetSource(app.ThemeSource(mode))
-			// Forcing an appearance hides the desktop's own from Theme.IsDark,
-			// and lifting the force (自动) uncovers it again. Re-read it now,
-			// while the new source is in force, so that choosing 自动 shows
-			// the desktop's appearance rather than the one it had last been
-			// told about.
+			// 强制外观会遮蔽桌面自身的外观（对 Theme.IsDark 而言），取消强制（自动）后又重新显露。趁新来源生效时立即重读，使选择「自动」显示桌面外观，而不是上次被告知的那个。
 			state.SyncAppearance(mygo.Theme.IsDark())
 		},
 		PopoverAppearance: popoverAppearance,
 		Autostart:         loginStart,
-		// What the about box draws and what the tray menu gains: a State with
-		// no service here is a build that draws no update row at all, which is
-		// what a test and a failed assembly both get.
+		// 关于框绘制的内容与托盘菜单新增的项：此处无服务时，构建完全不画更新行——测试与装配失败都得到这种结果。
 		Updates: updateService(updates),
 	})
 	if err != nil {
@@ -199,49 +156,34 @@ func main() {
 	}
 	bilibiliUpdates.SetEmit(state.NoteBilibiliChanges)
 
-	// A launch that reached the running instance is the user asking for the
-	// window, not for a second application: the tray is already there, so
-	// the handler only brings the quick window forward.
+	// 抵达运行中实例的启动是用户在要窗口，而非要第二个应用：托盘已存在，故处理器只把快速窗口提到前面。
 	mygo.App.OnSecondInstance(func([]string, string) {
 		state.Activate()
 	})
 
-	// macOS: reopening the app (Finder, `open -a Boku`) is an activation
-	// event, not a second process: LaunchServices gives the running instance
-	// applicationShouldHandleReopen, which MyGo reports as OnActivate. The
-	// second-instance path above is the Windows and Linux one.
+	// macOS：重新打开应用（Finder、`open -a Boku`）是激活事件而非第二个进程——LaunchServices 会给运行中实例发 applicationShouldHandleReopen，MyGo 将其报告为 OnActivate。上面的二次启动路径是 Windows 与 Linux 的。
 	if runtime.GOOS == "darwin" {
 		mygo.App.OnActivate(func(hasVisibleWindows bool) {
 			if !hasVisibleWindows {
 				state.Activate()
 			}
 		})
-		// The user may have just flipped the Accessibility switch in System
-		// Settings; coming back is the moment to stop showing the request.
+		// 用户可能刚在系统设置里打开了辅助功能开关；返回本应用时正是停止显示请求的时机。
 		mygo.App.OnDidBecomeActive(func() {
 			state.RefreshSelectionAccess()
 		})
 	}
 
-	// macOS: the tray icon is the entry point, so keep the app out of the
-	// Dock. Windows and Linux ignore this.
+	// macOS：托盘是入口，故让应用不出现在 Dock。Windows 与 Linux 忽略此项。
 	mygo.App.SetActivationPolicy(mygo.ActivationPolicyAccessory)
-	// The saved appearance goes to the desktop before Run, as MyGo asks: the
-	// title bars, menus and the macOS popover's material are drawn before the
-	// first frame, and a Boku that starts light and switches a moment later
-	// is a window that flashes. In the automatic mode this is the system
-	// source; follows it while the application runs, too.
+	// 保存的外观要在 Run 之前交给桌面，这是 MyGo 的要求：标题栏、菜单与 macOS popover 材质在第一帧之前就画好，先亮后切换的 Boku 会闪一下。自动模式下这里是系统来源；运行期间也跟随它。
 	mygo.Theme.SetSource(app.ThemeSource(appearance.Mode()))
 	mygo.Theme.OnUpdated(func() {
 		state.SyncAppearance(mygo.Theme.IsDark())
 	})
-	// The quick window is the only window, and closing it must not quit the
-	// application: MyGo quits on the last window closed unless something
-	// listens.
+	// 快速窗口是唯一的窗口，关闭它不得退出应用：除非有人监听，MyGo 会在最后一个窗口关闭时退出。
 	mygo.App.OnWindowAllClosed(func() {})
-	// The update check is a goroutine of its own, and it ends with the
-	// process: a check still asking its feed while the application goes away
-	// arrives at nothing.
+	// 更新检查是一个独立 goroutine，随进程结束：应用退出时仍在查询源的检查只会落到空处。
 	quitUpdates := func() {
 		if updates != nil {
 			updates.Stop()
@@ -252,30 +194,29 @@ func main() {
 	mygo.App.OnWillQuit(func(*mygo.QuitEvent) {
 		slog.Info("boku is quitting")
 		stopPads()
-		// The clipboard poll is a goroutine, and it ends before the
-		// process does: a read that arrives while the backend is going
-		// away is a read nobody asked for.
+		// 剪贴板轮询是 goroutine，须先于进程结束：后端即将消失时到达的读取是没人要的读取。
 		clipboard.Stop()
 		playtimeRecorder.Stop()
 		quitUpdates()
 		quitBilibili()
-		// A shortcut left bound belongs to a process that no longer exists:
-		// the next launch would find it taken by itself.
+		// 遗留绑定的快捷键属于已不存在的进程：下次启动会发现自己被占用。
 		if liveSession != nil {
 			liveSession.Close()
+		}
+		state.FlushDiary()
+		if diaryService != nil {
+			_ = diaryService.Close()
 		}
 		state.UnregisterShortcuts()
 		state.Destroy()
 	})
 	mygo.App.WhenReady(func() {
-		// The system's answer is only available once the application is
-		// running; in the automatic mode this is what the first frame uses.
+		// 系统的答案只有应用运行后才可得；自动模式下第一帧用的就是它。
 		state.SyncAppearance(mygo.Theme.IsDark())
 		if err := state.Setup(); err != nil {
 			log.Fatal(err)
 		}
-		// The shortcut needs the running application, and monitoring starts
-		// only if the user turned it on.
+		// 快捷键需要运行中的应用；只有用户开启时才启动监控。
 		state.RegisterShortcuts()
 		clipboard.Start(nil)
 		playtimeRecorder.SetChanged(func() {
@@ -296,10 +237,7 @@ func main() {
 			})
 		})
 		bilibiliUpdates.Start(context.Background())
-		// The update check starts last: its first look at the feed is a
-		// minute away, and the tray is what a launch is for. A build that
-		// cannot update itself gets no timer from here — the service knows,
-		// and the about box draws no row for it.
+		// 更新检查最后启动：它首次查询源还有一分钟，而托盘才是启动的目的。无法自我更新的构建不会得到定时器——服务自己知道，关于框也不会为它画行。
 		if updates != nil {
 			updates.Start(context.Background())
 		}
@@ -310,62 +248,45 @@ func main() {
 	}
 }
 
-// services assembles everything that exists before a window does: the
-// credential store, the settings, the system clipboard, the HTTP client, the
-// provider registry, the panels and the translation tool.
+// services 在窗口出现之前装配好一切：凭据存储、设置、系统剪贴板、HTTP 客户端、Provider 注册表、面板与翻译工具。
 //
-// It is a function of its own so that a test can check the wiring — a
-// mismatched provider and adapter, or a panel that breaks its provider's
-// contract, is a startup error and worth catching without a graphical
-// session.
-func services(userData, version string, layouts ...*preferences.QuickWindowLayout) (*panel.Panels, *anime.Service, *bilibili.Service, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, *ownServices, *preferences.Appearance, *settings.Store, *playtime.Recorder, *flash.Service, *live.Service, error) {
+// 独立成函数是为了让测试检查接线——Provider 与 Adapter 不匹配，或面板破坏了 Provider 的契约，都属于启动错误，值得在没有图形会话时捕获。
+func services(userData, version string, layouts ...*preferences.QuickWindowLayout) (*panel.Panels, *anime.Service, *bilibili.Service, *credential.Secrets, *clipboard.Clipboard, *translate.Translate, *ownServices, *preferences.Appearance, *settings.Store, *playtime.Recorder, *flash.Service, *diary.Service, *live.Service, error) {
 	quickWindowLayout := preferences.NewQuickWindowLayout()
 	if len(layouts) > 0 && layouts[0] != nil {
 		quickWindowLayout = layouts[0]
 	}
-	// Credentials: a file of their own, never the database. The store is
-	// named here and nowhere else.
+	// 凭据：独立文件，绝不入库。存储只在此处命名。
 	//
-	// The values are plain text. That is a deliberate choice rather than an
-	// unfinished one: with no passphrase for the user to type there is
-	// nowhere to keep a key that somebody reading the directory cannot also
-	// read, and a file encrypted with a key stored beside it would look like
-	// protection without being any. §5 of the security design says what
-	// protects them instead — a 0600 file, an ACL on Windows, never a value
-	// in a log or an error, and a window that says plainly what the file is.
+	// 值为明文，这是刻意的选择而非未完成品：用户没有口令可输入，就没有地方保存一把「读目录的人」读不到的密钥，而用放在旁边的密钥加密的文件只是看起来像保护。安全设计 §5 说明了真正保护它们的是什么——0600 权限、Windows 上的 ACL、值绝不进日志或错误、以及一个直接说明该文件是什么的窗口。
 	secretStore, err := credential.Open(filepath.Join(userData, credential.FileName))
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the credential store: %w", err)
 	}
 	secrets, err := credential.NewSecrets(secretStore)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the credential store: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the credential store: %w", err)
 	}
 
-	// The application's own settings and the clipboard history, next to the
-	// credentials: two files, each owned by the feature that reads it. See
-	// internal/clipboard/store.go for why the history is a file rather than
-	// the table §3 of the storage design describes.
+	// 应用自己的设置与剪贴板历史，就在凭据旁边：两个文件，各归读取它的功能所有。历史为何是文件而非存储设计 §3 所说的表，见 internal/clipboard/store.go。
 	//
-	// The settings file is shared, so each feature that has settings is
-	// registered with the store: the store itself knows nothing about what is
-	// in it, and a feature is handed only the keys it owns.
+	// 设置文件是共享的，因此每个有设置的功能都注册到 store：store 本身不知道里面有什么，功能只拿到自己拥有的键。
 	clipboardSettings := clipboard.NewSection()
 	translateSettings := translate.NewSection()
 	panelSettings := panel.NewSection()
 	animeSettings := anime.NewSection()
 	bilibiliSettings := bilibili.NewSection()
 	playtimeSettings := playtime.NewSection()
-	// The appearance is the presentation's choice rather than a feature's,
-	// but it is stored the same way: a section of its own in the same file,
-	// written through the same store.
+	// 外观是 presentation 而非某个功能的选择，但以同样方式存储：同一文件里独立的 section，经同一 store 写入。
 	appearance := preferences.NewAppearanceSection()
 	flashSettings := flash.NewSection()
+	diarySettings := diary.NewSection()
 	liveSettings := live.NewSection()
 	prefs, err := settings.New(
 		filepath.Join(userData, "settings.json"),
 		clipboardSettings,
 		flashSettings,
+		diarySettings,
 		translateSettings,
 		panelSettings,
 		animeSettings,
@@ -376,79 +297,74 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 		liveSettings,
 	)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the settings store: %w", err)
 	}
-	// The file is read once, here: a frame must not read it, and neither
-	// must a service that already has its settings in memory.
+	// 文件在这里读一次：一帧不得读文件，已在内存中持有设置的服务也不得再读。
 	if err := prefs.Load(context.Background()); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the settings: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the settings: %w", err)
 	}
 	flashes, err := flash.Open(filepath.Join(userData, flash.FileName), flashSettings, prefs, domain.SystemClock{})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open flashes: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open flashes: %w", err)
 	}
 	liveSession, err := live.Open(filepath.Join(userData, live.ModelsDirName), filepath.Join(userData, live.GlossaryFileName), liveSettings, prefs, domain.SystemClock{})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open live translation: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open live translation: %w", err)
 	}
 	history, err := clipboard.NewHistory(filepath.Join(userData, "clipboard_history.json"))
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the clipboard history: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("open the clipboard history: %w", err)
 	}
 
-	// Public Bangumi requests require an identifiable User-Agent. Keeping the
-	// project address in the common client also makes every other request
-	// traceable without leaking any user-specific value.
+	// 公开的 Bangumi 请求需要可识别的 User-Agent。在公共客户端里带上项目地址，也让其它请求可追溯，同时不泄露任何用户专属的值。
 	client := httpc.New(httpc.Options{UserAgent: "Boku/" + applicationVersion(version) + " (+https://github.com/QiYuOr2/boku)"})
+	diaryService, diaryErr := diary.OpenService(userData, diarySettings, prefs, secretStore, client, domain.SystemClock{})
+	if diaryErr != nil {
+		// 日记数据库损坏或来自更高版本时绝不覆盖原文件，也不阻止托盘应用其余功能启动。
+		slog.Error("open diary service", "err", diaryErr)
+	}
 	animeService, err := anime.NewWithCache(client, animeSettings, prefs, anime.NewCache(filepath.Join(userData, "anime_today.json")), secretStore)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare anime updates: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare anime updates: %w", err)
 	}
 
 	bilibiliService, err := bilibili.NewWithCache(client, bilibiliSettings, prefs, bilibili.NewCache(filepath.Join(userData, "bilibili_followed.json")))
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare Bilibili UP monitoring: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare Bilibili UP monitoring: %w", err)
 	}
 
-	// Providers and their adapters are registered in pairs: a provider
-	// without an adapter can only fail later, in front of the user.
+	// Provider 与 Adapter 成对注册：缺 Adapter 的 Provider 只会在之后、在用户面前失败。
 	registry := panel.NewRegistry()
 	if err := registry.Register(
 		deepseekpanel.New(client),
 		deepseekpanel.NewAdapter(),
 	); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek provider: %w", err)
 	}
 	if err := registry.Register(
 		codexpanel.New(client),
 		codexpanel.NewAdapter(),
 	); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the codex provider: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the codex provider: %w", err)
 	}
 	if err := registry.Register(
 		grokpanel.New(client),
 		grokpanel.NewAdapter(),
 	); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the grok provider: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the grok provider: %w", err)
 	}
 	if err := registry.Validate(); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("the provider registry is incomplete: %w", err)
 	}
 
-	// The Codex quota's credential is not one of Boku's: it is the ChatGPT
-	// login the Codex CLI already made, read where it lies and refreshed in
-	// memory (§9 of the security design).
+	// Codex 额度的凭据不属于 Boku：它是 Codex CLI 已做的 ChatGPT 登录，就地读取并在内存中刷新（安全设计 §9）。
 	codexLogin := codexpanel.NewLogin(codexpanel.LoginOptions{Client: client})
 	grokLogin := grokpanel.NewLogin(grokpanel.LoginOptions{Client: client, Secrets: secrets})
 	if err := grokLogin.Remember(context.Background()); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the Grok login: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the Grok login: %w", err)
 	}
 
-	// The panels the application shows. Adding one means adding a definition
-	// here; the panel service checks it against the provider's own contract. A
-	// panel marked optional is one the user can turn off in the settings
-	// window, and its switch is stored in the same settings file as the rest
-	// of the application's choices.
+	// 应用展示的面板。新增一个就在这里加一条定义；面板服务会用 Provider 自己的契约校验它。标为 optional 的面板用户可在设置窗口关掉，其开关与其它应用设置存在同一文件里。
 	panels, err := panel.NewPanels(registry, secretStore, panelSettings, prefs, []panel.PanelDef{
 		{
 			Panel:   deepseekpanel.Panel(),
@@ -458,8 +374,7 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 			Panel:              codexpanel.Panel(),
 			Metrics:            codexpanel.Metrics(),
 			OptionalMetricKeys: codexpanel.OptionalMetricKeys(),
-			// The quota comes from the Codex CLI's own login on this
-			// machine, so reading it is the user's to allow.
+			// 额度来自本机 Codex CLI 自己的登录，因此读取它需用户允许。
 			Optional: true,
 		},
 		{
@@ -470,15 +385,14 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 		},
 	}, codexLogin, grokLogin)
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the panels: %w", err)
 	}
-	// The switches are read once, here: a frame must not read a file.
+	// 开关在这里读一次：一帧不得读文件。
 	if err := panels.LoadChoices(context.Background()); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the panel switches: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("read the panel switches: %w", err)
 	}
 
-	// The clipboard reads and writes on the thread the platform owns, so
-	// every call goes through MyGo's dispatcher.
+	// 剪贴板在平台拥有的线程上读写，所以每次调用都经 MyGo 的调度器。
 	device := clipboarddevice.New(func(fn func()) bool {
 		done := make(chan struct{})
 		go func() {
@@ -496,80 +410,55 @@ func services(userData, version string, layouts ...*preferences.QuickWindowLayou
 		Device:  device,
 		Store:   history,
 		Section: clipboardSettings,
-		// The store the switches are written through. The file was read
-		// once above, so this only writes.
+		// 开关写入所经的 store。文件上面已读过一次，故这里只写。
 		Settings: prefs,
 		Clock:    domain.SystemClock{},
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the clipboard: %w", err)
 	}
 
-	// The translators the tool may ask. Like the panels, adding one means
-	// adding a registration here; unlike a provider, a translator stands
-	// alone: it answers in the domain's own words, so there is no adapter to
-	// pair it with.
+	// 工具可询问的翻译器。与面板一样，新增一个就在这里加一次注册；与 Provider 不同，翻译器独立存在：它直接以领域自己的语言作答，无需配对 Adapter。
 	translators := translate.NewRegistry()
 	if err := translators.Register(deepseektranslator.New(client)); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek translator: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the deepseek translator: %w", err)
 	}
-	// The free engines: no key, no account, and the reason a fresh
-	// installation can press the shortcut and get an answer instead of a page
-	// explaining where to buy one. They are two translators rather than one,
-	// because the settings window offers them as two choices — the user picks
-	// the engine, and that engine is the one asked.
+	// 免费引擎：无需 key、无需账号，正是全新安装后能按快捷键就得到答案、而不是被导到一个「去哪买」页面的原因。它们是两个翻译器而非一个，因为设置窗口把它们作为两个选择——用户选哪个引擎，就询问哪个。
 	if err := translators.Register(freetranslator.NewMicrosoft(client)); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free microsoft translator: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free microsoft translator: %w", err)
 	}
 	if err := translators.Register(freetranslator.NewBilibili(client)); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free bilibili translator: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("register the free bilibili translator: %w", err)
 	}
-	// The services the user runs themselves: one translator per stored service,
-	// because each has its own id, its own address and its own name. Which ones
-	// exist is the settings file's answer, and the user adds one from the
-	// settings window — so the registry is given a way to catch up with what
-	// they added, rather than a set written down here.
+	// 用户自己运行的服务：每个已存服务一个翻译器，各有自己的 id、地址与名称。存在哪些是设置文件的答案，用户从设置窗口添加——因此注册表拿到的是「追上用户新增内容」的能力，而不是在此写死的一组。
 	own := newOwnServices(client, translators, translateSettings)
 	if err := own.registerAll(); err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, err
 	}
 	translation, err := translate.NewTranslate(translate.TranslateOptions{
 		Translators: translators,
 		Secrets:     secretStore,
 		Section:     translateSettings,
 		Settings:    prefs,
-		// The selection is asked first and the clipboard second: what the
-		// user has selected is what they mean, and what is on the clipboard
-		// is what they copied last. The clipboard is also what the selection
-		// device borrows when an application publishes nothing — it asks the
-		// application to copy, then puts the clipboard back — so the tool is
-		// told to keep that borrowed value out of the history.
+		// 先询问选区、再询问剪贴板：用户选中的就是其本意，剪贴板则是最后复制的内容。当应用什么都不发布时，选区设备会借用剪贴板——请应用复制，再把剪贴板放回——因此工具被告知把这份借来的值排除在历史之外。
 		Selection: selection.New(selection.Options{
 			Clipboard:  device,
 			BeforeCopy: clip.IgnoreTheNextCopy,
-			// The clipboard's write counter is the platform's own, and the
-			// selection tool uses the same one Windows uses. On macOS the
-			// copy fallback cannot tell "nothing selected" from "copied the
-			// same text again" without it.
+			// 剪贴板的写入计数器是平台自身的，选区工具用的是 Windows 用的同一个。macOS 上，没有它，复制回退无法区分「未选中任何内容」和「又复制了同样的文本」。
 			Sequence: device.ChangeCount,
 		}),
 		Clipboard: device,
 		Clock:     domain.SystemClock{},
 	})
 	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the translation tool: %w", err)
+		return nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("prepare the translation tool: %w", err)
 	}
-	// Playtime is local and optional at runtime: a file that cannot be read is
-	// logged inside Open, and a desktop that cannot list processes simply
-	// never starts the recorder.
+	// 游戏时长是本地且在运行时可选：读不了的文件由 Open 内部记日志，无法列出进程的桌面干脆不启动记录器。
 	playtimeRecorder := playtime.Open(userData, playtimeSettings)
-	return panels, animeService, bilibiliService, secrets, clip, translation, own, appearance, prefs, playtimeRecorder, flashes, liveSession, nil
+	return panels, animeService, bilibiliService, secrets, clip, translation, own, appearance, prefs, playtimeRecorder, flashes, diaryService, liveSession, nil
 }
 
-// applicationVersion is the version to send as a user agent: a plain `go
-// run` has none, and an empty "Boku/" would say nothing. It is also the
-// version the update feature compares against, so a build with no version
-// says "dev" there too — and compares as one.
+// applicationVersion 是作为 User-Agent 发送的版本：直接 `go run` 没有版本，空的 "Boku/" 什么也没说。它也是更新功能比对所用的版本，因此无版本的构建在那里同样报 "dev"，并以此为比较依据。
 func applicationVersion(version string) string {
 	if version == "" {
 		return "dev"
@@ -577,11 +466,7 @@ func applicationVersion(version string) string {
 	return version
 }
 
-// updateService hands the assembled service to the presentation as nil when
-// there is none. It is a function rather than a ternary because a typed nil
-// pointer inside app.UpdateService is not nil to the interface: a build
-// without updates has to pass the interface's zero value, or the about box
-// would draw a row it can never fill.
+// updateService 在无服务时把 nil 交给 presentation。用函数而非三元式，是因为装在 app.UpdateService 里的类型化 nil 指针对接口而言不为 nil：没有更新功能的构建必须传接口零值，否则关于框会画一行永远填不上的项。
 func updateService(updates *update.Service) app.UpdateService {
 	if updates == nil {
 		return nil
@@ -589,10 +474,7 @@ func updateService(updates *update.Service) app.UpdateService {
 	return updates
 }
 
-// logDirectory is where the daily logs live: a directory of their own under
-// the user data directory, so that the logs are one thing to look at and one
-// thing to delete. BOKU_LOG_DIR moves them, which is what a support run
-// wants — the file is then somewhere that can be handed over whole.
+// logDirectory 是每日日志所在：用户数据目录下独立的目录，使日志便于查看也便于整体删除。BOKU_LOG_DIR 可移动它们，供排障使用——文件可整体交出。
 func logDirectory(userData string) string {
 	if dir := strings.TrimSpace(os.Getenv(logging.DirEnv)); dir != "" {
 		return dir
@@ -600,12 +482,9 @@ func logDirectory(userData string) string {
 	return filepath.Join(userData, "logs")
 }
 
-// startLogging opens the day's log, makes it the process's own, and records
-// the launch.
+// startLogging 打开当天的日志，把它设为进程自己的，并记录本次启动。
 //
-// It is a function of its own, like services, so that a test can check it
-// without a window: the first record of a run is where a failure that happens
-// before anything else exists is found afterwards.
+// 与 services 一样独立成函数，便于测试无需窗口即可检查：一次运行的第一条记录，是事后定位其它一切存在之前所发生故障的地方。
 func startLogging(userData, version string) (*logging.Log, error) {
 	logFile, err := logging.Open(logging.Options{
 		Dir:   logDirectory(userData),
@@ -626,9 +505,7 @@ func startLogging(userData, version string) (*logging.Log, error) {
 	return logFile, nil
 }
 
-// recordPanics writes down why the process is dying, then lets it die the way
-// it was going to: the reason is in the file for the next launch to find, and
-// nothing about how the process ends changes.
+// recordPanics 记下进程为何将死，再让它按原方式死去：原因留在文件里供下次启动查看，进程结束方式不变。
 func recordPanics() {
 	reason := recover()
 	if reason == nil {

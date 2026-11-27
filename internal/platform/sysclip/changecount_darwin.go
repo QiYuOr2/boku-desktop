@@ -9,13 +9,11 @@ import (
 	"github.com/ebitengine/purego/objc"
 )
 
-// The pasteboard's changeCount is the write counter the whole platform uses:
-// it is raised by every write, by every application, and comparing it before
-// and after a copy is how a reader tells "nothing was copied" from "the same
-// value was copied again".
+// 粘贴板的 changeCount 是整个平台通用的写计数器：任何应用每次写入都会递增，
+// 在复制前后比较它，读取方才能区分「没有新复制」与「同一个值又被复制了一次」。
 //
-// MyGo does not expose it, so it is read here, through the same pure-Go
-// Objective-C bridge MyGo itself uses. There is no cgo in this build.
+// MyGo 没有暴露它，这里通过 MyGo 自身使用的纯 Go Objective-C 桥读取；
+// 本构建不含 cgo。
 var (
 	pasteboardOnce sync.Once
 	pasteboard     objc.ID

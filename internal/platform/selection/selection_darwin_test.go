@@ -8,23 +8,14 @@ import (
 	"testing"
 )
 
-// TestByHand reads the selection of the application the user has in front.
-// It needs a desktop session, a selected text and the Accessibility
-// permission, so it is not part of the ordinary suite:
-//
-//	BOKU_SELECTION_PROBE=1 go test ./internal/platform/selection -run ByHand -v
-//
-// It is the macOS counterpart of the Windows probe: the platform half cannot
-// run in a test process that has no session, and a manual check is what says
-// the vtable or the accessibility attribute is the one this build thinks it
-// is.
+// TestByHand 读取前台应用的选中文本。需要桌面会话、已选中的文本和辅助功能权限，
+// 因此不属于常规测试；用 BOKU_SELECTION_PROBE=1 手动运行。
 func TestByHand(t *testing.T) {
 	if os.Getenv("BOKU_SELECTION_PROBE") == "" {
 		t.Skip("set BOKU_SELECTION_PROBE=1 and select some text in another application")
 	}
-	// Accessibility only: the copy fallback needs a running application
-	// and its clipboard, which a test process does not have. The real app
-	// exercises that path through the shortcut.
+	// 只用辅助功能：复制回退需要运行中的应用和它的剪贴板，测试进程没有。
+	// 真实应用通过快捷键走那条路径。
 	text, err := New(Options{}).SelectedText(context.Background())
 	if err != nil {
 		t.Fatalf("read the selection: %v", err)
@@ -35,9 +26,6 @@ func TestByHand(t *testing.T) {
 	t.Logf("selected text: %q", text)
 }
 
-// The accessibility and Core Graphics frameworks are loaded through purego;
-// a missing symbol or a wrong signature would fail here rather than in front
-// of the user.
 func TestAccessibilityFrameworksLoad(t *testing.T) {
 	if !loadAX() {
 		t.Fatal("the Accessibility framework did not load")
@@ -68,8 +56,7 @@ func TestCoreFoundationStringRoundTrip(t *testing.T) {
 	}
 }
 
-// Reading with no permission or no selection must answer nothing rather than
-// crash on a CFTypeRef that is not a string.
+// 无权限或无选中时必须返回空而不是崩溃：属性可能不是字符串类型的 CFTypeRef。
 func TestReadingTheSelectionAnswersNothingRatherThanPanicking(t *testing.T) {
 	if !loadAX() {
 		t.Skip("the Accessibility framework is not available")

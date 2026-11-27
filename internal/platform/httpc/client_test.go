@@ -125,9 +125,8 @@ func TestStatusMapping(t *testing.T) {
 				if bad.HTTPStatus != c.status {
 					t.Errorf("the error carries status %d, want %d", bad.HTTPStatus, c.status)
 				}
-				// The card shows the reason, not the status field, so the
-				// status has to survive inside it: a block (HTTP 412) and a
-				// shape change must not read the same.
+				// 卡片展示的是 reason 而非 status 字段，因此状态码必须留在
+				// reason 里：拦截（HTTP 412）与格式变化不能读成同一回事。
 				if !strings.Contains(bad.Reason, strconv.Itoa(c.status)) {
 					t.Errorf("reason %q does not name the status", bad.Reason)
 				}
@@ -326,8 +325,7 @@ func TestBadResponseSnippetIsRedacted(t *testing.T) {
 	}
 }
 
-// The client must not hold its request a moment longer than the deadline it
-// promises, whatever the transport is doing.
+// 无论传输层在做什么，client 都不得比它承诺的期限多等一刻。
 func TestDefaultTimeoutApplies(t *testing.T) {
 	client := New(Options{})
 	if client.timeout != DefaultTimeout {

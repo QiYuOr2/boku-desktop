@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "otp_invalid",
+    "message": "verification code is invalid or expired",
+    "retryable": false
+  }
+}

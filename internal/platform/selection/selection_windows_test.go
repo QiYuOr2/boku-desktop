@@ -12,16 +12,12 @@ import (
 	"unsafe"
 )
 
-// The platform half of this package needs a desktop session and another
-// application to read from, which a test process does not have. What can be
-// tested here is the reading of the one type COM answers with, and the
-// HRESULT test every call is judged by; the reading of a real selection is
-// checked by hand, with TestReadTheSelectionByHand.
+// 本包的平台部分是读取真实选中内容，需要桌面会话和另一个应用，测试进程没有。这里能测的
+// 是 COM 返回的唯一类型的解析和判定每次调用的 HRESULT 测试；真实选中的读取由
+// TestReadTheSelectionByHand 手动检查。
 
-// TestDecodeBSTRReadsThePlatformsLayout lays a BSTR out the way COM does —
-// its length in bytes in the four bytes before the pointer, then UTF-16 — and
-// reads it back: the length is honoured, an empty string is not a missing
-// one, and characters outside the basic plane survive.
+// TestDecodeBSTRReadsThePlatformsLayout 按 COM 的布局摆放 BSTR——指针前四个字节是字节长度，
+// 随后是 UTF-16——再读回：长度被遵循，空串不等于缺失，基本平面外的字符也能保留。
 func TestDecodeBSTRReadsThePlatformsLayout(t *testing.T) {
 	build := func(s string) []byte {
 		units := utf16.Encode([]rune(s))
@@ -43,8 +39,7 @@ func TestDecodeBSTRReadsThePlatformsLayout(t *testing.T) {
 	}
 }
 
-// TestFailedReadsHRESULTs: a COM call reports failure in the sign of the top
-// bit, and every call in this package is judged by that.
+// TestFailedReadsHRESULTs：COM 调用以最高位的符号表示失败，本包每次调用都据此判定。
 func TestFailedReadsHRESULTs(t *testing.T) {
 	cases := []struct {
 		hr   uintptr
@@ -63,13 +58,10 @@ func TestFailedReadsHRESULTs(t *testing.T) {
 	}
 }
 
-// TestReadTheSelectionByHand asks the system what is selected in whatever
-// application has the keyboard and prints it.
+// TestReadTheSelectionByHand 询问系统当前占据键盘的应用里选中了什么并打印出来。
 //
-// It is a manual check, not a test: it needs a desktop session, a second
-// application and a human to select something in it, so it is skipped unless
-// its environment variable is set. Select a sentence in a browser or an
-// editor, then run:
+// 这是手动检查而非测试：需要桌面会话、第二个应用和一个人在其中选中内容，因此仅在设置了
+// 环境变量时运行。在浏览器或编辑器里选中一句话，然后运行：
 //
 //	BOKU_SELECTION_PROBE=1 go test ./internal/data/selection -run ByHand -v
 func TestReadTheSelectionByHand(t *testing.T) {

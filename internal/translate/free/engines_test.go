@@ -15,13 +15,6 @@ import (
 	"boku/internal/translate/openai"
 )
 
-// Each free engine is a translator of its own: it is asked when it is the one
-// the user picked, and nothing else is asked in its place. These tests drive
-// one engine each, over an httptest server — no test in this package reaches
-// the network.
-
-// chatAnswer wraps a model's own answer in the chat-completions envelope the
-// endpoint answers with, escaping the content the way the wire format does.
 func chatAnswer(content string) string {
 	encoded, err := json.Marshal(content)
 	if err != nil {
@@ -30,8 +23,6 @@ func chatAnswer(content string) string {
 	return `{"choices":[{"message":{"content":` + string(encoded) + `}}]}`
 }
 
-// microsoftAnswer is the shape the Edge endpoint answers with, as
-// §3.1 of the free-translate research measured it.
 const microsoftAnswer = `[{"detectedLanguage":{"language":"en","score":0.9},
   "translations":[{"text":"你好，世界。","to":"zh-Hans","sentLen":{"srcSentLen":[12],"transSentLen":[6]}}]}]`
 
@@ -43,8 +34,6 @@ func plainRequest(text string) domain.TranslationRequest {
 	}
 }
 
-// The engine is a translator under its own id, which is what the settings file
-// stores and what the picker marks.
 func TestTheEnginesCarryTheirOwnIdentity(t *testing.T) {
 	client := httpc.New(httpc.Options{})
 	microsoft := NewMicrosoft(client)
@@ -56,13 +45,11 @@ func TestTheEnginesCarryTheirOwnIdentity(t *testing.T) {
 	if bilibili.ID() != contract.Bilibili {
 		t.Errorf("bilibili id = %q, want %q", bilibili.ID(), contract.Bilibili)
 	}
-	// One engine, one id: two free engines sharing an id would be one entry in
-	// the settings file with two meanings.
+	// 一个引擎一个 id：两个免费引擎共用 id 会让设置文件里同一个条目有两种含义。
 	if microsoft.ID() == bilibili.ID() {
 		t.Error("the two free engines share an id")
 	}
-	// Both are usable with nothing configured at all, which is the whole point
-	// of them.
+	// 两者在完全未配置时都可用，这正是它们的意义。
 	for _, reply := range []domain.Translator{microsoft, bilibili} {
 		descriptor := reply.Descriptor()
 		if err := descriptor.Validate(); err != nil {
@@ -93,8 +80,6 @@ func TestBilibiliDoesNotAdvertiseImageTranslation(t *testing.T) {
 	}
 }
 
-// The names are the design's own: the settings page draws them as the two free
-// options, and they have to be what the user recognises.
 func TestTheEnginesAreNamedAsTheSettingsPageDrawsThem(t *testing.T) {
 	client := httpc.New(httpc.Options{})
 	if got := NewMicrosoft(client).Descriptor().DisplayName; got != "微软 Edge 翻译" {
@@ -135,8 +120,7 @@ func TestMicrosoftAsksAndReadsTheAnswer(t *testing.T) {
 	if result.CreatedAt.IsZero() {
 		t.Error("the result has no time")
 	}
-	// The body is a bare array of strings, and the target language is spelled
-	// the way this endpoint spells it.
+	// 请求体是裸字符串数组，目标语言按该端点自己的拼法。
 	if len(body) != 1 || body[0] != "Hello world." {
 		t.Errorf("body = %v, want one string", body)
 	}
@@ -146,17 +130,15 @@ func TestMicrosoftAsksAndReadsTheAnswer(t *testing.T) {
 	if !strings.Contains(query, "to=zh-Hans") {
 		t.Errorf("query = %q, want the simplified-Chinese code", query)
 	}
-	// The engine sends no credential, because there is none to send: a free
-	// endpoint given an empty bearer token would be told about a key nobody
-	// has.
+	// 引擎不发送凭据，因为无凭据可发：向公开端点发送空 bearer token 等于告诉
+	// 对方一个不存在的 key。
 	if auth != "" {
 		t.Errorf("authorization = %q, want none", auth)
 	}
 }
 
-// An engine that answers one sentence per text has nothing to say about the
-// words in it, and says so rather than failing: the user gets the translation
-// and is told exactly what it does not have.
+// 每次只答一句的引擎无法提供词内信息，如实说明而非失败：用户得到译文，并被明确
+// 告知缺了什么。
 func TestMicrosoftAnswersARequestForReadingsWithANote(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(microsoftAnswer))
@@ -219,7 +201,7 @@ func TestMicrosoftFailuresAreDomainErrors(t *testing.T) {
 	}
 }
 
-// A text that is not there is the caller's mistake, and nothing is asked.
+// 空文本是调用方的错误，不应向端点发出任何请求。
 func TestTheEnginesRefuseAnEmptyRequest(t *testing.T) {
 	asked := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +223,7 @@ func TestTheEnginesRefuseAnEmptyRequest(t *testing.T) {
 	}
 }
 
-// A text that was cut says so, and one that was not is silent about it.
+// 被截断的文本会说明，未截断则不提。
 func TestMicrosoftNotesALongText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(microsoftAnswer))
@@ -262,9 +244,8 @@ func TestMicrosoftNotesALongText(t *testing.T) {
 	}
 }
 
-// The B 站 engine asks the OpenAI-compatible endpoint the same way the paid
-// backends do, and reads the annotation out of a model's answer. It is the free
-// engine that can do this, which is what makes it the one to pick for Japanese.
+// B 站引擎与付费后端一样请求 OpenAI-compatible 端点，并从模型答复中读出标注。它是
+// 唯一能做这件事的免费引擎，因而也是翻译日语时该选的。
 func TestBilibiliAsksForAnAnnotatedAnswer(t *testing.T) {
 	var (
 		path string
@@ -314,9 +295,7 @@ func TestBilibiliAsksForAnAnnotatedAnswer(t *testing.T) {
 	}
 }
 
-// A model that answers a paragraph when pieces were asked for is not a
-// failure: the paragraph is the translation, and the note says what is missing,
-// exactly as the paid backends do.
+// 请求分段却答了整段不算失败：整段即译文，提示说明缺了什么，与付费后端一致。
 func TestBilibiliNotesAnAnswerWithNoPieces(t *testing.T) {
 	answer := chatAnswer("【回忆模式已完备】")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -342,9 +321,8 @@ func TestBilibiliNotesAnAnswerWithNoPieces(t *testing.T) {
 	}
 }
 
-// A model that wraps its answer in a fenced code block — the most common way a
-// model disobeys "no code fences" — is read the same way: the parser unwraps
-// the fence, and what it cannot read as a piece is the translation.
+// 模型用围栏代码块包裹答复（最常见的违背「不要代码块」的方式）也按同样方式读取：
+// 解析器剥掉围栏，读不成片段的内容即为译文。
 func TestBilibiliReadsAModelThatIgnoresTheFormat(t *testing.T) {
 	answer := chatAnswer("```json\n" + `{"s":"こんにちは","t":"你好"}` + "\n```")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -363,16 +341,14 @@ func TestBilibiliReadsAModelThatIgnoresTheFormat(t *testing.T) {
 	if result.TranslatedText != "你好" {
 		t.Errorf("translation = %q", result.TranslatedText)
 	}
-	// The fence is not a translation, and it is not drawn: the piece inside it
-	// is.
+	// 围栏不是译文、也不画出：画的是围栏内的片段。
 	if len(result.Segments) != 1 || result.Segments[0].Text != "こんにちは" {
 		t.Errorf("segments = %+v, want the piece inside the fence", result.Segments)
 	}
 }
 
-// A service that fails is reported as a failure and never as an empty
-// translation — and, because the engines are separate translators, the failure
-// is the one the user's engine reported: nothing else is asked in its place.
+// 服务失败报告为失败，绝不报成空译文；且引擎是独立翻译器，失败是用户所选引擎报出
+// 的，不会转问其它引擎。
 func TestBilibiliReportsItsOwnFailures(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -403,8 +379,7 @@ func TestBilibiliReportsItsOwnFailures(t *testing.T) {
 			if result.TranslatedText != "" {
 				t.Errorf("a failure produced a translation: %+v", result)
 			}
-			// The engine was asked once and only once: there is no pool to hand
-			// the text to.
+			// 引擎只被问一次：没有可转交文本的池。
 			if asked != 1 {
 				t.Errorf("the endpoint was asked %d times, want once", asked)
 			}
@@ -412,7 +387,6 @@ func TestBilibiliReportsItsOwnFailures(t *testing.T) {
 	}
 }
 
-// The endpoints are the ones the design measured, written once each.
 func TestTheEndpointsAreTheOnesTheDesignMeasured(t *testing.T) {
 	if !strings.HasPrefix(microsoftEndpoint, "https://edge.microsoft.com/translate/translatetext?") {
 		t.Errorf("endpoint = %q", microsoftEndpoint)
@@ -425,8 +399,7 @@ func TestTheEndpointsAreTheOnesTheDesignMeasured(t *testing.T) {
 	}
 }
 
-// Each engine stamps its answers through its own clock, which is how a test
-// decides when an answer happened.
+// 每个引擎通过自己的时钟给答复打时间戳，测试借此决定答复的发生时刻。
 func TestTheEnginesStampTheirAnswers(t *testing.T) {
 	at := time.Date(2026, 10, 16, 9, 0, 0, 0, time.UTC)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -445,9 +418,8 @@ func TestTheEnginesStampTheirAnswers(t *testing.T) {
 	}
 }
 
-// The OpenAPI-compatible engine keeps the shared protocol honest: it asks for
-// the same prompt the paid backends ask for, which is what the annotation
-// depends on.
+// OpenAI-compatible 引擎保持共享协议一致：它请求的 prompt 与付费后端相同，标注
+// 依赖于此。
 func TestBilibiliSendsTheToolOwnPrompt(t *testing.T) {
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -475,6 +447,5 @@ func TestBilibiliSendsTheToolOwnPrompt(t *testing.T) {
 	}
 }
 
-// ensure the openai package is the one both the prompt and the parser come
-// from, so that this test file cannot drift from the protocol.
+// 确保 prompt 与解析器都来自 openai 包，使本测试文件不会偏离协议。
 var _ = openai.DefaultMaxChars

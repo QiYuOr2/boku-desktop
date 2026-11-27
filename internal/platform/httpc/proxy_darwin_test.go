@@ -72,8 +72,7 @@ func TestParseSCUtilProxyLeavesADisabledProxyOff(t *testing.T) {
 	}
 }
 
-// A PAC-only configuration is not a manual proxy: this file does not evaluate
-// PAC, so the answer is "nothing", and the request goes direct.
+// 仅有 PAC 的配置不是手动代理：本文件不解析 PAC，因此结果为「无」，请求走直连。
 func TestParseSCUtilProxyDoesNotInventAProxyFromPAC(t *testing.T) {
 	got, err := parseSCUtilProxy(`<dictionary> {
   ProxyAutoConfigEnable : 1

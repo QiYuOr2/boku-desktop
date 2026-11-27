@@ -8,10 +8,8 @@ import (
 	"boku/internal/domain"
 )
 
-// Opening the history window must not wait on the clipboard. On Windows a
-// clipboard read can wait on whatever else is holding the clipboard, and the
-// window is already on screen while that happens: the wait would be spent
-// with a drawn but empty window.
+// 打开历史窗口不能等剪贴板。Windows 上读取剪贴板可能等待占用它的其它程序，
+// 而窗口此时已在屏幕上：这段等待会耗在一个已绘制却空无一物的窗口上。
 func TestOpenDoesNotWaitForASlowClipboard(t *testing.T) {
 	emitted := make(chan struct{}, 4)
 	device := &fakeDevice{readDelay: 300 * time.Millisecond}
@@ -34,7 +32,7 @@ func TestOpenDoesNotWaitForASlowClipboard(t *testing.T) {
 		t.Errorf("Open waited %s for the clipboard", elapsed)
 	}
 
-	// The read does happen, behind the call.
+	// 读取确实在调用背后发生了。
 	select {
 	case <-emitted:
 	case <-time.After(3 * time.Second):
@@ -45,9 +43,7 @@ func TestOpenDoesNotWaitForASlowClipboard(t *testing.T) {
 	}
 }
 
-// A click on a history row must not wait on the write either: the write goes
-// to the platform's thread, and that is the thread drawing the frame the
-// click was in.
+// 点击历史行同样不能等写入：写入发生在平台线程，而那正是绘制点击所在帧的线程。
 func TestCopyAsyncDoesNotWaitForASlowClipboard(t *testing.T) {
 	device := &fakeDevice{writeDelay: 300 * time.Millisecond}
 	clipboard, err := NewClipboard(ClipboardOptions{
@@ -68,8 +64,7 @@ func TestCopyAsyncDoesNotWaitForASlowClipboard(t *testing.T) {
 		t.Errorf("CopyAsync waited %s for the clipboard", elapsed)
 	}
 
-	// The entry is already at the top of the history: a click is visible in
-	// the list whatever the platform answers.
+	// 条目此时已在历史顶部：无论平台如何回应，点击在列表中都是可见的。
 	if got := len(clipboard.History(1)); got != 1 {
 		t.Fatalf("the history holds %d entries after the click, want 1", got)
 	}
@@ -87,8 +82,7 @@ func TestCopyAsyncDoesNotWaitForASlowClipboard(t *testing.T) {
 	}
 }
 
-// A write the platform refuses is reported back, so the row can take its mark
-// back rather than claim a copy that did not happen.
+// 平台拒绝的写入会被回报，使该行可以撤销标记，而非宣称一次并未发生的复制。
 func TestCopyAsyncReportsARefusedWrite(t *testing.T) {
 	device := &fakeDevice{}
 	device.failWrite(domain.ErrUnsupportedClipboardFormat)
@@ -115,8 +109,7 @@ func TestCopyAsyncReportsARefusedWrite(t *testing.T) {
 	}
 }
 
-// The interface asks whether a reading has just happened before spending
-// another one on a window it is opening.
+// 界面在打开窗口前会先问是否刚读过，以免为已有内容再读一次。
 func TestPolledRecentlyFollowsTheRead(t *testing.T) {
 	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{})
 	if clipboard.PolledRecently() {

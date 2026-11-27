@@ -476,8 +476,8 @@ func onMicBuffer(user unsafe.Pointer, queue uintptr, buffer uintptr, _ uintptr, 
 		return
 	}
 	mic := state.(*micQueue)
-	// AudioQueueBuffer puts the pointer before the size, with padding after the
-	// leading UInt32, so the size is at 16 and the bytes are at 8.
+	// AudioQueueBuffer 的布局：数据指针在前、大小在后，且首个 UInt32 之后有填充，
+	// 所以大小在偏移 16、字节数据在偏移 8。
 	size := *(*uint32)(unsafe.Add(cPtr(buffer), 16))
 	data := *(*uintptr)(unsafe.Add(cPtr(buffer), 8))
 	if size > 0 && data != 0 && mic.ctx.Err() == nil {

@@ -9,8 +9,7 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// CoreGraphics reads screen points, so a Retina display's scale must not be
-// applied to the rectangle: the reader returns the pixels itself.
+// CoreGraphics 读取的是屏幕点，因此不能对矩形施加 Retina 缩放：像素由读取方自行返回。
 func TestNativeRegionRectKeepsScreenPointsOnMacOS(t *testing.T) {
 	display := mygo.Display{Bounds: mygo.Rectangle{X: 1707, Y: -337, Width: 853, Height: 1369}, ScaleFactor: 2}
 	got := nativeRegionRect(display, image.Rect(20, 30, 120, 230))

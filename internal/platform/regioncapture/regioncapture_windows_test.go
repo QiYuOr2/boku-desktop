@@ -14,7 +14,7 @@ import (
 )
 
 func TestEncodeBGRAProducesAnOpaquePNGWithCorrectChannels(t *testing.T) {
-	// Two pixels in Windows' native BGRA byte order: red, then blue.
+	// 两个像素按 Windows 原生 BGRA 字节序排列：先红后蓝。
 	pngBytes, err := encodeBGRA(2, 1, []byte{0, 0, 255, 255, 255, 0, 0, 255})
 	if err != nil {
 		t.Fatalf("encodeBGRA() error = %v", err)
@@ -40,9 +40,8 @@ func TestEncodeBGRARejectsIncompletePixels(t *testing.T) {
 	}
 }
 
-// TestCaptureDesktopByHand is an opt-in smoke test for the actual GDI path.
-// It neither writes the capture to disk nor prints its pixels. Run it only in
-// an interactive desktop session with BOKU_REGION_CAPTURE_PROBE=1.
+// TestCaptureDesktopByHand 是实际 GDI 路径的按需冒烟测试：不落盘、不打印像素。
+// 仅在交互式桌面会话中设置 BOKU_REGION_CAPTURE_PROBE=1 时运行。
 func TestCaptureDesktopByHand(t *testing.T) {
 	if os.Getenv("BOKU_REGION_CAPTURE_PROBE") != "1" {
 		t.Skip("set BOKU_REGION_CAPTURE_PROBE=1 to test GDI against the live desktop")
@@ -74,11 +73,9 @@ func TestCaptureDesktopByHand(t *testing.T) {
 	}
 }
 
-// TestSelectDesktopByHand is an opt-in end-to-end probe for the native
-// Snipaste-style selector.  It waits for an operator to drag a visible,
-// non-uniform part of the desktop.  The selector must first disappear, then
-// GDI must return a decodable, non-uniform image; this catches the historical
-// regression where the overlay was captured instead of the desktop.
+// TestSelectDesktopByHand 是原生 Snipaste 式选择器的按需端到端探针，需操作者框选
+// 一块可见且颜色不均匀的桌面区域。选择器必须先消失，GDI 才能返回可解码、非单色的
+// 图像；这能捕捉「截到浮层而非桌面」这一历史回归。
 func TestSelectDesktopByHand(t *testing.T) {
 	if os.Getenv("BOKU_REGION_SELECTOR_PROBE") != "1" {
 		t.Skip("set BOKU_REGION_SELECTOR_PROBE=1 to test the native selector against the live desktop")

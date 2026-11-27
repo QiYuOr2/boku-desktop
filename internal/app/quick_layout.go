@@ -49,9 +49,8 @@ func (s *State) quickBlockAvailable(id string) bool {
 	}
 }
 
-// quickPanelID resolves the layout's stable provider identity to the panel's
-// stable entity ID. They deliberately differ: a provider can back a panel
-// without becoming its persistent panel identifier.
+// quickPanelID 把布局里稳定的 provider 身份解析为面板稳定的实体 ID。
+// 二者刻意不同：一个 provider 可以支撑某个面板，但不一定成为面板的持久标识。
 func (s *State) quickPanelID(providerID string) (string, bool) {
 	if s.panelService == nil {
 		return "", false

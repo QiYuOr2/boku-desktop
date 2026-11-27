@@ -8,13 +8,11 @@ import (
 	"testing"
 )
 
-// The shortcut reader, against a real shortcut.
+// 快捷方式读取器，针对真实快捷方式测试。
 //
-// testdata/shortcut.lnk was made by Windows itself: a shortcut on a machine
-// with no space in its account name, pointing at C:\Windows\System32\
-// notepad.exe through the system's ANSI code page. It is the case that a
-// reader written from the specification alone gets wrong, so it is a fixture
-// rather than a document assembled in the test.
+// testdata/shortcut.lnk 由 Windows 自己生成：来自账户名不含空格的机器，经系统 ANSI 代码页指向
+// C:\Windows\System32\notepad.exe。这正是仅按规范写出的读取器会读错的情形，因此它是 fixture，
+// 而不是测试里拼出的文档。
 
 func TestLnkTargetReadsARealShortcut(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("testdata", "shortcut.lnk"))
@@ -30,13 +28,12 @@ func TestLnkTargetReadsARealShortcut(t *testing.T) {
 	}
 }
 
-// equalPath compares two Windows paths the way Windows does: case-insensitively,
-// and without the whitespace the shell can leave around the halves of one.
+// equalPath 按 Windows 的方式比较两个路径：不区分大小写，且忽略 shell 可能留在各部分两端的空白。
 func equalPath(a, b string) bool {
 	return len(a) == len(b) && (a == b || lowerPath(a) == lowerPath(b))
 }
 
-// lowerPath is the ASCII part of case folding, which is all a path needs.
+// lowerPath 只做 ASCII 部分的大小写折叠，路径够用。
 func lowerPath(path string) string {
 	path = trimLnkPath(path)
 	lower := make([]byte, len(path))

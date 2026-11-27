@@ -1,7 +1,5 @@
-// This file maps ChatGPT's usage response onto the application's snapshot. It
-// is a pure function of the response and of the moment it was fetched at: no
-// network, no clock of its own, and a fixture for every case, so a field the
-// service renames is caught by a test rather than by a bar showing 0.
+// 本文件把 ChatGPT 的用量响应映射为应用的快照。它是响应与取数时刻的纯函数：
+// 不发起网络请求、不读取自己的时钟。
 package codex
 
 import (
@@ -14,10 +12,8 @@ import (
 	"boku/internal/domain"
 )
 
-// usageResponse is the endpoint's own shape, and the only place in the
-// application where these field names appear. Everything that must be there
-// is a pointer, so that a response without it is a bad response rather than
-// a quota of zero.
+// usageResponse 是接口自身的结构，也是应用里唯一出现这些字段名的地方。必填字段
+// 都用指针，使缺失时被判为坏响应，而不是当成 0 配额。
 type usageResponse struct {
 	PlanType  string     `json:"plan_type"`
 	RateLimit *rateLimit `json:"rate_limit"`
@@ -25,34 +21,28 @@ type usageResponse struct {
 
 type rateLimit struct {
 	PrimaryWindow *window `json:"primary_window"`
-	// SecondaryWindow is optional and is shown for non-free accounts.
+	// SecondaryWindow 可选，只对非免费账户展示。
 	SecondaryWindow *window `json:"secondary_window"`
 }
 
 type window struct {
 	UsedPercent *int `json:"used_percent"`
-	// ResetAt is Unix seconds.
+	// ResetAt 是 Unix 秒。
 	ResetAt *int64 `json:"reset_at"`
-	// LimitWindowSeconds supplies the period label, independently of when
-	// the window next resets. A missing length must not imply five hours.
+	// LimitWindowSeconds 决定周期标签，与下次重置时间无关。缺失时不能默认按五小时处理。
 	LimitWindowSeconds *int64 `json:"limit_window_seconds"`
 }
 
-// Adapter maps the response.
 type Adapter struct{}
 
-// NewAdapter returns the adapter.
 func NewAdapter() *Adapter { return &Adapter{} }
 
-// ProviderID returns the provider this adapter maps.
 func (a *Adapter) ProviderID() string { return ProviderID }
 
-// Normalize turns one usage response into a snapshot.
+// Normalize 把一份用量响应转成快照。
 //
-// It refuses, rather than guessing, when the response is not the shape it
-// knows or when the window has no percentage or no reset time: a bar that
-// says "0% left" because a field was renamed is worse than a card that says
-// it could not read the answer.
+// 当响应不是已知结构，或窗口缺少百分比、重置时间时，它选择报错而不是猜测：字段
+// 被改名时若显示「剩余 0%」，比提示读不到结果更糟。
 func (a *Adapter) Normalize(result domain.FetchResult, panel domain.Panel) (domain.Snapshot, error) {
 	var payload usageResponse
 	if err := json.Unmarshal(result.Payload, &payload); err != nil {
@@ -113,9 +103,8 @@ func windowValues(w *window, fetchedAt time.Time) (remaining, resetsIn int64, er
 	return 100 - used, max(int64(0), *w.ResetAt-fetchedAt.Unix()), nil
 }
 
-// observations builds the panel's observations in the order its metrics are
-// defined, so the bar's own number comes first. A metric the response has no
-// value for is a bad response, not a zero.
+// observations 按面板定义的指标顺序构建观测值，使进度条自身的数字排在最前。
+// 响应中缺值的指标会被判为坏响应，而不是 0。
 func observations(panel domain.Panel, values map[string]domain.Value, observedAt time.Time) ([]domain.Observation, error) {
 	keys := append([]string(nil), panel.MetricKeys...)
 	if len(keys) == 0 {

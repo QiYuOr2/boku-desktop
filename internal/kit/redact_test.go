@@ -31,9 +31,8 @@ func TestRedactTextKeepsOrdinaryText(t *testing.T) {
 	}
 }
 
-// A service that echoes a credential back inside its error is the case this
-// exists for: the fragment an error carries must not hold one, whatever
-// punctuation the service used.
+// 服务把凭据原样回显在错误里，正是本功能存在的场景：无论服务用了什么标点，
+// 错误携带的片段都不得含有凭据。
 func TestRedactTextRemovesCredentialFields(t *testing.T) {
 	cases := map[string]string{
 		`{"error":{"message":"failed","key":"sk-live-1234567890"}}`: `{"error":{"message":"failed","key":"redacted"}}`,
@@ -41,8 +40,7 @@ func TestRedactTextRemovesCredentialFields(t *testing.T) {
 		`{"error":{"apiKey":"sk-live-1234567890"}}`:                 `{"error":{"apiKey":"redacted"}}`,
 		`token=abc123&other=1`:                                      `token=redacted&other=1`,
 		`{"access_token":"eyJhbGciOi"}`:                             `{"access_token":"redacted"}`,
-		// A response with nothing sensitive in it is left exactly as it was:
-		// redaction must not eat the diagnostic the snippet is for.
+		// 不含敏感信息的响应原样保留：脱敏不能吃掉这段 snippet 本身要提供的诊断信息。
 		`{"model":"deepseek-chat","choices":[]}`: `{"model":"deepseek-chat","choices":[]}`,
 	}
 	for in, want := range cases {
@@ -52,9 +50,7 @@ func TestRedactTextRemovesCredentialFields(t *testing.T) {
 	}
 }
 
-// A log record prints an attribute as `name=value`, and the name is what
-// says whether the value is a credential: a bare key has nothing else in it
-// to recognize.
+// 日志记录把属性打印为 `name=value`，名字才决定值是否为凭据：裸值本身没有可供识别的东西。
 func TestRedactField(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -68,8 +64,7 @@ func TestRedactField(t *testing.T) {
 		{"authorization", "Bearer abc123", "redacted"},
 		{"panel", "deepseek", "deepseek"},
 		{"note", "call ?key=abc failed", "call ?key=redacted failed"},
-		// A name that is not a credential, with a value that carries no
-		// credential either, is left exactly as it was.
+		// 名字不是凭据、值也不含凭据时，原样保留。
 		{"status", "error", "error"},
 		{"", "left alone", "left alone"},
 		{"apiKey", "", ""},

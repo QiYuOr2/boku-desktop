@@ -20,7 +20,7 @@ func TestParseMoney(t *testing.T) {
 		{"  42.10  ", 4210},
 		{"007.50", 750},
 		{"1234.56", 123456},
-		// A value beyond float64's exact integers must survive the parse.
+		// 超出 float64 精确整数范围的值也必须能正确解析。
 		{"9007199254740993.00", 900719925474099300},
 	}
 	for _, c := range cases {

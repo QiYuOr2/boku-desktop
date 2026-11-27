@@ -140,7 +140,7 @@ func TestExtractHTMLTextIsStableAndBounded(t *testing.T) {
 	if strings.Contains(first, "\n") {
 		t.Error("a single paragraph was broken into several lines")
 	}
-	// A tag soup must not grow in the conversion.
+	// 大量标签不应在转换中膨胀。
 	tags := strings.Repeat(`<span style="color:red">`, 100) + "text"
 	if got := ExtractHTMLText(tags); got != "text" {
 		t.Errorf("ExtractHTMLText(%d tags) = %q, want %q", 100, got, "text")
@@ -156,7 +156,7 @@ func TestDecodeHTMLEntities(t *testing.T) {
 		"&nbsp;":      " ",
 		"&unknown;":   "&unknown;",
 		"plain":       "plain",
-		"&#0;":        "&#0;", // an invalid code point is left alone
+		"&#0;":        "&#0;", // 无效码点按原样保留
 		"&#99999999;": "&#99999999;",
 	}
 	for in, want := range cases {

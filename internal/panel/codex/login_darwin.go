@@ -14,19 +14,14 @@ import (
 	"boku/internal/domain"
 )
 
-// findLoginCommand looks the CLI up the way a terminal would, not the way a
-// GUI process can.
+// findLoginCommand 以终端的方式查找 CLI，而不是以 GUI 进程能做到的方式。
 //
-// A process launched from Finder or a LaunchAgent inherits launchd's PATH,
-// which usually has none of the places a developer installs a CLI in:
-// Homebrew (/opt/homebrew/bin), npm, pnpm, Volta and Bun all live outside it.
-// Looking only at that PATH is why the login button used to say "not
-// installed" on a machine where `codex` worked in a terminal.
+// 从 Finder 或 LaunchAgent 启动的进程继承 launchd 的 PATH，其中通常不含开发者安装
+// CLI 的位置：Homebrew（/opt/homebrew/bin）、npm、pnpm、Volta、Bun 都在其外。只看
+// 这个 PATH 会导致在 codex 终端可用的机器上，登录按钮报「未安装」。
 //
-// The order is: the process PATH (a terminal launch, or an explicit override),
-// the user's login shell (the PATH they actually use), then the usual install
-// locations. The shell is asked with a timeout because a shell profile can be
-// slow or interactive.
+// 查找顺序：进程 PATH（终端启动或显式覆盖）、用户登录 shell（实际使用的 PATH）、再是
+// 常见安装位置。询问 shell 时加超时，因为 shell 配置可能很慢或交互式。
 func findLoginCommand(name string) (string, error) {
 	if path, err := exec.LookPath(name); err == nil {
 		return path, nil
@@ -44,10 +39,9 @@ func findLoginCommand(name string) (string, error) {
 	return "", exec.ErrNotFound
 }
 
-// commandInLoginShell asks the user's login shell where a command is. The
-// output can contain profile noise, so only an absolute path that exists is
-// accepted; the last such line wins, because a profile may print something
-// that looks like a path before the shell answers.
+// commandInLoginShell 询问用户登录 shell 某命令的位置。输出可能夹带 shell 配置的
+// 杂讯，因此只接受存在且为绝对路径的行；取最后一条，因为配置可能在 shell 回答前先
+// 打印出看似路径的内容。
 func commandInLoginShell(name, flag string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -65,9 +59,8 @@ func commandInLoginShell(name, flag string) string {
 	return found
 }
 
-// commonCommandPaths are the places a CLI installed by the usual macOS
-// package managers lives. They are a fallback for a shell that cannot be
-// asked; a path that does not exist is simply skipped.
+// commonCommandPaths 是常见 macOS 包管理器安装 CLI 的位置，作为无法询问 shell 时的
+// 兜底；不存在的路径直接跳过。
 func commonCommandPaths(name string) []string {
 	paths := []string{
 		filepath.Join("/opt/homebrew/bin", name),
@@ -90,13 +83,12 @@ func isExecutable(path string) bool {
 	return err == nil && !info.IsDir() && info.Mode()&0o111 != 0
 }
 
-// startLogin opens the CLI's login in Terminal. The command runs from a
-// .command script rather than from the executable itself: Terminal would get
-// the binary and no arguments, and what the user needs is `codex login`.
+// startLogin 在 Terminal 中打开 CLI 的登录。命令经由 .command 脚本执行，而不是
+// 直接执行二进制：直接执行会让 Terminal 拿到二进制却没有参数，而用户需要的是
+// `codex login`。
 //
-// The script is left in the system temporary directory: Terminal reads it
-// after `open` returns, and removing it at once would race that read. macOS
-// cleans the directory.
+// 脚本留在系统临时目录：Terminal 是在 `open` 返回后才读取它，立即删除会与这次读取
+// 竞争。macOS 会清理该目录。
 func startLogin(command string) error {
 	script, err := writeLoginScript(command)
 	if err != nil {
@@ -113,7 +105,7 @@ func startLogin(command string) error {
 	return nil
 }
 
-// writeLoginScript writes the temporary .command Terminal opens.
+// writeLoginScript 写出 Terminal 打开的临时 .command 脚本。
 func writeLoginScript(command string) (string, error) {
 	dir, err := os.MkdirTemp("", "boku-codex-login-")
 	if err != nil {
@@ -127,13 +119,13 @@ func writeLoginScript(command string) (string, error) {
 	return path, nil
 }
 
-// loginScript is the shell script Terminal runs. The command is quoted as one
-// word so that a path with a space in it still works.
+// loginScript 是 Terminal 运行的 shell 脚本。命令作为单个词加引号，使含空格的路径
+// 也能工作。
 func loginScript(command string) string {
 	return "#!/bin/zsh\nexec " + shellQuote(command) + " login\n"
 }
 
-// shellQuote quotes one word for a POSIX shell.
+// shellQuote 为 POSIX shell 引用单个词。
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }

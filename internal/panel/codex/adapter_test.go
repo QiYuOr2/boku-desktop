@@ -11,18 +11,16 @@ import (
 	"boku/internal/domain"
 )
 
-// The vectors live inside this module (testdata/providers) so it can be built
-// and tested on its own. They mirror the repository-level fixtures/ directory,
-// which both ends share: both ends must read the same response the service
-// sends. Change both copies.
+// 这些向量位于本模块内（testdata/providers），使本模块可独立构建与测试。它们镜像
+// 仓库级的 fixtures/ 目录，两端共享同一份，因而必须读到服务发出的同一份响应。两处
+// 副本都要改。
 const fixturesDir = "../../../testdata/providers/codex"
 
-// fetchedAt is the moment the fixtures are taken to be fetched at, and
-// sessionResetAt is the reset time usage_ok.json carries: the adapter counts
-// one from the other, so both are written down here.
+// fetchedAt 是样本被视为的取数时刻，sessionResetAt 是 usage_ok.json 携带的重置时间：
+// adapter 由前者推算出后者，因此两者都写在这里。
 var fetchedAt = time.Date(2026, 10, 14, 2, 0, 0, 0, time.UTC)
 
-const sessionResetAt = 1791943200 // 2026-10-14T04:00:00Z, two hours later
+const sessionResetAt = 1791943200 // 2026-10-14T04:00:00Z，两小时之后
 
 func fixture(t *testing.T, name string) domain.FetchResult {
 	t.Helper()
@@ -44,8 +42,7 @@ func normalize(t *testing.T, result domain.FetchResult) (domain.Snapshot, error)
 	return NewAdapter().Normalize(result, Panel())
 }
 
-// observation returns one metric of a snapshot, failing the test when it is
-// not there.
+// observation 返回快照中的一个指标，缺失时使测试失败。
 func observation(t *testing.T, snapshot domain.Snapshot, key string) domain.Observation {
 	t.Helper()
 	found, ok := snapshot.Observation(key)
@@ -55,8 +52,7 @@ func observation(t *testing.T, snapshot domain.Snapshot, key string) domain.Obse
 	return found
 }
 
-// The usage response becomes the three numbers the panel shows: what is left
-// of the window, how long until it resets, and which plan the account is on.
+// 用量响应变成面板展示的三个数字：窗口剩余多少、多久后重置、账户属于哪个套餐。
 func TestNormalizeMapsTheSessionWindow(t *testing.T) {
 	snapshot, err := normalize(t, fixture(t, "usage_ok.json"))
 	if err != nil {
@@ -72,13 +68,12 @@ func TestNormalizeMapsTheSessionWindow(t *testing.T) {
 		t.Errorf("ObservedAt = %s, want the moment it was fetched", snapshot.ObservedAt)
 	}
 
-	// 6% used leaves 94% of the five-hour window.
+	// 已用 6%，五小时窗口还剩 94%。
 	remaining := observation(t, snapshot, MetricSessionRemainingPercent)
 	if got, ok := remaining.Value.Number(); !ok || got != 94 {
 		t.Errorf("sessionRemainingPercent = %v (%v), want 94", got, remaining.Value)
 	}
-	// The reset time is absolute in the response and a duration in the
-	// snapshot: two hours after the moment it was fetched.
+	// 响应里的重置时间绝对值，快照里是时长：取数时刻之后两小时。
 	resetsIn := observation(t, snapshot, MetricSessionResetsInSeconds)
 	if got, ok := resetsIn.Value.DurationSeconds(); !ok || got != sessionResetAt-fetchedAt.Unix() {
 		t.Errorf("sessionResetsInSeconds = %v (%v), want %d", got, resetsIn.Value, sessionResetAt-fetchedAt.Unix())
@@ -92,8 +87,7 @@ func TestNormalizeMapsTheSessionWindow(t *testing.T) {
 	if got, _ := observation(t, snapshot, MetricLongWindowResetsInSeconds).Value.DurationSeconds(); got != 1792400000-fetchedAt.Unix() {
 		t.Errorf("longWindowResetsInSeconds = %d, want %d", got, 1792400000-fetchedAt.Unix())
 	}
-	// The metrics come out in the panel's own order, so the bar's number is
-	// first.
+	// 指标按面板自身的顺序输出，因此进度条的数字排在最前。
 	if len(snapshot.Observations) != len(Metrics()) {
 		t.Fatalf("observations = %d, want the panel's %d", len(snapshot.Observations), len(Metrics()))
 	}
@@ -232,8 +226,7 @@ func TestNormalizeLongWindowBoundaries(t *testing.T) {
 	}
 }
 
-// A window that has already reset counts as no time left to wait rather than
-// as a negative duration.
+// 已重置的窗口按「无需再等」计，而不是负时长。
 func TestNormalizeCountsAPastResetAsZero(t *testing.T) {
 	snapshot, err := normalize(t, fixture(t, "usage_window_past.json"))
 	if err != nil {
@@ -247,8 +240,7 @@ func TestNormalizeCountsAPastResetAsZero(t *testing.T) {
 	}
 }
 
-// A window that is over its limit reports nothing left rather than a negative
-// percentage, and one that reports less than nothing used is read as full.
+// 超出上限的窗口报告剩余为零而不是负百分比；已用量少于零的按满额读。
 func TestNormalizeClampsThePercentage(t *testing.T) {
 	cases := map[string]int64{"usage_over_limit.json": 0, "usage_negative.json": 100}
 	for name, want := range cases {
@@ -262,8 +254,8 @@ func TestNormalizeClampsThePercentage(t *testing.T) {
 	}
 }
 
-// A response that is not the shape this adapter knows is refused: a renamed
-// field must not become "0% left", which is what a bar would draw.
+// 不是本 adapter 已知结构的响应会被拒绝：字段被改名时不能变成「剩余 0%」，那正是
+// 进度条会画出的样子。
 func TestNormalizeRefusesMalformedResponses(t *testing.T) {
 	files, err := filepath.Glob(filepath.Join(fixturesDir, "usage_malformed_*.json"))
 	if err != nil {
@@ -289,8 +281,7 @@ func TestNormalizeRefusesMalformedResponses(t *testing.T) {
 	}
 }
 
-// The refusal says what was asked and keeps a trimmed snippet: a renamed
-// field is meant to be diagnosable from the error alone.
+// 拒绝信息说明所请求的内容并保留裁剪过的片段：字段被改名应当仅凭错误即可诊断。
 func TestBadResponseCarriesWhatWasAsked(t *testing.T) {
 	_, err := normalize(t, fixture(t, "usage_malformed_no_rate_limit.json"))
 	if err == nil {
@@ -311,8 +302,7 @@ func TestBadResponseCarriesWhatWasAsked(t *testing.T) {
 	}
 }
 
-// A plan the response does not name is shown as no plan rather than as a
-// failure: the bar and the reset time are still worth having.
+// 响应未指明套餐时显示为无套餐，而不是失败：进度条与重置时间仍值得保留。
 func TestNormalizeWithoutAPlan(t *testing.T) {
 	snapshot, err := normalize(t, fixture(t, "usage_no_plan.json"))
 	if err != nil {
@@ -326,8 +316,8 @@ func TestNormalizeWithoutAPlan(t *testing.T) {
 	}
 }
 
-// The panel the adapter is given is the one it fills: a panel that lists a
-// metric this provider does not report is caught rather than guessed at.
+// 传给 adapter 的面板就是它要填充的面板：面板列出 provider 不上报的指标会被捕获，
+// 而不是猜测。
 func TestNormalizeRefusesAMetricItDoesNotReport(t *testing.T) {
 	panel := Panel()
 	panel.MetricKeys = append(panel.MetricKeys, "balanceMinor")

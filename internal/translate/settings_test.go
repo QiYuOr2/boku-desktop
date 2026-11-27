@@ -7,9 +7,8 @@ import (
 	"time"
 )
 
-// The translation defaults are what a fresh installation has: the tool on,
-// the built-in translator, both Japanese annotations, unpinned, closing soon
-// after it loses the keyboard.
+// 翻译默认值即全新安装的状态：工具开启、内置翻译器、两个日语注释开启、不固定、
+// 失去焦点后很快关闭。
 func TestTheDefaultsAreWhatAFreshInstallationHas(t *testing.T) {
 	got := Defaults()
 	if !got.Enabled {
@@ -128,8 +127,7 @@ func TestSettingsAreBroughtIntoTheirBounds(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := tc.in.Normalize()
-			// Every case but the first says nothing about the provider, and
-			// normalization names the default one whenever nothing is named.
+			// 除第一个用例外，其余都不涉及 provider，而规范化在未指定时会给出默认值。
 			wantProvider := tc.want.Provider
 			if wantProvider == "" {
 				wantProvider = DefaultProvider
@@ -147,9 +145,8 @@ func TestSettingsAreBroughtIntoTheirBounds(t *testing.T) {
 	}
 }
 
-// sameServices compares two sets of the user's services, treating a nil map and
-// an empty one as the same thing: what matters is which services there are, not
-// whether the map was allocated.
+// sameServices 比较两组用户服务，把 nil map 与空 map 视为相同：
+// 重要的是有哪些服务，而非该 map 是否被分配。
 func sameServices(got, want map[string]CustomSettings) bool {
 	if len(got) != len(want) {
 		return false
@@ -162,8 +159,7 @@ func sameServices(got, want map[string]CustomSettings) bool {
 	return true
 }
 
-// Adding a service takes the first id that is free, and the ids the file
-// already holds are never handed out again.
+// 新增服务取第一个空闲 id，文件中已持有的 id 不会被再次分配。
 func TestNextCustomServiceID(t *testing.T) {
 	cases := []struct {
 		name string
@@ -187,8 +183,7 @@ func TestNextCustomServiceID(t *testing.T) {
 	}
 }
 
-// The ids a user's own services are stored under are recognised by their
-// prefix, and nothing else is.
+// 用户自有服务的 id 靠前缀识别，其它一律不算。
 func TestIsCustomService(t *testing.T) {
 	own := []string{"custom", "custom-2", "custom-10"}
 	for _, id := range own {
@@ -198,8 +193,7 @@ func TestIsCustomService(t *testing.T) {
 	}
 	others := []string{
 		"", "deepseek", "free.microsoft", "free.bilibili",
-		// Not the prefix with a separator: a translator that merely starts
-		// with the word is a different thing.
+		// 不是带分隔符的前缀：仅仅以该词开头的翻译器是另一回事。
 		"customary", "customs-2", "Custom-2",
 	}
 	for _, id := range others {
@@ -209,13 +203,11 @@ func TestIsCustomService(t *testing.T) {
 	}
 }
 
-// Every setting a user may leave unset has an answer for the empty case: a
-// file written before a key existed reads as the default rather than as a zero.
+// 每个用户可能留空的设置都有其空值答案：某个键存在前写下的文件按默认值读，
+// 而不是零值。
 //
-// The close delay is the exception, and the reason the rule is written per
-// setting rather than for the whole struct: zero means "close at once", which
-// is a choice a user can make, so an absent delay reads as no delay rather
-// than as the default one.
+// 关闭延迟是例外，也是规则按设置单独写、而非对整个结构体统一写的原因：零意味着
+// 「立即关闭」，这是用户可选的值，所以缺席的延迟读作无延迟而不是默认延迟。
 func TestTheEmptySettingsAnswerWithTheirDefaults(t *testing.T) {
 	var empty Settings
 	if empty.ProviderOr() != DefaultProvider {
@@ -230,10 +222,8 @@ func TestTheEmptySettingsAnswerWithTheirDefaults(t *testing.T) {
 	}
 }
 
-// Zero is a choice the user makes when they want the card to go at once, so a
-// file that says zero has to read as zero. It used to read as "the key is not
-// there" — which silently put every such user back on the default at the next
-// start.
+// 零是用户想让卡片立即关闭时的选择，所以写着零的文件必须读作零。
+// 曾经它被读成「键不存在」——结果悄悄把这类用户下次启动时打回默认值。
 func TestAZeroCloseDelayReadsAsZero(t *testing.T) {
 	section := NewSection()
 	values := map[string]json.RawMessage{
@@ -247,8 +237,7 @@ func TestAZeroCloseDelayReadsAsZero(t *testing.T) {
 	}
 }
 
-// And a file that does not mention it keeps the default: the two cases are
-// different, and telling them apart is the whole of the fix.
+// 未提及该键的文件保持默认：两种情况不同，区分它们正是修复的核心。
 func TestAnAbsentCloseDelayKeepsTheDefault(t *testing.T) {
 	section := NewSection()
 	if err := section.Decode(map[string]json.RawMessage{}); err != nil {
@@ -259,8 +248,7 @@ func TestAnAbsentCloseDelayKeepsTheDefault(t *testing.T) {
 	}
 }
 
-// A zero goes out to the file and comes back a zero: what the settings window
-// shows after a restart is what the user chose.
+// 零写入文件又读回来仍是零：重启后设置窗口显示的就是用户所选。
 func TestAZeroCloseDelaySurvivesTheFile(t *testing.T) {
 	section := NewSection()
 	settings := section.Current()

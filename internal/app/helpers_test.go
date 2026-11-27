@@ -180,7 +180,7 @@ func testTranslate(t testing.TB, store *testStore) *testTranslateFixture {
 	}
 }
 
-// Only the network response is controlled; descriptors come from the real backends.
+// 只控制网络响应；descriptor 来自真实的 backend。
 type testTranslator struct {
 	domain.Translator
 	mu       sync.Mutex

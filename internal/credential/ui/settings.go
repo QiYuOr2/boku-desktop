@@ -26,36 +26,25 @@ type CardStatus struct {
 }
 
 type ConnectForm struct {
-	// Keys is what the user typed, per translator ID, and only that. A
-	// stored credential never goes into a field.
+	// Keys 只存用户为每个翻译器输入的内容；已保存的凭据不会回填到输入框。
 	Keys map[string]string
-	// HasCredential is whether each provider has one.
+	// HasCredential 表示各提供商是否已有凭据。
 	HasCredential map[string]bool
-	// NewName, NewURL and NewModel are the service being added, as typed into the
-	// blank card at the foot of the section. They are not credentials: they
-	// live in the settings file, in the clear, and they are cleared once the
-	// service is added.
+	// NewName、NewURL、NewModel 是正在添加的服务，不是凭据：它们明文存放在设置文件里，添加成功后即清空。
 	NewName  string
 	NewURL   string
 	NewModel string
-	// Busy is the card that is being tested or saved, or empty.
+	// Busy 是正在测试或保存的卡片 ID，空闲为空。
 	Busy string
-	// BusyNote says what that card is Busy with, as the line under it reads.
-	// A card does three things — connect, save, remove — and only the first
-	// of them is a connection.
+	// BusyNote 是该卡片当前的忙碌说明（连接、保存、删除三种操作中只有第一种是「连接」）。
 	BusyNote string
-	// DeleteArmed is the card whose stored credential has been asked about
-	// and not yet confirmed: the card that is one press away from losing it.
+	// DeleteArmed 是已请求删除但尚未确认的卡片。
 	DeleteArmed string
-	// Status is what each card's last attempt said.
+	// Status 是各卡片最近一次操作的结果。
 	Status map[string]CardStatus
-	// InputCard is the card the credential field is showing, and Input is
-	// what has been typed into it.
+	// InputCard 是当前显示凭据输入框的卡片，Input 是其输入内容。
 	//
-	// The field needs one string that outlives a frame — the framework binds
-	// it by address — while the cards are drawn in a loop and only one of
-	// them has a field at a time. So the typing lives here, and it is filed
-	// under its card as soon as another card's field is built.
+	// 输入框需要跨越帧持续存在的字符串（框架按地址绑定），而卡片是在循环里绘制的、同一时刻只有一个输入框，因此输入暂存在这里，切换卡片时归档到对应卡片下。
 	InputCard string
 	Input     string
 }
@@ -67,20 +56,13 @@ func (s *State) ApiKeySection(c *ui.Context, head *ui.Handle) {
 		presentation.Stacked(c, presentation.GroupGap, func() {
 			presentation.SectionHeadSmall(c, head, s.keyMark, presentation.ColorStoneInk, "API Key", "配置各 AI 服务密钥")
 
-			// Only the services that have a key: this section is a key form,
-			// and a card here is a field to fill in. The services that need
-			// nothing are chosen in the translation section instead, where the
-			// user is deciding what to translate with rather than what to
-			// type.
+			// 只列出需要密钥的服务：本区是密钥表单，每张卡片是一个待填输入框；无需密钥的服务在翻译区选择。
 			cards := KeyedTranslateCards(s.TranslateCards())
 			presentation.Stacked(c, presentation.RowGap, func() {
 				for _, card := range cards {
 					s.ApiKeyCard(c, card)
 				}
-				// The blank card is always the last one, and it is always
-				// there: adding a second service is how a user who already
-				// has one gets another, and a section whose only way to add is
-				// to email the author is not one.
+				// 空白卡片始终在最后且始终存在：它是添加更多服务的唯一入口。
 				s.NewCustomServiceCard(c)
 			})
 		})
@@ -346,18 +328,13 @@ func (s *State) DeleteCredential(card TranslateCard) {
 		ctx := context.Background()
 		var err error
 		if ownService {
-			// The order is the reverse of adding one: the service is
-			// forgotten first, so that nothing asks an address that is about
-			// to be gone, and its key is dropped after.
+			// 顺序与添加相反：先注销服务，避免还有地方请求即将消失的地址，之后再删除密钥。
 			err = service.RemoveCustomTranslator(ctx, ID)
 			if err == nil {
 				err = ForgetCredential(ctx, secrets, ID, key, s.Form.HasCredential[ID])
 			}
 			if err == nil {
-				// And its translator goes with it. The cards are drawn from
-				// the registry, so a service taken out of the settings but
-				// left in the registry is a card that stays on the page with
-				// no address and nothing to ask.
+				// 翻译器也要一并注销：卡片来自注册表，若只从设置移除而留在注册表，会残留一张没有地址的卡片。
 				if syncErr := s.UnregisterOwnServices(); syncErr != nil {
 					slog.Warn("the registry could not be brought in step", "error", syncErr)
 				}
@@ -369,8 +346,7 @@ func (s *State) DeleteCredential(card TranslateCard) {
 			err = service.SetProvider(ctx, translate.DefaultProvider)
 		}
 		if window.RunOnMain == nil {
-			// No window: this state exists only while a test builds the
-			// view, and there is nothing to hand the answer to.
+			// 无窗口：该 state 仅在测试构建视图时存在，无需回传结果。
 			return
 		}
 		if err != nil {
@@ -590,18 +566,12 @@ func (s *State) AddCustomService() {
 			err = secrets.Set(ctx, ID, "apiKey", key)
 		}
 		if err == nil {
-			// The new service needs a translator before it can be asked.
+			// 新服务必须先注册翻译器才能被调用。
 			if err = s.RegisterOwnServices(); err != nil {
 				slog.Warn("the new service could not be registered", "error", err)
 			}
 		}
-		// A custom service can point at any OpenAI-compatible gateway. Its model
-		// catalogue does not reliably advertise vision support, so test the
-		// exact Endpoint with a tiny image after the key and translator exist.
-		// Failure does not undo the service: it can still be a useful Text
-		// translator, and the stored capability remains false. It is logged
-		// rather than dropped, because the card then tells the user the service
-		// is Text-only and this line is what explains why.
+		// 自定义服务可能指向任意 OpenAI 兼容网关，其模型目录不可靠地声明视觉支持，因此需在密钥与翻译器就绪后用一张小图实测该 Endpoint。探测失败不撤销服务（仍可作文本翻译），能力保持为 false，并记录日志以便解释卡片为何显示仅支持文本。
 		imageSupported := false
 		if err == nil {
 			probeCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -674,8 +644,7 @@ func (s *State) SaveCredential(card TranslateCard) {
 		return
 	}
 	if !card.NeedsCredential && key == "" {
-		// Nothing to store: an optional key that is not there means the
-		// service needs none, and it is already Configured.
+		// 无需存储：可选密钥为空说明该服务不需要密钥，且已配置。
 		s.SetCardStatus(card.ID, StatusOK, "这个服务不需要密钥。")
 		s.host.Refresh()
 		return
@@ -704,7 +673,7 @@ func (s *State) SaveCredential(card TranslateCard) {
 			s.ClearCardInput(ID)
 			s.ReloadCredentialsAfterSave()
 			s.SetCardStatus(ID, StatusOK, "已保存。")
-			// A panel now has what it was missing: fetch with it.
+			// 面板刚拿到缺失的凭据，立即刷新数据。
 			s.refreshPanels()
 		})
 	}()

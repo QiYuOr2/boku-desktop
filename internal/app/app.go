@@ -1,15 +1,11 @@
-// Package app is the presentation layer: view state, the views MyGo draws,
-// and the windows that show them.
+// Package app 是表现层：视图状态、MyGo 绘制的视图，以及展示它们的窗口。
 //
-// It owns the tray icon and the flyout, because MyGo's callbacks and the
-// views run on the main thread and share the same state. Everything is
-// created and changed on that thread; no field of State may be touched from
-// a goroutine, and results of background work are handed back with
-// Window.Update.
+// 它拥有托盘图标和 flyout，因为 MyGo 的回调和视图都在主线程上运行并共享同一份状态。
+// 一切都在这条线程上创建和修改；State 的任何字段都不得从 goroutine 触碰，
+// 后台工作的结果通过 Window.Update 交回。
 //
-// The panels themselves are not state here: the use case keeps them, so a
-// refresh that finishes while the window is closed cannot lose its answer,
-// and the view reads what is known without doing any work of its own.
+// 面板本身不是这里的状态：用例持有它们，因此窗口关闭时完成的刷新不会丢失结果，
+// 视图只读取已知内容，自身不做任何工作。
 package app
 
 import (
@@ -32,6 +28,8 @@ import (
 	clipboardui "boku/internal/clipboard/ui"
 	"boku/internal/credential"
 	credentialui "boku/internal/credential/ui"
+	"boku/internal/diary"
+	diaryui "boku/internal/diary/ui"
 	"boku/internal/domain"
 	"boku/internal/flash"
 	flashui "boku/internal/flash/ui"
@@ -52,122 +50,75 @@ import (
 
 const (
 	appName = "Boku"
-	// toolTip is what the system shows when the pointer rests on the tray
-	// icon: the application's name, and nothing after it.
-	//
-	// It used to add "— 我的面板". The tray is a five-millimetre square, and
-	// the line that appears over it is read while the pointer is already
-	// there to click it: the extra words were a sentence nobody was reading.
-	// The name is what tells the user whose icon this is, which is the only
-	// question the tooltip has to answer.
-	toolTip    = appName
-	panelWidth = 320
-	// panelHeight leaves room for the page's margin, the panel's section, the
-	// clipboard line under it and the footer. A section with more in it
-	// scrolls rather than pushing the lines off the window.
+	// toolTip 是托盘图标上悬停时系统显示的文本：只有应用名。
+	toolTip     = appName
+	panelWidth  = 320
 	panelHeight = 380
-	// quickTaskRowHeight is the reserved vertical room for one image task in
-	// the tray flyout. The actual rows are content-driven; this conservative
-	// estimate lets the flyout grow before its scroll body needs to scroll.
+	// quickTaskRowHeight 是 flyout 中一个图片任务预留的垂直空间；
+	// 实际行高由内容决定，这是保守估计。
 	quickTaskRowHeight = 52
-	// quickEnabledHeightShare is how tall the flyout opens when a reading block
-	// — today's animation releases or the followed UPs — is switched on.
+	// quickEnabledHeightShare 是打开阅读块（今日动画更新或被关注的 UP）时 flyout 的开启高度占比。
 	//
-	// The window is not resized to its content: measuring the content from the
-	// view turned out to follow the scroll offset, so dragging the scrollbar
-	// made the window change height under the pointer. A share of the work
-	// area is decided before anything is drawn, so it cannot move while the
-	// user is reading.
+	// 窗口不按内容调整大小：从视图测量内容会跟随滚动偏移，
+	// 拖动滚动条会让窗口在指针下改变高度。因此在工作区绘制前就按比例定高，读时不会移动。
 	quickEnabledHeightShare = 0.30
-	// trayIconSize is the icon in device pixels: 16 points on a Retina
-	// display, which MyGo scales to the screen's density on Windows and
-	// Linux.
+	// trayIconSize 是图标的设备像素尺寸：Retina 下为 16 点，
+	// MyGo 在 Windows 与 Linux 上会按屏幕密度缩放。
 	trayIconSize = 32
 )
 
-// Deps is what the presentation layer is assembled from, by main.
+// Deps 是 main 用来装配表现层的依赖。
 type Deps struct {
-	// Panels reads and refreshes the panels.
-	Panels *panel.Panels
-	// Anime reads today's releases from the configured public watching list.
-	Anime AnimeService
-	// Bilibili reads public activity and live state for explicitly followed UPs.
+	Panels   *panel.Panels
+	Anime    AnimeService
 	Bilibili BilibiliService
-	// Secrets stores the credentials those panels need.
-	Secrets *credential.Secrets
-	// Clipboard reads and records the system clipboard. It is what the
-	// quick window's clipboard line and the history window show; a State
-	// without one draws neither.
+	Secrets  *credential.Secrets
+	// Clipboard 读写的系统剪贴板。没有它的 State 不绘制快捷窗口的剪贴板行，也不绘制历史窗口。
 	Clipboard *clipboard.Clipboard
-	// Translate is the selection-translation tool. A State without one
-	// draws no translation window and binds no shortcut for it.
+	// Translate 是划词翻译工具。没有它的 State 不绘制翻译窗口，也不绑定其快捷键。
 	Translate *translate.Translate
-	// Flash is the text-flash document. A State without one draws no capture
-	// line and no history.
+	// Flash 是文字闪念文档。没有它的 State 不绘制输入行，也没有历史。
 	Flash *flash.Service
-	// Live is the local speech translation. A State without one draws no
-	// float window and binds no shortcut for it.
-	Live *live.Service
-	// Screenshot opens the platform region selector and returns the chosen PNG.
+	// Diary 是个人日记服务。DiaryUnavailable 为 true 时仍保留入口并提示数据库不可读，绝不覆盖原文件。
+	Diary            *diary.Service
+	DiaryUnavailable bool
+	// Live 是本地语音翻译。没有它的 State 不绘制浮动窗口，也不绑定其快捷键。
+	Live       *live.Service
 	Screenshot domain.ScreenshotDevice
-	// RegionCapture reads physical desktop pixels. When present, the app
-	// supplies its own cross-platform selection overlay and does not invoke a
-	// system screenshot UI or use the clipboard.
+	// RegionCapture 读取物理桌面像素。存在时 App 使用自带的跨平台选区覆盖层，
+	// 不调用系统截图 UI，也不使用剪贴板。
 	RegionCapture RegionCapture
-	// RegisterOwnServices registers a translator for every service the user
-	// runs themselves. The window calls it after the user adds one: a service
-	// the settings hold but the registry does not know is a row that cannot
-	// answer. It is nil in a test that never adds a service.
+	// RegisterOwnServices 为用户自建的每个服务注册翻译器。窗口在用户添加后调用它：
+	// 设置里有、注册表却不认识的服务是一行无法回答的行。从不添加服务的测试里它为 nil。
 	RegisterOwnServices func() error
-	// Shortcuts binds the global shortcuts. A State without one still runs:
-	// a shortcut that cannot be bound is a tray application with one way in
-	// fewer, not a failure to start.
+	// Shortcuts 绑定全局快捷键。没有它的 State 仍能运行：绑定失败的快捷键只是少一条入口，不是启动失败。
 	Shortcuts ShortcutRegistrar
-	// Version is the application version, shown in the footer.
-	Version string
-	// Quit is how the tray application leaves: it has no main window to
-	// close.
-	Quit func()
-	// Appearance is the theme the user chose. It is the presentation's own
-	// setting, stored beside the features' keys; nil means "follow the
-	// desktop", which is also the default.
+	Version   string
+	Quit      func()
+	// Appearance 是用户选的主题。它是表现层自己的设置，存在功能键旁边；
+	// nil 表示「跟随桌面」，也是默认值。
 	Appearance *Appearance
-	// AppearanceStore is the settings store the choice is written through.
-	// A state without one still changes the appearance for this run.
+	// AppearanceStore 是写入该选择的设置存储。没有它的 State 仍会在本次运行内改变外观。
 	AppearanceStore        AppearanceStore
 	QuickWindowLayout      *preferences.QuickWindowLayout
 	QuickWindowLayoutStore preferences.LayoutStore
-	// ApplyAppearance gives the desktop the chosen appearance, so that the
-	// title bars, menus and system-drawn window chrome around Boku's own
-	// drawing match it. It is nil in a test that has no desktop.
+	// ApplyAppearance 把所选外观交给桌面，使标题栏、菜单和系统绘制的窗口边框与 Boku 的绘制一致。
+	// 无桌面的测试里它为 nil。
 	ApplyAppearance func(AppearanceMode)
-	// PopoverAppearance gives a native popover the dark appearance a forced
-	// dark mode needs. It is nil where the platform has no way to do it, in
-	// which case forced dark uses the application's card. main injects the
-	// platform implementation; replacing it with one backed by MyGo's own
-	// API (or nil) is the only change that future API needs.
+	// PopoverAppearance 给原生 popover 提供强制深色模式所需的深色外观。
+	// 平台无法做到时为 nil，此时强制深色使用 App 自己的卡片。
 	PopoverAppearance PopoverAppearance
-	// Autostart is the platform's login start: what "开机自动启动" reads and
-	// writes. It is nil where nothing was injected, and a State without one
-	// draws no switch — a switch that cannot do anything is worse than none.
-	// main injects internal/platform/autostart's platform implementation; a
-	// test injects its own.
+	// Autostart 是平台的登录自启动：「开机自动启动」读写的对象。
+	// 未注入时为 nil，没有它的 State 不绘制开关——一个什么都做不了的开关比没有更糟。
 	Autostart autostart.Manager
-	// Playtime is the tray readout of recorded sessions. Nil draws nothing,
-	// which is every test that does not care about it.
+	// Playtime 是录制会话的托盘读数。nil 时不绘制任何内容。
 	Playtime *playtime.Recorder
-	// Updates is the update check. A State without one draws no update row,
-	// starts no check and adds nothing to the tray menu: a build without an
-	// updater is every test and every assembly that wired none.
-	//
-	// The interface is the presentation's own, so that nothing here imports
-	// internal/update or MyGo's updater. main injects the real service; a
-	// test injects a fake.
+	// Updates 是更新检查。没有它的 State 不绘制更新行、不启动检查、也不加入托盘菜单。
+	// 该接口是表现层自己的，因此这里不 import internal/update 或 MyGo 的更新器。
 	Updates UpdateService
 }
 
-// AnimeService is the small presentation-facing contract of the animation
-// feature. Defining it here keeps app independent of the feature package.
+// AnimeService 是动画功能面向表现层的小契约，定义在此使 app 不依赖该功能包。
 type AnimeService interface {
 	Enabled() bool
 	Username() string
@@ -179,8 +130,7 @@ type AnimeService interface {
 	Cover(subjectID int64) []byte
 }
 
-// BilibiliService is the small presentation-facing contract of the UP
-// monitoring feature. It keeps app independent of the feature package.
+// BilibiliService 是 UP 监控功能面向表现层的小契约，使 app 不依赖该功能包。
 type BilibiliService interface {
 	Enabled() bool
 	UIDs() []int64
@@ -191,12 +141,11 @@ type BilibiliService interface {
 	View() ([]domain.FollowedUpdate, time.Time, bool, error)
 	Refresh(context.Context) error
 	RefreshIfNeeded(context.Context) error
-	// Avatar returns the fetched avatar bytes of one creator, or nil.
+	// Avatar 返回某个创作者已抓取的头像字节，或 nil。
 	Avatar(int64) []byte
 }
 
-// State is the whole presentation state. It is read and written on the main
-// thread only.
+// State 是整个表现层状态，仅在主线程读写。
 type State struct {
 	app               *mygo.Application
 	panelService      *panel.Panels
@@ -214,6 +163,7 @@ type State struct {
 	translate         *translate.Translate
 	translationUI     *translateui.State
 	flashUI           *flashui.State
+	diaryUI           *diaryui.State
 	liveUI            *liveui.State
 	liveMark          *ui.SVG
 	version           string
@@ -245,6 +195,7 @@ type State struct {
 	historyCode       *ui.SVG
 	settingsMark      *ui.SVG
 	quitMark          *ui.SVG
+	diaryMark         *ui.SVG
 	flashMark         *ui.SVG
 	screenshotMark    *ui.SVG
 	qrMark            *ui.SVG
@@ -262,6 +213,7 @@ type State struct {
 	historyWindow     *mygo.Window
 	flashCapture      *mygo.Window
 	flashHistory      *mygo.Window
+	diaryWindow       *mygo.Window
 	ownServices       func() error
 	panelStatus       string
 	settingsScroll    ui.ScrollState
@@ -272,14 +224,12 @@ type State struct {
 	settingsRoom      float32
 }
 
-// RegionCapture is the narrow platform boundary behind the app-owned region
-// picker. The rectangle is in the coordinate space the platform's reader
-// takes: screen points on macOS, physical virtual-desktop pixels on Windows.
+// RegionCapture 是 App 自有选区选择器背后的窄平台边界。
+// 矩形使用平台读取器采用的坐标空间：macOS 上是屏幕点，Windows 上是物理虚拟桌面像素。
 type RegionCapture = translateui.RegionCapture
 
-// New builds the tray icon and the state of the application. The caller
-// must still run Setup from mygo.App.WhenReady, once MyGo's event loop is
-// up: no window or tray can exist before that.
+// New 构建托盘图标和 App 状态。调用方仍须在 MyGo 事件循环就绪后运行 mygo.App.WhenReady 中的 Setup：
+// 在此之前任何窗口或托盘都无法存在。
 func New(app *mygo.Application, deps Deps) (*State, error) {
 	if app == nil {
 		return nil, fmt.Errorf("app: no application")
@@ -290,8 +240,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if deps.Secrets == nil {
 		return nil, fmt.Errorf("app: no secret service")
 	}
-	// A state built by a test that does not care about the theme still has
-	// one: following the desktop is what a user who never chose gets.
+	// 不关心主题的测试所构建的 State 仍有一个主题：跟随桌面是用户从未选择时的结果。
 	appearance := deps.Appearance
 	if appearance == nil {
 		appearance = NewAppearanceSection()
@@ -300,8 +249,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The blocks of the quick window carry their provider's mark, so the two
-	// the repository has are parsed here with the rest.
+	// 快捷窗口的块带着各自提供者的标记，仓库里的这些标记在这里一并解析。
 	deepseekMark, err := ui.ParseSVG(assets.DeepSeek())
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the DeepSeek mark: %w", err)
@@ -358,6 +306,10 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the settings mark: %w", err)
 	}
+	diaryMark, err := ui.ParseSVG(assets.Diary())
+	if err != nil {
+		return nil, fmt.Errorf("app: parse the diary mark: %w", err)
+	}
 	flashMark, err := ui.ParseSVG(assets.Lightbulb())
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the flash mark: %w", err)
@@ -394,9 +346,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the return mark: %w", err)
 	}
-	// The translation section's mark is the application's own drawing, not a
-	// brand's: it heads a section of Boku's settings rather than standing for
-	// a service.
+	// 翻译区的标记是应用自己的绘图，不是品牌标记：它作为 Boku 设置中一个区块的标题，而非代表某项服务。
 	translationMark, err := ui.ParseSVG(assets.Translate())
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the translation mark: %w", err)
@@ -405,10 +355,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the live translation mark: %w", err)
 	}
-	// The sidebar reaches every section, including the two that had no mark
-	// of their own: the key section and the about box. The key is the
-	// design's own drawing for the page that configures services, and the
-	// info mark is the one it draws beside the other one.
+	// 侧边栏要到达每个区块，包括两个原本没有自己标记的：密钥区和关于框。
 	keyMark, err := ui.ParseSVG(assets.Key())
 	if err != nil {
 		return nil, fmt.Errorf("app: parse the key mark: %w", err)
@@ -489,6 +436,7 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		historyCode:       historyCode,
 		settingsMark:      settingsMark,
 		quitMark:          quitMark,
+		diaryMark:         diaryMark,
 		flashMark:         flashMark,
 		screenshotMark:    screenshotMark,
 		qrMark:            qrMark,
@@ -502,9 +450,8 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 		layoutMark:        layoutMark,
 		quickWindowLayout: quickLayout,
 	}
-	// The update service was built before the state, so its change listener
-	// is installed now, once, before anything can ask it for a check: a
-	// service without one is a row that never redraws.
+	// 更新服务在 State 之前构建，因此在这里一次性安装它的变更监听器，在任何人索要检查之前：
+	// 没有监听器的服务是一行永远不会重绘的行。
 	var connections credentialui.Connections
 	if deps.Translate != nil {
 		connections = deps.Translate
@@ -547,6 +494,9 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 			ReturnMark:  returnMark,
 		})
 	}
+	if deps.Diary != nil || deps.DiaryUnavailable {
+		state.diaryUI = diaryui.New(deps.Diary, state.featureHost(), state.diaryMark, state.openDiarySettings)
+	}
 	if deps.Live != nil {
 		state.liveUI = liveui.New(liveui.Config{
 			Service:      deps.Live,
@@ -570,34 +520,28 @@ func New(app *mygo.Application, deps Deps) (*State, error) {
 	return state, nil
 }
 
-// AttachUpdates gives the state its update service, or replaces the one it
-// has. It is what an assembly calls when the service is built after — or on
-// — the state: the service's change listener may fire from another goroutine,
-// and installing it once the state exists means every report reaches a state
-// that can be repainted.
+// AttachUpdates 给 State 装上更新服务，或替换它已有的。
+// 装配在服务晚于（或在）State 之后构建时调用它：服务的变更监听器可能从另一个 goroutine 触发，
+// 在 State 已存在后安装它，意味着每次报告都能送达可重绘的 State。
 //
-// A service passed to New installs the same listener there, so an assembly
-// only needs one of the two. A State with neither simply has no updates, and
-// everything about updating is then absent rather than broken.
+// 传给 New 的服务也会在那里安装同一个监听器，因此装配只需二者之一。
+// 两者都没有的 State 只是没有更新功能，关于更新的一切都消失而非损坏。
 func (s *State) AttachUpdates(updates UpdateService) {
 	s.prepareUpdates(updates)
 }
 
-// Setup adds the tray icon and wires its clicks. It must be called on the
-// main thread, once the application is ready.
+// Setup 添加托盘图标并接好其点击。必须在应用就绪后的主线程调用。
 func (s *State) Setup() error {
 	if s.tray != nil {
 		return fmt.Errorf("app: the tray already exists")
 	}
 	tray, err := mygo.NewTray(mygo.TrayOptions{
 		Icon: s.trayIcon,
-		// A black-and-transparent image lets macOS tint its menu-bar icon.
-		// Windows and Linux ignore this flag and retain the PNG's colors.
+		// 黑白透明图片让 macOS 给菜单栏图标着色；Windows 与 Linux 忽略该标志，保留 PNG 的颜色。
 		IconIsTemplate: runtime.GOOS == "darwin",
 		ToolTip:        toolTip,
-		// No Menu: MyGo shows a menu on a left click whenever the tray has
-		// one, which would make the left click unable to open the panel.
-		// The menu is set for the duration of a right click only.
+		// 不设 Menu：只要托盘有菜单，MyGo 就会在左键单击时显示它，从而使左键无法打开面板。
+		// 菜单只在右键单击期间设置。
 	})
 	if err != nil {
 		return fmt.Errorf("app: create the tray: %w", err)
@@ -607,8 +551,7 @@ func (s *State) Setup() error {
 	s.RefreshSelectionAccess()
 	requestScreenRecording()
 	if runtime.GOOS == "linux" {
-		// An AppIndicator can only show a menu and reports no clicks, so
-		// the menu is what opens the panel there.
+		// AppIndicator 只能显示菜单、不报告点击，因此那里由菜单打开面板。
 		tray.SetMenu(s.menu())
 		return nil
 	}
@@ -617,15 +560,11 @@ func (s *State) Setup() error {
 	return nil
 }
 
-// trayDebugEnv makes Setup report where the system thinks the tray icon is.
+// trayDebugEnv 让 Setup 报告系统认为托盘图标所在的位置。
 //
-// Do not read a zero rectangle as "the icon was never added". MyGo asks
-// Shell_NotifyIconGetRect, which returns E_FAIL for every tray icon on
-// Windows 11 — measured on 2025-11 hardware against Chrome, Steam, PowerToys,
-// Raycast and the app window alike. The rectangle is worth having when it is
-// non-zero; zeros mean "no answer", not "no icon". The system's own record of
-// a registered icon is the NotifyIconSettings key under HKCU\Control Panel,
-// which gets one entry per icon that registers, including hidden ones.
+// 不要把零矩形读作「图标从未添加」。MyGo 调用 Shell_NotifyIconGetRect，
+// 而它在 Windows 11 上对每个托盘图标都返回 E_FAIL——2025-11 硬件上对 Chrome、Steam、
+// PowerToys、Raycast 及本 App 窗口实测皆然。非零矩形值得获取；零表示「无答案」，不是「无图标」。
 const trayDebugEnv = "BOKU_TRAY_DEBUG"
 
 func (s *State) logTrayBounds() {
@@ -637,9 +576,8 @@ func (s *State) logTrayBounds() {
 		"answer; see the comment on trayDebugEnv)", r.X, r.Y, r.Width, r.Height)
 }
 
-// Destroy takes the tray icon away. MyGo calls it on the main thread while
-// the application is quitting; leaving the icon behind makes the system
-// show a dead one until the pointer moves over it.
+// Destroy 移除托盘图标。MyGo 在应用退出时于主线程调用它；
+// 留下图标会让系统显示一个死图标，直到指针移过它。
 func (s *State) Destroy() {
 	if s.tray != nil {
 		s.tray.Destroy()
@@ -647,16 +585,13 @@ func (s *State) Destroy() {
 	}
 }
 
-// Refresh asks the open windows for a frame. It is what a background answer
-// calls — a new clipboard reading, a switch that was flipped — and it is
-// safe to call from another goroutine: Window.Update carries it to the main
-// thread, which is the only thread that may touch this state.
+// Refresh 请求已打开的窗口绘制一帧。后台答复（一次新的剪贴板读取、一次开关切换）调用它，
+// 且可从其它 goroutine 安全调用：Window.Update 会把它送到主线程，而主线程是唯一可以触碰此状态的线程。
 func (s *State) Refresh() {
 	s.featureHost().Refresh()
 }
 
-// featureHost is the Shell adapter used by feature UI packages. It is kept at
-// the edge of app so no feature needs to import app.State or MyGo windows.
+// featureHost 是功能 UI 包使用的 Shell 适配器。它守在 app 边界，使任何功能都无需 import app.State 或 MyGo 窗口。
 func (s *State) featureHost() presentation.Host {
 	return presentation.Host{
 		RequestRefresh: func() { s.refresh(nil) },
@@ -670,19 +605,13 @@ func (s *State) featureHost() presentation.Host {
 	}
 }
 
-// refresh is Refresh with work of the caller's to run on the main thread
-// after the repaint has been asked for: a goroutine that has an answer to
-// hand over gives it here as a closure rather than touching the state itself.
+// refresh 是带「重绘请求后要在主线程执行的工作」的 Refresh：有结果要交出的 goroutine 以闭包形式在此交出，
+// 而不自行触碰状态。
 //
-// The windows are MyGo's own way to the main thread (Window.Update posts to
-// it and returns), so the first window present carries the work and the
-// others get no repaint. With no window open there is nothing to carry it,
-// and dropping it would lose what the caller could not do on its own — a
-// notice about an update that finished while the quick window was closed, for
-// instance. It is posted on a goroutine instead, which is safe because the
-// work does nothing but ask MyGo to show a notice: that request is itself
-// carried to the main thread by the framework, and nothing in it touches the
-// state.
+// 窗口是 MyGo 通往主线程的方式（Window.Update 向它投递后返回），因此第一个存在的窗口承载工作，
+// 其余窗口只负责重绘。没有窗口打开时无人承载，而丢弃它会丢失调用方自己做不到的事——
+// 例如快捷窗口关闭时完成的更新通知。于是改为投递到一个 goroutine 上，这样做是安全的，
+// 因为该工作只是请求 MyGo 显示通知：这个请求本身由框架送到主线程，其中不触碰任何状态。
 func (s *State) refresh(after func()) {
 	if s.panel != nil {
 		s.panel.Update(refreshCallback(after))
@@ -704,6 +633,10 @@ func (s *State) refresh(after func()) {
 		s.flashHistory.Update(refreshCallback(after))
 		after = nil
 	}
+	if s.diaryWindow != nil {
+		s.diaryWindow.Update(refreshCallback(after))
+		after = nil
+	}
 	if s.translationUI != nil && s.translationUI.Repaint(refreshCallback(after)) {
 		after = nil
 	}
@@ -715,10 +648,9 @@ func (s *State) refresh(after func()) {
 	}
 }
 
-// refreshCallback turns a repaint-only request into a callable no-op. MyGo's
-// Window.Update always invokes its argument, so nil is not a valid way to ask
-// for just a redraw. The first open window receives after; every later window
-// receives a no-op, preserving the rule that extra work runs exactly once.
+// refreshCallback 把「只重绘」的请求变成可调用的空操作。MyGo 的 Window.Update 总会调用其参数，
+// 因此 nil 不是请求单纯重绘的合法方式。第一个打开的窗口接收 after；其后每个窗口接收空操作，
+// 保持「额外工作恰好执行一次」的规则。
 func refreshCallback(after func()) func() {
 	if after != nil {
 		return after
@@ -726,12 +658,14 @@ func refreshCallback(after func()) func() {
 	return func() {}
 }
 
-// menu is the tray menu: the only way out of a tray application, which has
-// no main window to close.
+// menu 是托盘菜单：托盘 App 的唯一出口，它没有主窗口可关。
 func (s *State) menu() *mygo.Menu {
 	items := []*mygo.MenuItem{
 		{Label: "打开 " + appName, Click: func(*mygo.MenuItem, *mygo.Window) { s.Toggle() }},
 		{Label: "设置…", Click: func(*mygo.MenuItem, *mygo.Window) { s.openSettings() }},
+	}
+	if s.diaryUI != nil {
+		items = append(items, &mygo.MenuItem{Label: "日记", Click: func(*mygo.MenuItem, *mygo.Window) { s.openDiary() }})
 	}
 	if s.flashUI != nil {
 		items = append(items,
@@ -739,10 +673,8 @@ func (s *State) menu() *mygo.Menu {
 			&mygo.MenuItem{Label: "闪念历史", Click: func(*mygo.MenuItem, *mygo.Window) { s.openFlashHistory() }},
 		)
 	}
-	// A ready update earns a line here, between the settings and the way
-	// out: the menu is the one place reachable while the application is
-	// behind another window. Every other status earns nothing — an item that
-	// can never do anything is noise in a four-line menu.
+	// 就绪的更新在此赢得一行，位于设置与出口之间：菜单是应用被别的窗口挡住时唯一可达的地方。
+	// 其它状态都不配一行——在四行菜单里，一个永远无事可做的条目只是噪音。
 	items = append(items, s.updateMenuItems()...)
 	items = append(items,
 		mygo.Separator(),
@@ -751,9 +683,8 @@ func (s *State) menu() *mygo.Menu {
 	return mygo.NewMenu(items)
 }
 
-// popUpMenu shows the menu next to the icon for this right click only, as
-// the framework's menubar example does: a menu left set would turn every
-// left click into a menu, and the left click is what opens the panel.
+// popUpMenu 仅在本次右键单击时在图标旁显示菜单，如框架的 menubar 示例所做：
+// 若菜单一直设置着，每次左键单击都会变成菜单，而左键正是打开面板的方式。
 func (s *State) popUpMenu() {
 	if s.panel != nil {
 		s.panel.Close()
@@ -763,9 +694,8 @@ func (s *State) popUpMenu() {
 	s.tray.PopUpMenu()
 }
 
-// Toggle opens the quick window next to the tray icon, or closes it when it
-// is already open. It is what the tray click, the menu item and the global
-// shortcut call, so it must return at once and never wait on anything.
+// Toggle 在托盘图标旁打开快捷窗口，若已打开则关闭。它是托盘点击、菜单项和全局快捷键调用的入口，
+// 因此必须立刻返回，且绝不等待任何东西。
 func (s *State) Toggle() {
 	if s.panel != nil {
 		s.panel.Close()
@@ -774,14 +704,11 @@ func (s *State) Toggle() {
 	s.Open()
 }
 
-// Activate brings the quick window forward: it is what a second launch of
-// the application asks for, since the running instance owns the tray and has
-// no window of its own to raise. The window already open is focused rather
-// than opened again, so a second launch never leaves two of them behind.
+// Activate 把快捷窗口带到前台：这是应用第二次启动所请求的，因为运行中的实例拥有托盘、自身没有窗口可抬起。
+// 已打开的窗口被聚焦而非再次打开，因此第二次启动不会留下两个窗口。
 //
-// A tray that does not exist yet is one nothing can be anchored to: MyGo's
-// NewFlyout refuses a flyout without a tray or a parent, and a second launch
-// arriving while the application is still starting has nothing to show.
+// 尚不存在的托盘没有任何东西可作锚点：MyGo 的 NewFlyout 拒绝无托盘或父窗口的 flyout，
+// 而在应用仍在启动时到来的第二次启动没有东西可显示。
 func (s *State) Activate() {
 	if s.tray == nil {
 		return
@@ -793,33 +720,26 @@ func (s *State) Activate() {
 	s.Open()
 }
 
-// quickWindowUsesPopover reports whether the quick window can be the system
-// popover. It can in the automatic appearance, whose material follows the
-// desktop and therefore matches Boku's page. A fixed dark appearance can use
-// it only with the injected dark material; a fixed light one draws the
-// application's own card, because a native popover on a dark desktop would be
-// dark behind a light page.
+// quickWindowUsesPopover 报告快捷窗口能否就是系统 popover。自动外观下可以：
+// 其材质跟随桌面，因而与 Boku 的页面相配。固定深色外观只有注入深色材质时才能用；
+// 固定浅色则绘制应用自己的卡片，因为深色桌面上的原生 popover 会在浅色页面背后变深。
 func (s *State) quickWindowUsesPopover() bool {
 	switch s.appearance.Mode() {
 	case AppearanceSystem:
-		// The material follows the desktop, and so does the page.
+		// 材质跟随桌面，页面亦然。
 		return true
 	case AppearanceDark:
-		// The material does not follow a forced appearance; the injected
-		// appearance is what makes the native popover usable here.
+		// 材质不跟随被强制的外观；注入的外观才是让原生 popover 在此可用的原因。
 		return s.popoverAppearance != nil
 	default:
-		// A forced light appearance keeps the application's card: the
-		// platform bridge is deliberately only for dark, and a native
-		// popover on a dark desktop would be dark behind a light page.
+		// 强制浅色保留应用卡片：平台桥接刻意只用于深色，
+		// 而深色桌面上的原生 popover 会在浅色页面背后变深。
 		return false
 	}
 }
 
-// quickWindowPlacement is where the quick window goes from the tray icon. A
-// popover centres its arrow on the icon; the application's card centres itself
-// on macOS for the same reason, and keeps the established end alignment where
-// it is the normal shape.
+// quickWindowPlacement 决定快捷窗口从托盘图标出发的位置。
+// popover 把箭头对准图标中心；应用卡片在 macOS 上出于同样原因居中，其余情况保持既有末端对齐。
 func quickWindowPlacement(goos string, popover bool) mygo.Placement {
 	if goos == "darwin" && !popover {
 		return mygo.PlacementTop
@@ -827,11 +747,9 @@ func quickWindowPlacement(goos string, popover bool) mygo.Placement {
 	return mygo.PlacementTopEnd
 }
 
-// Open shows a new quick window next to the tray icon.
+// Open 在托盘图标旁显示一个新的快捷窗口。
 //
-// The window is created again on every open instead of being kept hidden:
-// a flyout is placed against the tray when it is created, so a reused one
-// would stay where it was first shown.
+// 每次打开都重新创建窗口，而不是隐藏复用：flyout 在创建时贴靠托盘，复用会停在它首次显示的位置。
 func (s *State) Open() {
 	popover := s.quickWindowUsesPopover()
 	panel := mygo.NewFlyout(mygo.FlyoutOptions{
@@ -840,15 +758,12 @@ func (s *State) Open() {
 		Gap:       4,
 		Width:     panelWidth,
 		Height:    s.quickWindowHeight(),
-		// Focusable: a click outside closes it, as the system's menus do.
+		// Focusable：点击外部会关闭它，如系统菜单那样。
 		Focusable: true,
 		Shadow:    true,
-		// Popover: on macOS it is an NSPopover, which draws the material,
-		// the corners and the arrow pointing at the icon. It is used in the
-		// automatic appearance and, with the injected dark material, in a
-		// fixed dark one; a fixed light one draws the application's card.
-		// Elsewhere the option is ignored and the view draws its own
-		// background either way.
+		// Popover：macOS 上是 NSPopover，绘制材质、圆角和指向图标的箭头。
+		// 自动外观下使用，注入深色材质时固定深色也使用；固定浅色则绘制应用卡片。
+		// 其它平台忽略该选项，由视图自绘背景。
 		Popover: popover,
 		Content: ui.View(s.View),
 	})
@@ -862,38 +777,28 @@ func (s *State) Open() {
 			s.panelInjectedDark = false
 		}
 	})
-	// Opening the window is the moment to refresh, and every tray click asks
-	// again whatever the cache says: the numbers a click shows should be the
-	// numbers now, not the ones the previous click left behind. The request
-	// runs off the main thread; the view never starts work of its own,
-	// because MyGo builds it several times per frame.
+	// 打开窗口正是刷新的时机，且每次托盘点击无论缓存如何都会再次请求：一次点击显示的数字应是此刻的数字，
+	// 而非上次点击留下的。请求在主线程之外运行；视图从不自行启动工作，因为 MyGo 每帧会构建它多次。
 	//
-	// The animation service may already hold today's disk cache. Turn its
-	// cover bytes into UI bitmaps before the first frame, so a cache-backed
-	// opening does not flash placeholder marks while the network refresh is
-	// still in flight. This is presentation-thread image decoding, not I/O.
+	// 动画服务可能已持有今日的磁盘缓存。在第一帧前把它的封面字节转成 UI 位图，
+	// 使缓存支撑的打开不会在网络刷新仍在进行时闪现占位标记。这是表现线程的图像解码，不是 I/O。
 	s.cacheAnimeCovers()
 	s.CachePlaytimeCovers()
-	// The followed-UP block may already hold rows from the last refresh, and
-	// its avatars may already have been fetched. Turn them into bitmaps and
-	// size the flyout for them before the first frame, so an opening does not
-	// show placeholders that resolve a moment later.
+	// 被关注 UP 的块可能已持有上次刷新的行，其头像也可能已抓取。在第一帧前把它们转成位图并为它们定好 flyout 尺寸，
+	// 使打开时不会显示稍后才解析出来的占位符。
 	s.cacheBilibiliAvatars()
 	s.fitQuickWindow()
 	s.refreshAsync(true)
 }
 
-// quickWindowHeight sizes the flyout from what is switched on, within the
-// half-screen ceiling. The fallback keeps tests without a screen deterministic.
+// quickWindowHeight 根据开关状态在半个屏幕高度上限内确定 flyout 尺寸。回退值让无屏幕的测试保持确定性。
 func (s *State) quickWindowHeight() int {
 	work := s.screenNear(s.cursorPoint())
 	return quickWindowHeightForContent(s.translationUI.ImageTaskCount(), s.readingBlocksOn(), work.Height)
 }
 
-// readingBlocksOn reports whether a block the user reads — today's animation
-// releases, or the followed UPs — is switched on. Either one opens the flyout
-// at quickEnabledHeightShare of the work area, tall enough to show it without
-// scrolling and without filling the screen.
+// readingBlocksOn 报告用户阅读的块——今日动画更新或被关注的 UP——是否开启。
+// 任一开启都会让 flyout 以工作区的 quickEnabledHeightShare 高度打开，足以无需滚动地显示，又不占满屏幕。
 func (s *State) readingBlocksOn() bool {
 	if s.quickWindowLayout.Visible("anime") && s.animeService != nil && s.animeService.Enabled() && s.animeService.Username() != "" {
 		return true
@@ -901,29 +806,24 @@ func (s *State) readingBlocksOn() bool {
 	return s.quickWindowLayout.Visible("bilibili") && s.bilibiliService != nil && s.bilibiliService.Enabled() && len(s.bilibiliService.UIDs()) > 0
 }
 
-// quickWindowHeightForTasks is the image-task-only sizing rule. Keeping it
-// independent of the desktop makes the half-screen guarantee testable without
-// a live tray or display.
+// quickWindowHeightForTasks 是仅按图片任务定尺寸的规则。让它独立于桌面，
+// 使半屏保证无需真实托盘或显示器即可测试。
 func quickWindowHeightForTasks(tasks, workHeight int) int {
 	return quickWindowHeightForContent(tasks, false, workHeight)
 }
 
-// quickWindowHeightForContent is the whole sizing rule:
+// quickWindowHeightForContent 是完整定尺寸规则：
 //
-//   - a reading block is switched on: 30% of the work area, which shows a
-//     couple of rows under the panels;
-//   - otherwise: the base height, one row per image task;
+//   - 有阅读块开启：工作区的 30%，在面板下方显示几行；
+//   - 否则：基础高度，每个图片任务一行；
 //
-// and never more than half the work area.
+// 并且绝不超工作区的一半。
 //
-// The height is decided from settings and the task count alone — never from
-// measured content. Measuring was the previous attempt, and it went wrong in
-// the one way that matters: the boxes it read follow the scroll offset, so
-// dragging the scrollbar resized the window under the user's pointer.
+// 高度仅由设置和任务数决定——绝不来自测量内容。测量是此前的尝试，它以唯一要紧的方式出错：
+// 它读取的盒子跟随滚动偏移，拖动滚动条会在用户指针下改变窗口大小。
 //
-// The price is that a flyout with a reading block on and little in it can be
-// taller than its rows. That is the trade the user asked for after seeing it:
-// a predictable height over a moving one.
+// 代价是：阅读块开启而内容很少时，flyout 可能比其行更高。这是用户看到后选择的权衡：
+// 可预测的高度胜过变动的高度。
 func quickWindowHeightForContent(tasks int, readingBlocks bool, workHeight int) int {
 	maxHeight := workHeight / 2
 	if maxHeight <= 0 {
@@ -931,48 +831,39 @@ func quickWindowHeightForContent(tasks int, readingBlocks bool, workHeight int) 
 	}
 	wanted := panelHeight + max(tasks, 0)*quickTaskRowHeight
 	if readingBlocks {
-		// The share is a floor, not a target: on a short display 30% can be
-		// less than the base height, and a reading block must never make the
-		// flyout smaller than a flyout without one.
+		// 该占比是下限而非目标：在较矮的屏幕上 30% 可能低于基础高度，
+		// 阅读块绝不能使 flyout 比没有它时更小。
 		wanted = max(wanted, int(float64(workHeight)*quickEnabledHeightShare))
 	}
 	return clampInt(wanted, min(panelHeight, maxHeight), maxHeight)
 }
 
-// fitQuickWindow applies the height rule after a task is added, completed,
-// retried or removed, or after a block is switched on or off. SetSize is the
-// MyGo flyout API that also re-places the window next to its tray anchor.
+// fitQuickWindow 在任务添加、完成、重试或移除后，或在块开关后应用高度规则。
+// SetSize 是 MyGo 的 flyout API，它会同时把窗口重新贴靠到托盘锚点。
 func (s *State) fitQuickWindow() {
 	if s.panel != nil {
 		s.panel.SetSize(panelWidth, s.quickWindowHeight())
 	}
 }
 
-// View builds one frame of the quick window: the panel, the clipboard line
-// under it and the footer. It has no title bar of its own — a flyout hangs
-// from the tray icon, and the window it opens is what names the application —
-// so the content starts at the top of the window.
+// View 绘制快捷窗口的一帧：面板、其下的剪贴板行和页脚。它自身没有标题栏——
+// flyout 从托盘图标悬挂，打开它的窗口才为应用命名——因此内容从窗口顶部开始。
 //
-// The window is drawn on the application's design (design.go) rather than on
-// the framework's default theme: the panel reads as the first section of a
-// page, which is what it is.
+// 窗口按应用自己的设计（design.go）绘制，而非框架默认主题：面板读作页面的第一个区块，它正是如此。
 func (s *State) View(c *ui.Context) {
 	s.useDesign(c)
 	c.Root().Background(ui.Transparent)
-	// A frame is where a ready update is noticed too, on the same decision
-	// the service's own change reports go through (see refreshReadyUpdate):
-	// the notice is shown once per version, so whichever of the two sees it
-	// first, the other finds nothing left to do.
+	// 帧也是察觉就绪更新的地方，走与更新服务自身变更报告相同的判断（见 refreshReadyUpdate）：
+	// 通知每版本只显示一次，因此两者中先看到的一方处理后，另一方无事可做。
 	s.refreshReadyUpdate()
 	box := ui.Column(c).Fill()
 	switch {
-	case c.Vibrancy(): // over the popover's own material on macOS
-	case runtime.GOOS == "windows": // Windows 11 rounds and outlines the flyout
+	case c.Vibrancy(): // macOS 上位于 popover 自身材质之上
+	case runtime.GOOS == "windows": // Windows 11 为 flyout 加圆角与轮廓
 		box.Background(presentation.ColorSurface)
 	case runtime.GOOS == "darwin":
-		// A fixed appearance draws the application's card on macOS: the
-		// system draws the shadow and outlines the card with a hairline, so
-		// it draws the face and its corner and no second border.
+		// 固定外观在 macOS 上绘制应用卡片：系统绘制阴影并用细线勾勒卡片，
+		// 因此只绘其表面与圆角，不加第二道边框。
 		box.Background(presentation.ColorSurface).Radius(presentation.RadiusCard)
 	default:
 		box.Background(presentation.ColorSurface).Radius(presentation.RadiusCard).Border(1, presentation.ColorBorder)
@@ -980,26 +871,20 @@ func (s *State) View(c *ui.Context) {
 	box.Children(func() {
 		body := ui.Scroll(c).FillWidth().Grow(1)
 		body.Children(func() {
-			// Every block brings its own room with it, and the line between
-			// two of them is the window's: the design's blocks are the
-			// window, not rows inside one margin.
+			// 每个块自带其空间，两块之间的线属于窗口：设计中的块就是窗口，而非同一外边距内的行。
 			s.quickLayoutBlocks(c)
 			s.translationUI.QuickView(c)
 		})
-		// The clipboard row closes the content: it is about the desktop
-		// rather than about a panel, and it belongs at the far end of the
-		// window from the numbers. The line under it is the window's own —
-		// it runs from edge to edge — and the footer keeps its own room
-		// inside that.
+		// 剪贴板行收束内容：它关乎桌面而非某个面板，应位于窗口离数字最远的一端。
+		// 其下的线属于窗口——从一边延伸到另一边——页脚在其中保留自己的空间。
 		s.clipboardBottom(c)
 		presentation.QuickEdgeLine(c)
 		presentation.QuickWindowFooter(c, s.versionLine(), s.flyoutActions)
 	})
 }
 
-// clipboardBottom draws the quick window's clipboard region, when the user
-// asked for it. Without the switch the region is not there at all — no
-// divider, no empty line — so a window that never wanted it is unchanged.
+// clipboardBottom 在用户要求时绘制快捷窗口的剪贴板区域。没有该开关时区域根本不存在——
+// 没有分隔线、没有空行——因此从不需要它的窗口保持不变。
 func (s *State) clipboardBottom(c *ui.Context) {
 	if s.clipboard == nil {
 		return
@@ -1010,13 +895,15 @@ func (s *State) clipboardBottom(c *ui.Context) {
 	s.clipboardRegion(c)
 }
 
-// flyoutActions is the quick window's footer: everything the user can always
-// do from here. The actions are marks rather than words — the footer is one
-// line at the bottom of a card, and a word there reads as another piece of
-// content while a mark reads as what it is. Each keeps its label for the
-// pointer that rests on it and for assistive technology.
+// flyoutActions 是快捷窗口的页脚：用户始终能从这里做的事。每个按钮都带标签供悬停指针与辅助技术使用。
 func (s *State) flyoutActions(c *ui.Context) {
 	ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(4)).Children(func() {
+		if s.diaryUI != nil {
+			if button := presentation.QuietIconButton(c, s.diaryMark, "日记"); button.Clicked() {
+				slog.Info("diary button clicked", "event", "diary_opened", "source", "quick_window")
+				s.openDiary()
+			}
+		}
 		if s.flashUI != nil {
 			if button := presentation.QuietIconButton(c, s.flashMark, "闪念"); button.Clicked() {
 				slog.Info("flash button clicked", "event", "flash_history_opened", "source", "quick_window")
@@ -1044,7 +931,7 @@ func (s *State) flyoutActions(c *ui.Context) {
 	})
 }
 
-// versionLine is what the footer shows on the left.
+// versionLine 是页脚左侧显示的内容。
 func (s *State) versionLine() string {
 	version := strings.TrimSpace(s.version)
 	if version == "" {
@@ -1053,14 +940,11 @@ func (s *State) versionLine() string {
 	return appName + " " + version
 }
 
-// refreshAsync fetches the listed panels away from the main thread.
+// refreshAsync 在主线程之外获取列出的面板。
 //
-// force asks for a refresh whatever the cache says; otherwise a panel is only
-// asked when its snapshot is missing, stale or from a failed attempt. Each
-// panel runs in its own goroutine, so one slow provider cannot hold up
-// another's numbers. The answers are not carried back here: the use case
-// keeps them, and the repaint below makes the view read them. That is why a
-// refresh that finishes while the window is closed loses nothing.
+// force 请求无视缓存地刷新；否则只在快照缺失、过期或来自失败尝试时才请求某个面板。
+// 每个面板在各自的 goroutine 中运行，因此一个慢提供者不会拖累另一个的数字。
+// 答复不回到此处：用例持有它们，下面的重绘让视图读取它们。这就是关闭窗口时完成的刷新不丢失任何东西的原因。
 func (s *State) refreshAsync(force bool) {
 	for _, panel := range s.panelService.List() {
 		s.panelUI.RefreshPanelAsync(panel.ID, force)

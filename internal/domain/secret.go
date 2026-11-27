@@ -5,62 +5,51 @@ import (
 	"time"
 )
 
-// SecretMeta describes one stored secret without saying what it is. A store
-// keeps it beside the value, so that a window can list which keys exist and
-// who they belong to without reading any value.
+// SecretMeta 描述一个已存储的密钥而不透露其内容。存储把它与值放在一起，
+// 好让窗口能列出存在哪些 key、属于谁，而不读取任何值。
 type SecretMeta struct {
 	ProviderID string
-	// Account is a non-sensitive label, such as which account a key
-	// belongs to; it is shown, so it never holds a credential.
+	// Account 是非敏感标签，例如密钥属于哪个账户；它会显示，因此绝不含凭据。
 	Account   string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
-// Secret is one credential, in memory, for as long as it is being used.
+// Secret 是一个凭据，仅在使用期间存在于内存。
 //
-// Value is the plain text and it stays here: a Secret has no String method
-// on purpose, and nothing formats one — a struct printed with %v would show
-// its value, which is exactly what must never reach a log.
+// Value 是明文，只留在这里：Secret 故意没有 String 方法，也没有任何东西格式化
+// 它——用 %v 打印结构体会显示其值，而值恰恰绝不能进入日志。
 type Secret struct {
 	Name  string
 	Value []byte
 	Meta  SecretMeta
 }
 
-// Text returns the value as the text a request needs.
+// Text 以请求所需的文本形式返回值。
 func (s Secret) Text() string { return string(s.Value) }
 
-// SecretStore keeps credentials. The database stores only these names, never
-// a value. Only this interface stands between the application and how the
-// values are protected, so the file behind it can change without touching
-// the layers above.
+// SecretStore 保存凭据。数据库只存这些名称，绝不存值。只有这个接口横在应用
+// 与值的保护方式之间，所以其背后的文件可以更换而不触及上层。
 //
-// The locked state is part of the interface and not of this build. A store
-// that needs a passphrase before it can be read answers ErrVaultLocked —
-// which is why Put, Get and the rest are written to be branchable on it —
-// but the store this application assembles keeps its values in a plain-text
-// file and answers true to Unlocked always. §5 of the security design says
-// why, and says what protects the values instead.
+// 锁定状态属于接口而非本构建：需要口令才能读取的存储会返回 ErrVaultLocked
+// ——因此 Put、Get 等方法都写成可据此分支——但本应用装配的存储把值放在明
+// 文文件里，Unlocked 始终返回 true。安全设计 §5 说明原因以及用什么保护值。
 type SecretStore interface {
-	// Unlock makes the values readable. A store with nothing to unlock
-	// accepts any passphrase — which is itself the honest answer for a
-	// plain-text file.
+	// Unlock 使值可读。无需解锁的存储接受任意口令——对明文文件而言，这
+	// 正是诚实的答案。
 	Unlock(ctx context.Context, passphrase string) error
-	// Lock forgets what it can, so that the values are not readable again
-	// until the next Unlock.
+	// Lock 尽力遗忘，使值在下次 Unlock 前不再可读。
 	Lock()
-	// Unlocked reports whether values can be read right now.
+	// Unlocked 报告当前值是否可读。
 	Unlocked() bool
-	// Put stores a value under a name, replacing it and keeping the
-	// creation time of the first version.
+	// Put 在某个名称下存值，替换旧值并保留首个版本的创建时间。
 	Put(ctx context.Context, name string, value []byte, meta SecretMeta) error
-	// Get returns one secret, or ErrSecretNotFound.
+	// Get 返回一个密钥，或 ErrSecretNotFound。
 	Get(ctx context.Context, name string) (Secret, error)
-	// Delete removes a name, or returns ErrSecretNotFound.
+	// Delete 删除一个名称，或返回 ErrSecretNotFound。
 	Delete(ctx context.Context, name string) error
-	// List returns every name, sorted, and no values.
+	// List 返回所有名称（已排序），不含值。
 	List(ctx context.Context) ([]string, error)
-	// Meta returns one name's metadata, or ErrSecretNotFound.
+	// Meta 返回某个名称的元数据，或 ErrSecretNotFound。
 	Meta(ctx context.Context, name string) (SecretMeta, error)
 }

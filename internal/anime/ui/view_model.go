@@ -1,4 +1,4 @@
-// Package ui owns animation-update presentation state and view helpers.
+// Package ui 负责动画更新的展示状态与视图辅助。
 package ui
 
 import (
@@ -16,9 +16,6 @@ import (
 	"boku/internal/presentation"
 )
 
-// ViewModel owns UI-only decoded cover bitmaps. The feature service retains
-// source bytes; converting them for MyGo belongs to presentation, not to the
-// network/cache layer.
 type Service interface {
 	Enabled() bool
 	Username() string

@@ -6,16 +6,16 @@ import (
 	"strings"
 )
 
-// The domain's errors. Callers test them with errors.Is: an error that
-// describes more, such as BadResponseError, wraps one of these.
+// 领域错误。调用方用 errors.Is 判断：携带更多信息的错误（如 BadResponseError）
+// 会包裹其中之一。
 var (
-	// General.
+	// 通用。
 	ErrNotFound           = errors.New("not found")
 	ErrInvalidArgument    = errors.New("invalid argument")
 	ErrInvalidMetricValue = errors.New("invalid metric value")
 	ErrAlreadyExists      = errors.New("already exists")
 
-	// Providers and the network.
+	// Provider 与网络。
 	ErrProviderNotFound     = errors.New("provider not found")
 	ErrProviderUnauthorized = errors.New("provider unauthorized")
 	ErrProviderRateLimited  = errors.New("provider rate limited")
@@ -24,52 +24,38 @@ var (
 	ErrProviderBadResponse  = errors.New("provider bad response")
 	ErrCredentialMissing    = errors.New("credential missing")
 
-	// Credentials: the store keeps values in a plain-text file, so the only
-	// two things that can go wrong are a name that is not there and a name
-	// that already is. There is no locked state to report — §5 of the
-	// security design says why — and the errors an encrypted store would
-	// need were removed with the encryption rather than left for a caller to
-	// branch on something that never happens.
+	// 凭据：存储把值放在明文文件里，因此只会出现两种问题——名称不存在、
+	// 名称已存在。
 	ErrSecretNotFound = errors.New("secret not found")
 	ErrSecretExists   = errors.New("secret exists")
 
-	// Tools.
+	// 工具。
 	ErrInvalidJSON                = errors.New("invalid json")
 	ErrInvalidMagnetURI           = errors.New("invalid magnet uri")
 	ErrUnsupportedClipboardFormat = errors.New("unsupported clipboard format")
 	ErrTranslateUnavailable       = errors.New("translation unavailable")
 	ErrImageTranslateUnavailable  = errors.New("image translation unavailable")
-	// ErrImageTranslationFailed means the image model understood the request
-	// but could not translate this particular image. Unlike a bad response, its
-	// structured code gives the interface an actionable explanation.
+	// ErrImageTranslationFailed 表示图像模型理解了请求但无法翻译这张图片。
+	// 不同于坏响应，它的结构化代码能给界面可操作的说明。
 	ErrImageTranslationFailed = errors.New("image translation failed")
-	// ErrScreenRecordingDenied is macOS refusing to read the screen because
-	// the user has not allowed Boku to record it. It is not a translation
-	// failure and not a missing translator: the window sends the user to the
-	// System Settings switch. The capture is checked before pixels are read,
-	// because an unauthorized CoreGraphics read returns black rather than
-	// nothing.
+	// ErrScreenRecordingDenied 是 macOS 因用户未允许 Boku 录屏而拒绝读取屏幕。
+	// 它不是翻译失败，也不是缺少翻译器：窗口会引导用户去系统设置开关。
+	// 读取像素前先检查授权，因为未授权的 CoreGraphics 读取返回黑色而非没有。
 	ErrScreenRecordingDenied = errors.New("screen recording denied")
-	// ErrTranslateDisabled is the tool switched off, which is not the same
-	// thing as the tool having nowhere to send a text. They are separate
-	// errors because they are separate sentences to the user: "you turned this
-	// off, here is how to turn it back on" and "there is no service to ask".
-	// One error for both made the card tell a user whose tool was off that
-	// every free service was down.
+	// ErrTranslateDisabled 是工具被关闭，与工具无处发送文本不是一回事。
+	// 它们是给用户的两句不同的话，因此是两个独立错误。
 	ErrTranslateDisabled = errors.New("translation disabled")
 
-	// Credentials that belong to another tool: the login Boku reads is the
-	// tool's, so the tool is what has to be logged in, and it may not be
-	// there at all.
+	// 属于其它工具的凭据：Boku 读取的登录属于该工具，因此需要登录的是该工具，
+	// 它也可能根本不存在。
 	ErrLoginCommandMissing = errors.New("login command missing")
 	ErrLoginUnsupported    = errors.New("login cannot be started here")
-	// ErrDeviceLoginExpired is a device code the user did not finish in time.
+	// ErrDeviceLoginExpired 是用户未及时完成的设备码。
 	ErrDeviceLoginExpired = errors.New("device login expired")
 )
 
-// ImageTranslationFailureCode is the closed set a vision model may use when
-// it cannot produce a translation. Keeping this small and machine-readable
-// avoids presenting a model's untrusted prose as an application error.
+// ImageTranslationFailureCode 是视觉模型无法产出翻译时可用的一组封闭取值。
+// 保持其小而机器可读，避免把模型不可信的散文当作应用错误展示。
 type ImageTranslationFailureCode string
 
 const (
@@ -87,8 +73,8 @@ func (c ImageTranslationFailureCode) Valid() bool {
 	}
 }
 
-// ImageTranslationError carries the model's structured failure code only.
-// It deliberately contains neither the image nor model-generated text.
+// ImageTranslationError 只携带模型的结构化失败代码。
+// 它有意不含图片，也不含模型生成的文本。
 type ImageTranslationError struct {
 	Code ImageTranslationFailureCode
 }
@@ -99,12 +85,12 @@ func (e *ImageTranslationError) Error() string {
 
 func (e *ImageTranslationError) Unwrap() error { return ErrImageTranslationFailed }
 
-// MaxSnippetBytes is how much of a response an error carries: enough to see
-// a renamed field, short enough not to fill a log with a whole payload.
+// MaxSnippetBytes 是错误携带的响应片段量：足以看出被改名的字段，
+// 又短到不会让整份负载填满日志。
 const MaxSnippetBytes = 512
 
-// BadResponseError reports a response the caller could not use. It is what
-// ErrProviderBadResponse wraps, and it never carries credentials.
+// BadResponseError 报告调用方无法使用的响应。它是 ErrProviderBadResponse
+// 所包裹的对象，且从不携带凭据。
 type BadResponseError struct {
 	ProviderID string
 	Endpoint   string
@@ -134,11 +120,10 @@ func (e *BadResponseError) Error() string {
 	return b.String()
 }
 
-// Unwrap makes errors.Is(err, ErrProviderBadResponse) true.
+// Unwrap 使 errors.Is(err, ErrProviderBadResponse) 成立。
 func (e *BadResponseError) Unwrap() error { return ErrProviderBadResponse }
 
-// Snippet returns the first MaxSnippetBytes of a response, as text, for an
-// error message.
+// Snippet 返回响应的前 MaxSnippetBytes 字节，作为错误消息中的文本。
 func Snippet(payload []byte) string {
 	if len(payload) > MaxSnippetBytes {
 		payload = payload[:MaxSnippetBytes]

@@ -1,45 +1,23 @@
-// Package freetranslate holds the identity of the free translation engines:
-// the ids they are registered under, the credential key their descriptors
-// carry, and the documentation link.
+// Package freetranslate 存放免费翻译引擎的身份：注册 id、描述符携带的凭据 key 和文档链接。
 //
-// It exists for one reason: the ids are read from two features that must agree
-// — the translation backends (internal/translate/free) and the settings window
-// (internal/app, which draws them in the translation section) — and two copies
-// of a string that must match is two chances to get it wrong.
-//
-// The engines are the same shape as internal/panel/<vendor>: their identity
-// belongs in a contract package, and their code belongs in the backend that
-// asks them.
-//
-// Nothing here does anything.
+// id 被两处读取且必须一致：翻译后端（internal/translate/free）与设置窗口
+// （internal/app 的翻译分区）。字符串只保留一份，避免两处不一致。
 package freetranslate
 
-// The free engines, as the settings file names them.
-//
-// Each one is a translator of its own and a choice of its own: the user picks
-// the engine they want from the translation section, and that engine is the one
-// asked. There is no pool and no fallback — an engine that fails reports the
-// failure, and the user changes engines if they want another one. Two options
-// in the interface means two answers, not one answer with a preference.
+// 免费引擎，名称与设置文件一致。
+// 每个引擎既是独立翻译器也是独立选项：用户选哪个就问哪个，不做池化、不做回退，
+// 失败的引擎直接报错，由用户自己换。
 const (
-	// MicrosoftEdge is the endpoint Edge's own translate feature asks. It is
-	// the wider, steadier of the two (§3.1 of the free-translate research) and the one
-	// that answers faster.
+	// MicrosoftEdge 是 Edge 自带翻译功能请求的端点。
 	MicrosoftEdge = "free.microsoft"
-	// Bilibili is B 站's Index-Translate model on its free public endpoint. It
-	// is the one that can annotate (§3.2 of the free-translate research), which is what
-	// the Japanese settings need.
+	// Bilibili 是 B 站免费的 Index-Translate 模型，支持注释，日文场景需要。
 	Bilibili = "free.bilibili"
 )
 
-// APIKeyCredential is the placeholder the descriptors carry.
-//
-// Neither engine needs a credential: AllowEmptyCredential is what says so, and
-// a missing key is not a missing configuration. The name is here because
-// TranslatorDescriptor.Validate refuses a translator that asks for none.
+// APIKeyCredential 是描述符携带的占位凭据名。
+// 两个引擎都不需要凭据，由 AllowEmptyCredential 声明；这里保留名字是因为
+// TranslatorDescriptor.Validate 不允许不声明凭据的翻译器。
 const APIKeyCredential = "apiKey"
 
-// DocsURL is where the free engines are written down. It is not a page that
-// hands out a key — there is none — but the descriptor requires one, and the
-// user is owed a page that says which endpoints their text is sent to.
+// DocsURL 是免费引擎的说明页，说明文本会发往哪些端点（并非发 key 的页面）。
 const DocsURL = "https://github.com/bilibili/Index-Translate"

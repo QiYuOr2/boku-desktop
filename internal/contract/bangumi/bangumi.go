@@ -1,4 +1,4 @@
-// Package bangumi holds the stable identity of Bangumi's public API.
+// Package bangumi 存放 Bangumi 公开 API 的稳定标识。
 package bangumi
 
 const (

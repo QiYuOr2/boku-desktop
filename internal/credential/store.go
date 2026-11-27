@@ -1,30 +1,14 @@
-// Package credential owns the application's credentials: the file they are
-// kept in (this one) and the one action the interface takes on them
-// (service.go).
+// Package credential 负责应用的凭据：存放它们的文件（本文件）与界面能对它们做的操作（service.go）。
 //
-// The values are stored as plain text in a JSON file that the store asks the
-// operating system to keep at 0600. That is a deliberate choice, and it is the
-// same one most tools of this kind make: without a passphrase the user has to
-// type, there is nowhere to keep a key that an attacker who can read the
-// directory cannot also read. Encrypting the file with a key kept beside it
-// would look like protection without being any, which is worse than saying
-// plainly what the file is.
+// 值以明文 JSON 保存，按 0600 请求权限。这是有意的选择：没有用户输入的
+// 口令，就不存在一个既能解密、又不会被能读到该目录的攻击者读到的地方放密钥。
+// 把文件用旁边的密钥加密只是看起来像保护，实际并没有，比如实说明更糟。
 //
-// What protects the values is therefore not cryptography but the things that
-// can actually be promised, and §5 of the security design says which:
+// 因此保护值靠的不是密码学，而是能真正保证的事：
 //
-//   - the file is written 0600, and on Windows what decides access is the
-//     ACL — a directory only its owner, administrators and SYSTEM can read;
-//   - a value never appears in an error or a log, and never in the database,
-//     which keeps only the name;
-//   - the settings window says the credentials are in a plain-text file, so
-//     nobody is led to believe otherwise.
-//
-// The store has nothing to unlock, which is why Unlock accepts anything and
-// Unlocked always answers true. The interface keeps those methods — see
-// §2 of the security design — so that a build which does have something to
-// unlock can be swapped in without the layers above knowing, but this build
-// does not pretend to have one.
+//   - 文件按 0600 写入；Windows 上由 ACL 决定访问（仅所有者、管理员与 SYSTEM 可读目录）；
+//   - 值不出现在错误或日志中，也不进数据库，数据库只存名字；
+//   - 设置窗口明确告知凭据是明文文件，不误导用户。
 package credential
 
 import (
@@ -42,17 +26,14 @@ import (
 	"boku/internal/platform/atomicfile"
 )
 
-// FileName is the file the credentials are kept in, under the user data
-// directory.
+// FileName 是凭据文件名，位于用户数据目录下。
 const FileName = "secrets.json"
 
-// fileVersion is the shape this build reads and writes. A file from another
-// version is refused rather than partly understood.
+// fileVersion 是当前构建读写的数据结构版本；版本不符的文件直接拒绝，不尝试部分解析。
 const fileVersion = 1
 
-// Store keeps credentials in one file. It is safe for concurrent use: the
-// file is written whole, through a temporary file and a rename, so a crash
-// mid-write cannot leave a half-written secret.
+// Store 把凭据保存在单个文件中，可并发使用：整份文件经临时文件加改名写入，
+// 写到一半崩溃也不会留下残缺的密钥。
 type Store struct {
 	path string
 
@@ -73,8 +54,7 @@ type document struct {
 	Secrets map[string]stored `json:"secrets"`
 }
 
-// Open reads the store at path. A file that does not exist yet is not an
-// error: the store starts empty and creates the file on the first write.
+// Open 读取 path 处的存储。文件尚不存在不算错误：存储为空，首次写入时创建。
 func Open(path string) (*Store, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("%w: the secret store has no path", domain.ErrInvalidArgument)
@@ -89,7 +69,7 @@ func Open(path string) (*Store, error) {
 	}
 	var doc document
 	if err := json.Unmarshal(data, &doc); err != nil {
-		// The parser's message describes the shape, not the values.
+		// 解析器的消息只描述结构，不涉及值。
 		return nil, fmt.Errorf("secret: %s is not a readable credential file: %w", path, err)
 	}
 	if doc.Version != fileVersion {
@@ -101,21 +81,19 @@ func Open(path string) (*Store, error) {
 	return store, nil
 }
 
-// Path returns the file the store keeps, for the interface to name it.
+// Path 返回存储的文件路径，供界面展示。
 func (s *Store) Path() string { return s.path }
 
-// Unlock accepts any passphrase: a plain-text file has nothing to unlock.
+// Unlock 接受任意口令：明文文件没有可解锁的东西。
 func (s *Store) Unlock(ctx context.Context, _ string) error { return contextError(ctx) }
 
-// Lock does nothing, for the same reason: the values are readable whether it
-// is called or not.
+// Lock 什么也不做：值无论是否调用它都可读。
 func (s *Store) Lock() {}
 
-// Unlocked is always true here; see the package comment.
+// Unlocked 恒为 true，见包注释。
 func (s *Store) Unlocked() bool { return true }
 
-// Put stores a value, replacing an existing one and keeping the creation
-// time of its first version.
+// Put 写入一个值，覆盖已有值并保留首次创建的 createdAt。
 func (s *Store) Put(ctx context.Context, name string, value []byte, meta domain.SecretMeta) error {
 	if err := contextError(ctx); err != nil {
 		return err
@@ -151,7 +129,7 @@ func (s *Store) Put(ctx context.Context, name string, value []byte, meta domain.
 	}
 	s.secrets[name] = entry
 	if err := s.save(); err != nil {
-		// The store keeps what it had: memory and file stay in step.
+		// 回滚：内存与文件保持一致。
 		if existed {
 			s.secrets[name] = previous
 		} else {
@@ -162,7 +140,6 @@ func (s *Store) Put(ctx context.Context, name string, value []byte, meta domain.
 	return nil
 }
 
-// Get returns one secret, or ErrSecretNotFound.
 func (s *Store) Get(ctx context.Context, name string) (domain.Secret, error) {
 	if err := contextError(ctx); err != nil {
 		return domain.Secret{}, err
@@ -177,7 +154,6 @@ func (s *Store) Get(ctx context.Context, name string) (domain.Secret, error) {
 	return domain.Secret{Name: name, Value: []byte(entry.Value), Meta: entry.meta()}, nil
 }
 
-// Delete removes a value, or returns ErrSecretNotFound.
 func (s *Store) Delete(ctx context.Context, name string) error {
 	if err := contextError(ctx); err != nil {
 		return err
@@ -197,7 +173,6 @@ func (s *Store) Delete(ctx context.Context, name string) error {
 	return nil
 }
 
-// List returns every name, sorted, and no values.
 func (s *Store) List(ctx context.Context) ([]string, error) {
 	if err := contextError(ctx); err != nil {
 		return nil, err
@@ -212,7 +187,6 @@ func (s *Store) List(ctx context.Context) ([]string, error) {
 	return names, nil
 }
 
-// Meta returns one name's metadata, or ErrSecretNotFound.
 func (s *Store) Meta(ctx context.Context, name string) (domain.SecretMeta, error) {
 	if err := contextError(ctx); err != nil {
 		return domain.SecretMeta{}, err
@@ -236,8 +210,7 @@ func (s stored) meta() domain.SecretMeta {
 	}
 }
 
-// save writes the whole file through a temporary file. The caller holds the
-// lock.
+// save 经临时文件写入整份文件；调用方持有锁。
 func (s *Store) save() error {
 	data, err := json.MarshalIndent(document{Version: fileVersion, Secrets: s.secrets}, "", "  ")
 	if err != nil {

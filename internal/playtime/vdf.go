@@ -7,9 +7,8 @@ import (
 	"unicode/utf8"
 )
 
-// parseVDF reads the text Valve KeyValue files Steam writes for libraries
-// and manifests. A value is either a string or a map of the same. Binary
-// KeyValues, such as shortcuts.vdf, are not this format and are not read.
+// parseVDF 解析 Steam 为库和清单写出的文本 KeyValue 文件。一个值要么是字符串，
+// 要么是同样结构的映射。二进制 KeyValues（如 shortcuts.vdf）不是此格式，不读取。
 func parseVDF(text string) (map[string]any, error) {
 	p := parser{text: text}
 	value, err := p.object()

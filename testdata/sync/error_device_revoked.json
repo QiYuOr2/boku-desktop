@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "device_revoked",
+    "message": "device has been revoked",
+    "retryable": false
+  }
+}

@@ -8,25 +8,13 @@ import (
 	"boku/internal/translate"
 )
 
-// The credential field: one card at a time, one string the framework can hold
-// on to, and what a save does to both.
-//
-// It is tested here because the field is where a saved key would come back
-// from: a value left filed under its card is put back on screen the next time
-// the frame draws that card, and the user would be looking at the key they just
-// saved.
+// 凭据输入框一次绑定一张卡片；卡片下留的值会在该卡片重绘时被重新显示出来，
+// 因此保存后必须清掉，否则用户会看到刚保存的 key。
 
-// Saving a card forgets what was typed into it, whether or not that card is
-// the one the field is currently bound to.
-//
-// This is the crash the field had: clearing the value called itself, and a save
-// ran the stack out. It is also the behaviour the field needs, so it is checked
-// rather than only not-crashing.
+// 保存卡片时清空它的输入，无论当前输入框是否绑定在该卡片上。
 func TestSavingACardForgetsWhatWasTypedIntoIt(t *testing.T) {
 	state, _ := translateState(t)
 
-	// The user typed into DeepSeek's card, then moved to another card: the
-	// value is filed under DeepSeek and the field is bound to the other one.
 	state.credentialUI.Form.Keys = map[string]string{"deepseek": "sk-typed-0001"}
 	state.credentialUI.Form.InputCard = freeMicrosoftID
 	state.credentialUI.Form.Input = ""
@@ -36,16 +24,13 @@ func TestSavingACardForgetsWhatWasTypedIntoIt(t *testing.T) {
 	if _, still := state.credentialUI.Form.Keys["deepseek"]; still {
 		t.Error("the saved value is still filed under its card")
 	}
-	// The field was bound to another card, so what is in it is untouched: the
-	// user is typing there.
+	// 输入框绑定的是另一张卡片，用户正在那里输入，因此不受影响。
 	if state.credentialUI.Form.InputCard != freeMicrosoftID {
 		t.Errorf("the field moved to %q", state.credentialUI.Form.InputCard)
 	}
 }
 
-// When the card being saved is the one the field is showing, the field is
-// emptied as well: the key is stored, and the box it was typed into does not
-// keep it.
+// 当保存的正是当前显示的卡片，输入框也随之清空：key 已存储，输入框不应再保留它。
 func TestSavingTheDisplayedCardEmptiesTheField(t *testing.T) {
 	state, _ := translateState(t)
 
@@ -63,8 +48,7 @@ func TestSavingTheDisplayedCardEmptiesTheField(t *testing.T) {
 	}
 }
 
-// A card that was never typed into is an empty answer rather than a panic: the
-// actions read the field whether or not the user has been there.
+// 从未输入过的卡片返回空结果而不是 panic：操作会读取输入框，无论用户是否到过该卡片。
 func TestClearingACardWithNothingTypedIsHarmless(t *testing.T) {
 	state, _ := translateState(t)
 	state.credentialUI.Form.Keys = map[string]string{}
@@ -136,8 +120,7 @@ func TestSavedCustomSettingsConfigureTheProvider(t *testing.T) {
 	if service.DisplayName != "测试" {
 		t.Errorf("display name = %q", service.DisplayName)
 	}
-	// The translator that will be asked resolves to the saved address, and it
-	// is called what the user called it.
+	// 翻译器会解析到保存的地址，并使用用户给它的名字。
 	views, err := fixture.service.Providers(t.Context())
 	if err != nil {
 		t.Fatalf("Providers failed: %v", err)

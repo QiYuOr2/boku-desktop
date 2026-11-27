@@ -16,29 +16,17 @@ import (
 	"boku/internal/panel/deepseek"
 )
 
-// The update check is tested where it is a decision rather than a drawing:
-// what the dialog says, whether the tray menu gains a line, whether the
-// notice is shown and how often. What the dialog looks like is a runtime
-// acceptance, like the rest of the views.
-//
-// The fake service below stands where internal/update stands in production:
-// it reports a state the test sets, counts what it was asked, and calls back
-// the way the real service does — from another goroutine.
-
-// testUpdates is an UpdateService the test drives.
+// testUpdates 是测试驱动的 UpdateService。
 type testUpdates struct {
 	mu       sync.Mutex
 	state    domain.UpdateState
 	checks   int
 	installs int
-	// checkErr and installErr are what the two calls answer with, if set.
+	// checkErr 与 installErr 是两个调用在设置时返回的错误。
 	checkErr   error
 	installErr error
-	// onChange is the listener the state installed. It is called on the
-	// goroutine the calls below run on, as the real service's is.
+	// onChange 是状态安装的监听器。它在下述调用所在的 goroutine 上被调用，与真实服务一致。
 	onChange func()
-	// sawErr records whether a call answered with an error before it was
-	// counted — what it answers, not what it does.
 }
 
 func (u *testUpdates) State() domain.UpdateState {
@@ -67,8 +55,8 @@ func (u *testUpdates) OnChange(fn func()) {
 	u.onChange = fn
 }
 
-// report sets the state the service reports, then tells the listener the way
-// the real one does: after the state, and from whatever goroutine it is on.
+// report 设置服务报告的状态，然后像真实服务那样通知监听器：在状态之后，且在其所在
+// goroutine 上。
 func (u *testUpdates) report(state domain.UpdateState) {
 	u.mu.Lock()
 	u.state = state
@@ -85,12 +73,11 @@ func (u *testUpdates) counts() (checks, installs int) {
 	return u.checks, u.installs
 }
 
-// testNotifier is an updateNotifier the test drives: what it was asked to
-// show, and whether it was told it could.
+// testNotifier 是测试驱动的 updateNotifier：它被要求显示什么，以及是否被告知可以显示。
 type testNotifier struct {
 	supported bool
 	notices   []testNotice
-	// open is the callback of the last notice, which is what a click runs.
+	// open 是最后一条通知的回调，即点击所运行的东西。
 	open func()
 }
 
@@ -105,8 +92,7 @@ func (n *testNotifier) Notify(id, title, body string, open func()) {
 	n.open = open
 }
 
-// updateStateWith builds the real presentation state over the given fakes,
-// with an update service attached the way the assembly attaches one.
+// updateStateWith 在给定假实现上构建真实的表现为层状态，并按装配那样挂上更新服务。
 func updateStateWith(t *testing.T, updates UpdateService, notifier desktopNotifier) *State {
 	t.Helper()
 	state := testState(t, newTestProvider(t), withCredential(newTestStore(t)), "0.1.0")
@@ -120,8 +106,7 @@ func updateStateWith(t *testing.T, updates UpdateService, notifier desktopNotifi
 	return state
 }
 
-// The tray menu gains one item, and only for a ready update: every other
-// status would add a line that can never do anything.
+// 托盘菜单只多一项，且只在更新就绪时：其他任何状态加的行都什么也做不了。
 func TestUpdateMenuLabelTable(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -159,9 +144,8 @@ func TestUpdateMenuLabelTable(t *testing.T) {
 	}
 }
 
-// A release tag's leading "v" belongs to the repository, not to the number:
-// the interface is written without it, and text with no version at all is
-// not decoration.
+// 发布标签的前导 "v" 属于仓库而非版本号：界面书写时不带它，而完全没有版本号的文本
+// 不是装饰。
 func TestUpdateVersionTrimsTheTag(t *testing.T) {
 	cases := map[string]string{
 		"v0.1.0-beta.6": "0.1.0-beta.6",
@@ -224,9 +208,8 @@ func TestUpdateDialogState(t *testing.T) {
 	}
 }
 
-// A State with no update service is a build without one: the row is not
-// drawn, the menu is what it always was, and nothing checks on its own or
-// panics when asked to.
+// 没有更新服务的 State 即没有更新的构建：该行不绘制，菜单保持原样，被请求时不自查、
+// 也不 panic。
 func TestUpdateWithoutAService(t *testing.T) {
 	notifier := &testNotifier{supported: true}
 	state := testState(t, newTestProvider(t), withCredential(newTestStore(t)), "0.1.0")
@@ -249,7 +232,7 @@ func TestUpdateWithoutAService(t *testing.T) {
 		}
 	}
 
-	// Every action a user could reach here is a no-op rather than a panic.
+	// 此处用户能触达的每个动作都应是空操作而非 panic。
 	state.startUpdateCheck()
 	state.installUpdate()
 	state.noteReadyUpdate(domain.UpdateState{Status: domain.UpdateReady, Version: "9.9.9"})
@@ -258,8 +241,7 @@ func TestUpdateWithoutAService(t *testing.T) {
 	}
 }
 
-// menuLabels names the tray menu's items, in order. A separator is the empty
-// string: what the menu is tested for is which lines it has.
+// menuLabels 按顺序列出托盘菜单各项的名称；分隔符为空字符串：测试关心的是它有哪些行。
 func menuLabels(menu *mygo.Menu) []string {
 	items := menu.Items()
 	labels := make([]string, 0, len(items))
@@ -269,8 +251,7 @@ func menuLabels(menu *mygo.Menu) []string {
 	return labels
 }
 
-// A service that is attached is what the views read, and the tray menu gains
-// its line only while an update is ready.
+// 挂上的服务即视图所读的服务，托盘菜单只在更新就绪时才增加它那一行。
 func TestUpdateMenuFollowsTheService(t *testing.T) {
 	updates := &testUpdates{state: domain.UpdateState{Status: domain.UpdateUpToDate}}
 	state := updateStateWith(t, updates, &testNotifier{supported: true})
@@ -289,15 +270,14 @@ func TestUpdateMenuFollowsTheService(t *testing.T) {
 	if len(labels) != 5 || labels[2] != "重启并更新到 0.1.0-beta.6" {
 		t.Errorf("the menu is %v, want the update line between 设置… and the way out", labels)
 	}
-	// Ready again, unchanged: still exactly one line.
+	// 再次就绪且未改变：仍恰好一行。
 	updates.report(domain.UpdateState{Status: domain.UpdateReady, Version: "0.1.0-beta.6"})
 	if items := state.updateMenuItems(); len(items) != 1 {
 		t.Errorf("a second report of the same ready update put %d items in the menu, want one", len(items))
 	}
 }
 
-// The menu item's click starts the install, and it must not sit on the main
-// thread while the files are swapped: the callback returns at once.
+// 菜单项的点击启动安装，且在交换文件时不得停留在主线程：回调立即返回。
 func TestUpdateMenuClickInstallsOffTheMainThread(t *testing.T) {
 	updates := &testUpdates{state: domain.UpdateState{Status: domain.UpdateReady, Version: "1.0.0"}}
 	state := updateStateWith(t, updates, &testNotifier{supported: true})
@@ -312,16 +292,13 @@ func TestUpdateMenuClickInstallsOffTheMainThread(t *testing.T) {
 	}()
 	waitClosed(t, done, "the menu item's click")
 
-	// The menu starts the install, not a check: it is the line that says
-	// "restart to update".
+	// 菜单启动的是安装而非检查：它就是「重启以更新」那一行。
 	if err := waitForCalls(t, updates, 0, 1); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// The notice is shown once per version, not once per frame the state is
-// polled in — and not at all for a version the user has already been told
-// about.
+// 每个版本只显示一次通知，而非状态每被轮询一次就一次——对已告知过的版本也完全不再显示。
 func TestUpdateNoticeOncePerVersion(t *testing.T) {
 	updates := &testUpdates{}
 	notifier := &testNotifier{supported: true}
@@ -345,14 +322,13 @@ func TestUpdateNoticeOncePerVersion(t *testing.T) {
 		t.Errorf("the notice's body is %q, want the version in it", got.body)
 	}
 
-	// A newer version is a second notice: it is news the user has not had.
+	// 更新的版本是第二条通知：这是用户尚未收到的新消息。
 	state.noteReadyUpdate(domain.UpdateState{Status: domain.UpdateReady, Version: "v0.2.0"})
 	if len(notifier.notices) != 2 {
 		t.Fatalf("a second version sent %d notices, want two", len(notifier.notices))
 	}
 
-	// A status that is not ready says nothing, and neither does the same
-	// version becoming ready again after the user ignored it.
+	// 非就绪状态什么也不说，用户忽略后同一版本再次就绪也不再提示。
 	state.noteReadyUpdate(domain.UpdateState{Status: domain.UpdateChecking})
 	state.noteReadyUpdate(domain.UpdateState{Status: domain.UpdateFailed})
 	state.noteReadyUpdate(domain.UpdateState{Status: domain.UpdateReady, Version: "v0.2.0"})
@@ -361,8 +337,7 @@ func TestUpdateNoticeOncePerVersion(t *testing.T) {
 	}
 }
 
-// A desktop that cannot show notices is skipped silently: the row is the
-// notice that is always there.
+// 不能显示通知的桌面会被静默跳过：那一行才是始终存在的通知。
 func TestUpdateNoticeSkippedWhenUnsupported(t *testing.T) {
 	notifier := &testNotifier{supported: false}
 	state := updateStateWith(t, &testUpdates{}, notifier)
@@ -372,8 +347,7 @@ func TestUpdateNoticeSkippedWhenUnsupported(t *testing.T) {
 	}
 }
 
-// A ready update with no version can only be announced once: there is
-// nothing to tell a second notice apart from the first.
+// 没有版本号的就绪更新只能播报一次：没有东西能把第二条通知与第一条区分开。
 func TestUpdateNoticeWithoutAVersionIsShownOnce(t *testing.T) {
 	notifier := &testNotifier{supported: true}
 	state := updateStateWith(t, &testUpdates{}, notifier)
@@ -383,19 +357,17 @@ func TestUpdateNoticeWithoutAVersionIsShownOnce(t *testing.T) {
 	if len(notifier.notices) != 1 {
 		t.Fatalf("the notice was shown %d times, want once", len(notifier.notices))
 	}
-	// A version that appears later is news of its own.
+	// 之后出现的版本号是它自己的新消息。
 	state.noteReadyUpdate(domain.UpdateState{Status: domain.UpdateReady, Version: "1.0.0"})
 	if len(notifier.notices) != 2 {
 		t.Errorf("the versioned notice was shown %d times, want a second one", len(notifier.notices)-1)
 	}
 }
 
-// The notice's click opens the settings window on the section that has the
-// button: it is the notice's whole purpose, after "restart when you like".
+// 通知的点击会在打开设置窗口时定位到含该按钮的分区：这是通知除「稍后重启」外的全部目的。
 //
-// Opening a window needs a running application, so what is tested is the
-// half that decides — the click reveals the about section — rather than the
-// window that then opens.
+// 打开窗口需要运行中的应用，故测试的是做出决定的那一半——点击定位到「关于」分区——
+// 而非随后打开的窗口。
 func TestUpdateNoticeClickRevealsTheAboutSection(t *testing.T) {
 	notifier := &testNotifier{supported: true}
 	state := updateStateWith(t, &testUpdates{}, notifier)
@@ -403,16 +375,15 @@ func TestUpdateNoticeClickRevealsTheAboutSection(t *testing.T) {
 	if notifier.open == nil {
 		t.Fatal("the notice has no click action")
 	}
-	// What the click does to the page, without the window around it.
+	// 点击对页面做了什么，不含外层的窗口。
 	state.openSettingsSection(sectionAbout)
 	if state.settingsReveal == nil || *state.settingsReveal != sectionAbout {
 		t.Errorf("the notice's click reveals %v, want the about section", state.settingsReveal)
 	}
 }
 
-// The state's listener is installed when the service is attached, and what
-// it does is ask for a repaint — it runs on the service's goroutine, so it
-// must not do anything else.
+// 服务的监听器在服务挂上时安装，它做的只是请求重绘——它运行在服务的 goroutine 上，
+// 所以不能做别的事。
 func TestAttachUpdatesInstallsTheListener(t *testing.T) {
 	updates := &testUpdates{state: domain.UpdateState{Status: domain.UpdateIdle}}
 	state := testState(t, newTestProvider(t), withCredential(newTestStore(t)), "0.1.0")
@@ -420,8 +391,7 @@ func TestAttachUpdatesInstallsTheListener(t *testing.T) {
 	if updates.onChange == nil {
 		t.Fatal("the service was given no listener")
 	}
-	// Attaching nothing is what a build without updates does; it must not
-	// take the listener from a service that is already there.
+	// 挂上 nil 是没有更新的构建该做的；它不得从已存在的服务那里拿走监听器。
 	state.AttachUpdates(nil)
 	if updates.onChange == nil {
 		t.Error("attaching nothing removed the listener")
@@ -431,13 +401,11 @@ func TestAttachUpdatesInstallsTheListener(t *testing.T) {
 	}
 }
 
-// The notice reaches the user whether or not the quick window was ever
-// opened: an update finishes downloading in the background, so the change the
-// service reports is a path of its own to the same decision the frame makes.
+// 无论快速窗口是否曾打开，通知都能到达用户：更新在后台下载完成，服务报告的变更是一条
+// 独立通往同一决定的路径。
 //
-// No window exists in this test, which is the case that matters — the
-// listener runs here on the goroutine the service called it from, the way
-// the real one does.
+// 本测试中没有窗口，而这正是要紧的情形——监听器在此运行于服务调用它的 goroutine 上，
+// 与真实服务一致。
 func TestUpdateNoticeFromTheServiceChange(t *testing.T) {
 	updates := &testUpdates{state: domain.UpdateState{Status: domain.UpdateChecking}}
 	notifier := &testNotifier{supported: true}
@@ -449,8 +417,7 @@ func TestUpdateNoticeFromTheServiceChange(t *testing.T) {
 	if err := waitForNotices(notifier, 1); err != nil {
 		t.Fatalf("a ready update reported by the service: %v", err)
 	}
-	// The frame's own check finds nothing left to do, and neither does a
-	// second report of the same version.
+	// 帧自身的检查已无事可做，同一版本第二次报告也一样。
 	state.refreshReadyUpdate()
 	updates.report(domain.UpdateState{Status: domain.UpdateReady, Version: "0.1.0-beta.6"})
 	if got := len(notifier.notices); got != 1 {
@@ -458,8 +425,7 @@ func TestUpdateNoticeFromTheServiceChange(t *testing.T) {
 	}
 }
 
-// waitForNotices waits for the notices to arrive: the listener is called by
-// the service's goroutine, so the notice follows the report by a moment.
+// waitForNotices 等待通知到达：监听器由服务的 goroutine 调用，通知随报告稍后到达。
 func waitForNotices(notifier *testNotifier, want int) error {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -473,8 +439,7 @@ func waitForNotices(notifier *testNotifier, want int) error {
 	}
 }
 
-// waitClosed fails the test if a callback that must return at once has not
-// returned almost immediately.
+// waitClosed 在必须立即返回的回调没有几乎立即返回时使测试失败。
 func waitClosed(t *testing.T, done <-chan struct{}, what string) {
 	t.Helper()
 	select {
@@ -484,9 +449,8 @@ func waitClosed(t *testing.T, done <-chan struct{}, what string) {
 	}
 }
 
-// waitForCalls waits for the service's calls to reach the counts asked for,
-// and says so if they do not: the presses run in goroutines, so what a
-// press does arrives a moment after it returns.
+// waitForCalls 等待服务的调用达到要求的次数，否则报告：按压在各 goroutine 中运行，
+// 故一次按压的效果在它返回后稍晚到达。
 func waitForCalls(t *testing.T, updates *testUpdates, checks, installs int) error {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -503,9 +467,8 @@ func waitForCalls(t *testing.T, updates *testUpdates, checks, installs int) erro
 	}
 }
 
-// A service handed to New is the other way an assembly can wire updates, and
-// it has to get the same change listener: a service without one is a row that
-// is drawn once and never redrawn. This is the path main.go takes.
+// 交给 New 的服务是装配接线的另一种方式，它必须得到同一个变更监听器：没有监听器的服务
+// 只会被绘制一次而永不重绘。main.go 走的就是这条路径。
 func TestAServicePassedToNewGetsItsListener(t *testing.T) {
 	updates := &testUpdates{state: domain.UpdateState{Status: domain.UpdateIdle}}
 	store := withCredential(newTestStore(t))
@@ -538,8 +501,7 @@ func TestAServicePassedToNewGetsItsListener(t *testing.T) {
 	if updates.onChange == nil {
 		t.Fatal("the service passed to New was given no listener")
 	}
-	// And it is the one the service reports to: a ready update reaches the
-	// decision the row and the notice both read.
+	// 而且它就是服务报告所指向的监听器：就绪更新能到达该行与通知共同读取的决定。
 	updates.report(domain.UpdateState{Status: domain.UpdateReady, Version: "0.1.0-beta.6"})
 	if got := state.updateState(); got.Status != domain.UpdateReady {
 		t.Errorf("the state after a report = %s, want ready", got.Status)

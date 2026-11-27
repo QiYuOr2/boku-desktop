@@ -12,10 +12,9 @@ import (
 	"boku/internal/kit"
 )
 
-// The clipboard tool is tested against a device and a store the test owns:
-// no platform clipboard, no file, no window. What is checked here is what
-// the tool promises — one entry per copy, a loop that stops when it is told
-// to, and a history that does not grow without a bound.
+// 剪贴板工具针对测试自有的设备与存储而测：无平台剪贴板、无文件、无窗口。
+// 这里检验的是工具承诺的行为——每次复制一条条目、被要求停止即停止的循环，
+// 以及不会无限增长的历史。
 
 func TestNewClipboardRequiresItsDependencies(t *testing.T) {
 	if _, err := NewClipboard(ClipboardOptions{Store: &fakeStore{}}); err == nil {
@@ -26,11 +25,9 @@ func TestNewClipboardRequiresItsDependencies(t *testing.T) {
 	}
 }
 
-// Both switches are off until the user turns them on: the clipboard is the
-// most sensitive thing the application can read.
-// A synthetic copy — the one the selection tool makes to read a text that no
-// application publishes — is not a copy the user made, and the history is not
-// where it belongs.
+// 两个开关在用户开启前都关闭：剪贴板是应用能读到的最敏感的东西。
+// 合成复制——划词工具为读取某个应用不发布的文本而发起的复制——不是用户的复制，
+// 历史不该收录它。
 func TestASyntheticCopyIsNotRecorded(t *testing.T) {
 	clock := newTestClock()
 	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{Clock: clock})
@@ -41,8 +38,7 @@ func TestASyntheticCopyIsNotRecorded(t *testing.T) {
 		t.Errorf("the history recorded %d entries of a synthetic copy", got)
 	}
 
-	// The window is a moment, not a rule: a copy the user makes afterwards is
-	// recorded as any other.
+	// 窗口是时刻而非规则：此后用户自己做的复制照常记录。
 	clock.advance(copyIgnoreWindow + time.Second)
 	device.set(textReading("what the user copied themselves"))
 	clipboard.poll(context.Background())
@@ -161,7 +157,7 @@ func TestRecordShapesEveryKind(t *testing.T) {
 
 func TestRecordShortensLongText(t *testing.T) {
 	record := Record(textReading(strings.Repeat("x", 5000)))
-	if len([]rune(record.Display)) != 121 { // the limit plus the ellipsis
+	if len([]rune(record.Display)) != 121 { // 上限加上省略号
 		t.Errorf("the display is %d runes, want 121", len([]rune(record.Display)))
 	}
 	if !strings.HasSuffix(record.Display, "…") {
@@ -172,10 +168,8 @@ func TestRecordShortensLongText(t *testing.T) {
 	}
 }
 
-// A reading that repeats what the history already holds is not a second
-// entry, and what is recorded reaches the store behind the frame. (Reading
-// a slow clipboard without blocking is what clipboard_blocking_test.go
-// pins; this is the history's side of a read.)
+// 重复历史已有内容的读取不成为第二条条目，且被记录的内容会在帧之后到达存储。
+// （不阻塞地读取慢剪贴板由 blocking_test.go 保证；这里测的是读取在历史一侧的效果。）
 func TestReadingTheSameValueTwiceKeepsOneEntry(t *testing.T) {
 	clock := newTestClock()
 	clipboard, device, store, _ := newTestClipboard(t, ClipboardOptions{Clock: clock})
@@ -189,15 +183,14 @@ func TestReadingTheSameValueTwiceKeepsOneEntry(t *testing.T) {
 	if got := device.readCount(); got != 2 {
 		t.Errorf("the device was read %d times, want 2", got)
 	}
-	// The history is written behind the change, so the store catches up a
-	// moment later rather than holding the frame that made it.
+	// 历史在改动之后写入，因此存储稍后才追上，而不是拖住做出改动的那一帧。
 	waitFor(t, "the history to be written", func() bool { return len(store.stored()) == 1 })
 	latest, ok := clipboard.Latest()
 	if !ok || latest.Content != "first" {
 		t.Errorf("Latest = %+v, %v", latest, ok)
 	}
 
-	// A different value is a second entry, newest first.
+	// 不同的值是第二条条目，最新在前。
 	read(clipboard, clock, device, "second")
 	history := clipboard.History(0)
 	if len(history) != 2 {
@@ -221,14 +214,13 @@ func TestHistoryLimitAndOrder(t *testing.T) {
 	if history[0].Content != "four" || history[2].Content != "two" {
 		t.Errorf("the oldest entry was not evicted: %q … %q", history[0].Content, history[2].Content)
 	}
-	// The page asks for fewer than the store keeps.
+	// 页面请求的比存储保留的少。
 	if got := len(clipboard.History(2)); got != 2 {
 		t.Errorf("History(2) returned %d entries", got)
 	}
 }
 
-// The same content copied again moves its entry back to the top instead of
-// adding a second one.
+// 相同内容再次复制会把其条目移回顶部，而非新增一条。
 func TestSameContentCopiedAgainMovesToTheTop(t *testing.T) {
 	clock := newTestClock()
 	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{Clock: clock})
@@ -248,7 +240,7 @@ func TestSameContentCopiedAgainMovesToTheTop(t *testing.T) {
 func TestPinnedEntriesSurviveTheLimit(t *testing.T) {
 	device := &fakeDevice{}
 	store := &fakeStore{}
-	// A pinned entry, as the full clipboard tool will be able to make.
+	// 一条置顶条目，完整剪贴板工具日后能够创建的形式。
 	pinned := domain.ClipboardEntry{
 		ID:          "pinned-1",
 		Content:     "keep me",
@@ -281,8 +273,7 @@ func TestPinnedEntriesSurviveTheLimit(t *testing.T) {
 		clipboard.Read(context.Background())
 	}
 	history := clipboard.History(0)
-	// The limit bounds the unpinned entries: the pinned one sits on top of
-	// them rather than inside the limit.
+	// 上限约束未置顶条目：置顶条目位于它们之上，而不在上限之内。
 	if len(history) != 3 {
 		t.Fatalf("the history has %d entries, want the limit plus the pinned one", len(history))
 	}
@@ -301,7 +292,7 @@ func TestClipboardIgnoresWhatIsNotShowable(t *testing.T) {
 	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{})
 	ctx := context.Background()
 
-	// A reading with no kind is not a reading.
+	// 无类型的读取不算一次读取。
 	device.set(domain.ClipContent{})
 	clipboard.Read(ctx)
 	if got := len(clipboard.History(0)); got != 0 {
@@ -311,7 +302,7 @@ func TestClipboardIgnoresWhatIsNotShowable(t *testing.T) {
 		t.Error("an empty reading became the latest content")
 	}
 
-	// A failed read is skipped rather than treated as an empty clipboard.
+	// 读取失败会被跳过，而非当作空剪贴板。
 	device.fail(errors.New("the clipboard is busy"))
 	clipboard.Read(ctx)
 	if _, ok := clipboard.Latest(); ok {
@@ -322,7 +313,7 @@ func TestClipboardIgnoresWhatIsNotShowable(t *testing.T) {
 	}
 }
 
-// The application's own write must not come back as a new copy.
+// 本应用自己的写入不得作为新复制回来。
 func TestCopySuppressesTheLoop(t *testing.T) {
 	clock := newTestClock()
 	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{Clock: clock})
@@ -338,8 +329,7 @@ func TestCopySuppressesTheLoop(t *testing.T) {
 		t.Fatalf("the device was written %v", got)
 	}
 
-	// The device now holds what the application wrote: the next read is its
-	// own write coming back.
+	// 设备现在持有本应用写入的内容：下一次读取是它自己的写入回来。
 	clock.advance(time.Second)
 	clipboard.Read(ctx)
 	history := clipboard.History(0)
@@ -355,7 +345,7 @@ func TestCopySuppressesTheLoop(t *testing.T) {
 		}
 	}
 
-	// After the suppression window, a genuinely new copy is recorded again.
+	// 抑制窗口过后，真正的新复制会重新被记录。
 	clock.advance(3 * DefaultPollInterval)
 	read(clipboard, clock, device, "something else")
 	if got := len(clipboard.History(0)); got != 3 {
@@ -374,9 +364,8 @@ func TestCopyRejectsWhatItCannotWrite(t *testing.T) {
 	}
 }
 
-// Clicking a recorded copy of files pastes the files, not the text of their
-// paths: the copy is the file list, and putting it back is what a clipboard
-// is for.
+// 点击已记录的文件复制会粘贴文件，而非其路径文本：这次复制就是文件列表，
+// 把它放回去正是剪贴板的用途。
 func TestCopyWritesFilesBackAsFiles(t *testing.T) {
 	clock := newTestClock()
 	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{Clock: clock})
@@ -410,7 +399,7 @@ func TestCopyWritesFilesBackAsFiles(t *testing.T) {
 		t.Errorf("the file list written back is %v, want %v", files, paths)
 	}
 
-	// And it does not come back as a new entry: the application wrote it.
+	// 且它不会作为新条目回来：这是本应用写的。
 	clock.advance(time.Second)
 	clipboard.Read(ctx)
 	if got := len(clipboard.History(0)); got != 2 {
@@ -418,9 +407,8 @@ func TestCopyWritesFilesBackAsFiles(t *testing.T) {
 	}
 }
 
-// A picture is recorded with its bytes kept, and a click on it puts the picture
-// back. What a click used to do was put the line "[图片]" on the clipboard,
-// which is a text nobody can paste anywhere.
+// 图片被记录且其字节保留，点击它会放回图片。过去点击会把「[图片]」这一行
+// 放到剪贴板，那是哪里都粘不了的文本。
 func TestCopyWritesAPictureBackAsAPicture(t *testing.T) {
 	clock := newTestClock()
 	clipboard, device, store, _ := newTestClipboard(t, ClipboardOptions{Clock: clock})
@@ -467,8 +455,7 @@ func TestCopyWritesAPictureBackAsAPicture(t *testing.T) {
 	}
 }
 
-// A picture whose bytes are gone says so rather than pasting its own name: the
-// entry is what the interface shows, not what the clipboard gets.
+// 字节已丢失的图片会如实说明，而非粘贴自己的名称：界面展示的是条目，剪贴板拿到的是内容。
 func TestAPictureWithNoBytesIsNotPastedAsItsName(t *testing.T) {
 	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{})
 	entry := domain.ClipboardEntry{
@@ -487,13 +474,11 @@ func TestAPictureWithNoBytesIsNotPastedAsItsName(t *testing.T) {
 	}
 }
 
-// Dropping an entry drops the picture that belonged to it: an image store that
-// only grows is a directory full of screenshots nobody can reach any more.
+// 丢弃条目会丢弃属于它的图片：只增不减的图片存储是一个堆满再也无法触及的截图的目录。
 func TestEvictedEntriesTakeTheirPicturesWithThem(t *testing.T) {
 	clipboard, device, store, _ := newTestClipboard(t, ClipboardOptions{})
 	ctx := context.Background()
-	// One more picture than the smallest history the settings allow, so that
-	// the limit is what drops one.
+	// 比设置允许的最小历史多一张图片，使上限正好丢一张。
 	copies := MinHistorySize + 1
 	refs := make([]string, 0, copies)
 	for i := 0; i < copies; i++ {
@@ -513,8 +498,7 @@ func TestEvictedEntriesTakeTheirPicturesWithThem(t *testing.T) {
 	if err := clipboard.SetHistorySize(ctx, MinHistorySize); err != nil {
 		t.Fatalf("SetHistorySize failed: %v", err)
 	}
-	// The entry goes first and its picture follows: the deletion happens
-	// behind the frame, so the test waits for it rather than assuming it.
+	// 条目先走、图片随后：删除发生在帧之后，因此测试等待它，而非假定它已完成。
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) && len(store.keptImages()) > MinHistorySize {
 		time.Sleep(10 * time.Millisecond)
@@ -532,9 +516,8 @@ func TestEvictedEntriesTakeTheirPicturesWithThem(t *testing.T) {
 	}
 }
 
-// Two screenshots of the same size are two pictures: comparing sizes alone made
-// the second one look like the first, so it was never recorded and a click on
-// the first put the wrong picture back.
+// 同样大小的两张截图是两张图片：仅比较大小会让第二张看起来像第一张，
+// 于是它从未被记录，而点击第一张会放回错误的图片。
 func TestTwoScreenshotsOfTheSameSizeAreTwoEntries(t *testing.T) {
 	one := Record(domain.ClipContent{
 		Kind: domain.ClipKindImage, HasImage: true, ImageBytes: 4096, ImageRef: "sha256:one",
@@ -549,7 +532,7 @@ func TestTwoScreenshotsOfTheSameSizeAreTwoEntries(t *testing.T) {
 		t.Errorf("the two entries draw differently: %q and %q", one.Display, two.Display)
 	}
 
-	// The same picture twice is one entry, whichever way it was copied.
+	// 同一张图片复制两次是一条条目，无论以何种方式复制。
 	again := Record(domain.ClipContent{
 		Kind: domain.ClipKindImage, HasImage: true, ImageBytes: 4096, ImageRef: "sha256:one",
 	})
@@ -558,8 +541,7 @@ func TestTwoScreenshotsOfTheSameSizeAreTwoEntries(t *testing.T) {
 	}
 }
 
-// A picture the platform refused is recorded with a note saying so, and the
-// note survives the trip through the history.
+// 平台拒绝的图片会被记录并附上说明，且该说明能历经历史往返而留存。
 func TestAnUnreadablePictureIsRecordedWithItsReason(t *testing.T) {
 	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{})
 	device.set(domain.ClipContent{
@@ -581,9 +563,8 @@ func TestAnUnreadablePictureIsRecordedWithItsReason(t *testing.T) {
 	}
 }
 
-// The interval the switches were saved with is the one the suppression
-// window is built from: a service that polled every two seconds must not
-// start treating its own write as new after one.
+// 开关保存时的间隔就是构建抑制窗口所用的间隔：每两秒轮询一次的服务，
+// 不能一度过后就误把自己的写入当作新内容。
 func TestCopiedValueIsSuppressedForTheConfiguredInterval(t *testing.T) {
 	clock := newTestClock()
 	tools := newFakeTools()
@@ -600,7 +581,7 @@ func TestCopiedValueIsSuppressedForTheConfiguredInterval(t *testing.T) {
 	if err := clipboard.Copy(context.Background(), textEntry("from boku")); err != nil {
 		t.Fatalf("Copy failed: %v", err)
 	}
-	// Three seconds on, which is inside 2 × 2s but outside 2 × 700ms.
+	// 三秒后，在 2 × 2s 之内，却在 2 × 700ms 之外。
 	clock.advance(3 * time.Second)
 	clipboard.Read(context.Background())
 	history := clipboard.History(0)
@@ -621,7 +602,7 @@ func TestCopyReportsAWriteFailure(t *testing.T) {
 	}
 }
 
-// Monitoring is a switch on the poll loop, and off means no read at all.
+// 监控是轮询循环的开关，关闭即完全不读。
 func TestMonitoringOnlyReadsWhileItIsOn(t *testing.T) {
 	clipboard, device, _, tools := newTestClipboard(t, ClipboardOptions{})
 	ctx := context.Background()
@@ -663,8 +644,7 @@ func TestMonitoringOnlyReadsWhileItIsOn(t *testing.T) {
 	}
 }
 
-// Turning monitoring off waits for the loop: the poll goroutine is gone by
-// the time the switch reports it.
+// 关闭监控会等待循环：开关报告时轮询 goroutine 已退出。
 func TestMonitoringStopEndsTheLoop(t *testing.T) {
 	clipboard, device, _, _ := newTestClipboard(t, ClipboardOptions{})
 	ctx := context.Background()
@@ -686,7 +666,7 @@ func TestMonitoringStopEndsTheLoop(t *testing.T) {
 		t.Fatal("turning monitoring off did not return")
 	}
 
-	// Starting again works: the loop is not left in a half-stopped state.
+	// 再次启动可行：循环不会停在半关闭状态。
 	if err := clipboard.SetMonitoring(ctx, true); err != nil {
 		t.Fatalf("SetMonitoring(true) after a stop failed: %v", err)
 	}
@@ -713,7 +693,7 @@ func TestSetRegionVisibleIsIndependentOfMonitoring(t *testing.T) {
 	}
 }
 
-// A settings file that cannot be written must not take the switch with it.
+// 无法写入的设置文件不得连累开关。
 func TestSwitchesSurviveASaveFailure(t *testing.T) {
 	tools := newFakeTools()
 	tools.saveErr = errors.New("the settings file is read-only")
@@ -726,9 +706,8 @@ func TestSwitchesSurviveASaveFailure(t *testing.T) {
 	}
 }
 
-// The record range bounds the history: it is the user's choice, shortening it
-// drops what no longer fits at once, and it is written down for the next
-// start.
+// 记录数量范围约束历史：它是用户的选择，缩短会立刻丢弃不再容得下的条目，
+// 并被写下来供下次启动使用。
 func TestRecordRangeBoundsTheHistory(t *testing.T) {
 	tools := newFakeTools()
 	tools.section.Set(Settings{
@@ -764,8 +743,7 @@ func TestRecordRangeBoundsTheHistory(t *testing.T) {
 		t.Errorf("the saved range is %d, want %d", got, MinHistorySize)
 	}
 
-	// A number the settings form cannot offer is the default, not a bound of
-	// its own.
+	// 设置表单给不出的数字是默认值，而非它自己的边界。
 	if err := clipboard.SetHistorySize(ctx, 7); err != nil {
 		t.Fatalf("SetHistorySize(7) failed: %v", err)
 	}
@@ -774,8 +752,7 @@ func TestRecordRangeBoundsTheHistory(t *testing.T) {
 	}
 }
 
-// Starting again honors the range the last session saved, and it prunes what
-// it read before anything is shown.
+// 再次启动会遵循上次会话保存的范围，并在展示任何内容前裁剪读到的历史。
 func TestRecordRangeIsReadAtStart(t *testing.T) {
 	base := time.Date(2026, 2, 3, 9, 0, 0, 0, time.UTC)
 	entries := make([]domain.ClipboardEntry, 0, MaxHistorySize)
@@ -806,13 +783,13 @@ func TestRecordRangeIsReadAtStart(t *testing.T) {
 		t.Fatalf("the history starts with %d entries, want the saved range %d",
 			len(history), MinHistorySize)
 	}
-	// The newest of the entries are the ones kept.
+	// 保留的是条目中最新的那些。
 	if want := fmt.Sprintf("copy %d", MaxHistorySize-1); history[0].Content != want {
 		t.Errorf("the history starts with %q, want the newest copy %q", history[0].Content, want)
 	}
 }
 
-// A history file that cannot be read must not keep the tool from working.
+// 读不出的历史文件不得妨碍工具正常工作。
 func TestCorruptHistoryDoesNotStopTheTool(t *testing.T) {
 	store := &fakeStore{loadErr: errors.New("the history file is not json")}
 	device := &fakeDevice{}
@@ -831,8 +808,7 @@ func TestCorruptHistoryDoesNotStopTheTool(t *testing.T) {
 	}
 }
 
-// A settings file that cannot be read is the user's configuration being
-// unavailable, which is worth failing over rather than guessing at.
+// 读不出的设置文件意味着用户的配置不可用，值得直接失败，而非猜测。
 func TestUnreadableSettingsStopTheTool(t *testing.T) {
 	store := &fakeStore{}
 	device := &fakeDevice{}
@@ -848,8 +824,8 @@ func TestUnreadableSettingsStopTheTool(t *testing.T) {
 	}
 }
 
-// prune is where the history's bound lives, so it is tested on its own, with
-// timestamps the test decides rather than whatever a read happened to stamp.
+// prune 是历史边界的所在，因此单独测试它，用测试决定的时间戳，
+// 而非某次读取碰巧打上的。
 func TestPruneOrdersAndBoundsTheHistory(t *testing.T) {
 	base := time.Date(2026, 2, 3, 9, 0, 0, 0, time.UTC)
 	entry := func(name string, ago time.Duration, pinned bool) domain.ClipboardEntry {
@@ -927,7 +903,7 @@ func TestPruneOrdersAndBoundsTheHistory(t *testing.T) {
 		}
 	}
 
-	// A pinned entry is never evicted, however many unpinned ones arrive.
+	// 无论多少未置顶条目到来，置顶条目从不被驱逐。
 	clipboard := &Clipboard{keep: 2}
 	entries := []domain.ClipboardEntry{entry("pinned", 9*time.Hour, true)}
 	for i := 0; i < 6; i++ {
@@ -948,7 +924,7 @@ func TestPruneOrdersAndBoundsTheHistory(t *testing.T) {
 	}
 }
 
-// Starting the tool again obeys the switches the last session saved.
+// 再次启动工具会遵循上次会话保存的开关。
 func TestClipboardStartRespectsTheSavedSwitch(t *testing.T) {
 	tools := newFakeTools()
 	tools.section.Set(Settings{

@@ -9,32 +9,26 @@ import (
 	"boku/internal/kit"
 )
 
-// Watcher reads the clipboard every interval and hands what changed to Emit.
-//
-// It runs on a goroutine of its own: the device it reads through is what
-// hops to the main thread, because that is where the platform keeps the
-// clipboard, and this loop must not hold that thread while it sleeps.
+// Watcher 按固定间隔读取剪贴板，把变化交给 Emit。
 type Watcher struct {
 	Device   domain.ClipboardDevice
 	Interval time.Duration
 	Now      func() time.Time
-	// Emit is called for content the loop has not seen before, and for the
-	// first reading of a loop's life. It runs on the watcher's goroutine
-	// and must not block on the interface.
+	// Emit 在循环首次读取以及发现新内容时调用；它运行在 watcher 自己的
+	// goroutine 上，不得阻塞界面。
 	Emit func(domain.ClipContent)
 
-	// last is the reading the loop saw last, whether or not it emitted it:
-	// the clipboard holds what is on it, so the same content must not be
-	// recorded twice.
+	// last 是循环上次看到的读取结果（无论是否已 emit）：剪贴板内容不变
+	// 时不能重复记录。
 	last    *domain.ClipContent
 	started bool
 }
 
-// Run polls until ctx is canceled. It returns when the context ends, so a
-// caller that cancels knows the goroutine is on its way out.
+// Run 轮询直到 ctx 被取消；返回即表示 goroutine 正在退出，
+// 调用方取消后可以据此确认它已结束。
 //
-// An interval below MinPollInterval is raised to it, and a read
-// that failed is skipped rather than treated as an empty clipboard.
+// 低于 MinPollInterval 的间隔会被提升到该下限；读取失败会被跳过，
+// 而不是当成空剪贴板处理。
 func (w *Watcher) Run(ctx context.Context) error {
 	if w.Device == nil {
 		return errors.New("clipboard: the watcher has no device")
@@ -61,13 +55,12 @@ func (w *Watcher) Run(ctx context.Context) error {
 	}
 }
 
-// poll reads the clipboard once and emits what is new.
+// poll 读取一次剪贴板并发出新内容。
 func (w *Watcher) poll(ctx context.Context, at time.Time) {
 	if w.Device == nil {
 		return
 	}
-	// A canceled context means the loop is shutting down: no further read
-	// is worth making, which is what "closed means closed" requires.
+	// context 已取消说明循环正在关闭，不应再发起读取。
 	if err := ctx.Err(); err != nil {
 		return
 	}
@@ -95,19 +88,11 @@ func (w *Watcher) poll(ctx context.Context, at time.Time) {
 	w.emit(reading)
 }
 
-// imageRef is the identity of the bitmap in a reading: the hash of its bytes,
-// which is what tells two screenshots of the same size apart — comparing sizes
-// alone made the second one look like the first and it was never recorded — and
-// what the history keeps the picture under.
-//
-// It is computed here rather than in the device because a digest is a storage
-// decision: the device reads what the platform has, and this is where the
-// application's own names for things are made. It costs one hash per poll while
-// a picture is on the clipboard.
-//
-// A reading that already carries a name keeps it. The device names a picture it
-// hands out again — the same one that is still on the clipboard — and hashing
-// its bytes a second time here would be the same answer for the same work.
+// imageRef 返回读取结果中位图的标识（其字节的哈希），历史以此作为图片的存储名。
+// 必须用字节哈希而非尺寸区分：同尺寸的两张截图靠尺寸无法区分。
+// 摘要属于存储决策，所以在这里算而不是在 device 里算；剪贴板上存在图片时
+// 每次轮询会多算一次哈希。已带标识的读取结果直接沿用（device 会为仍在剪贴板上的
+// 同一张图复用标识，无需重复哈希）。
 func imageRef(reading domain.ClipContent) string {
 	if reading.ImageRef != "" {
 		return reading.ImageRef

@@ -115,8 +115,8 @@ func TestRegisterRefusesNils(t *testing.T) {
 	}
 }
 
-// Validate is the startup check: an unpaired registry must fail loudly and
-// say which id is incomplete, not surprise the user later.
+// Validate 是启动检查：未配对的注册表必须在启动时明确失败并指出哪个 id 不完整，
+// 而不是等到用户使用时才发现。
 func TestValidateReportsUnpairedEntries(t *testing.T) {
 	broken := &Registry{
 		providers: map[string]domain.Provider{"deepseek": providerWithID("deepseek")},

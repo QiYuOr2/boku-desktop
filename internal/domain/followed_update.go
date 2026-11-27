@@ -2,8 +2,8 @@ package domain
 
 import "time"
 
-// FollowedUpdate is the newest public activity of one explicitly followed
-// creator. The feature maps provider response names to this neutral shape.
+// FollowedUpdate 是某个被显式关注的创作者最近的一条公开动态。
+// 该功能把 provider 响应中的名称映射成这个中性形状。
 type FollowedUpdate struct {
 	CreatorID    int64
 	CreatorName  string

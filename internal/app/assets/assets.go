@@ -1,11 +1,9 @@
-// Package assets carries the images the application needs at startup.
+// Package assets 提供应用启动所需的图片。
 //
-// They are embedded at compile time with go:embed: a packaged app keeps its
-// resources in a platform-specific place, so reading them from disk at
-// runtime would work in development and fail after packaging.
+// 资源用 go:embed 在编译期嵌入：打包后的应用资源位于平台特定路径，
+// 运行时从磁盘读取会在开发环境可用、打包后失败。
 //
-// The package has no dependencies of its own; it decodes and scales with the
-// standard library only.
+// 本包不依赖任何内部包，只用标准库解码与缩放。
 package assets
 
 import (
@@ -17,42 +15,38 @@ import (
 	"image/png"
 )
 
-// trayIconPNG is the tray icon, a copy of resources/icon.png.
+// trayIconPNG 是托盘图标，为 resources/icon.png 的副本。
 //
-// It is a copy because go:embed cannot reach a parent directory: a package
-// embeds only files below its own directory. resources/icon.png stays the
-// application icon that `mygo build` packages; change one, change the other.
+// 需要副本是因为 go:embed 只能嵌入包自身目录下的文件，无法访问上级目录。
+// resources/icon.png 是 `mygo build` 打包的应用图标；两者需同步修改。
 //
 //go:embed tray.png
 var trayIconPNG []byte
 
-// deepseekSVG is the DeepSeek whale mark, the icon of the provider of the
-// same name. It is an SVG, which the application shows with ui.Icon: a
-// vector stays sharp at whatever size the screen needs, and unlike a
-// bitmap it costs the binary a few kilobytes rather than a few hundred.
+// deepseekSVG 是 DeepSeek 鲸鱼标志，即同名厂商的图标。它是 SVG，
+// 用 ui.Icon 展示：矢量在任意尺寸都清晰，且比位图只增加几 KB 而非几百 KB。
 //
 //go:embed deepseek.svg
 var deepseekSVG []byte
 
-// clipboardSVG is the clipboard mark, drawn beside the clipboard line in the
-// quick window. It is an SVG for the same reason the DeepSeek mark is: it is
-// shown at a text size and stays sharp there.
+// clipboardSVG 是剪贴板标志，画在快捷窗口的剪贴板行旁。用 SVG 的原因同上：
+// 它按文字尺寸展示，需要保持清晰。
 //
 //go:embed clipboard.svg
 var clipboardSVG []byte
 
-// refreshSVG is the mark of the quick window's refresh action: fetching a
-// panel again. It is an SVG because the caller turns it while a fetch runs,
-// and a vector stays sharp at every angle.
+// refreshSVG 是快捷窗口刷新动作的标志。用 SVG 是因为取数期间调用方会旋转它，
+// 矢量在任意角度都清晰。
 //
 //go:embed refresh.svg
 var refreshSVG []byte
 
-// The quick window footer's actions: flashes, the two screenshot tools, the
-// way into the settings window and the way out of the application. They are
-// marks rather than words because the footer is one line at the bottom of a
-// card, and words there read as content while marks read as what they are.
+// 快捷窗口底栏的动作：日记、闪念、两个截图工具、进入设置窗口与退出应用。
+// 用标志而非文字，因为底栏是卡片底部的一行，文字在此读起来像内容，
+// 标志则读起来是动作本身。
 var (
+	//go:embed diary.svg
+	diarySVG []byte
 	//go:embed lightbulb.svg
 	lightbulbSVG []byte
 	//go:embed settings.svg
@@ -65,10 +59,9 @@ var (
 	qrSVG []byte
 )
 
-// The clipboard history's kind marks: what a recorded copy is drawn as, in
-// the tile at the head of its row. They are the framework's own drawing
-// language (a 24-unit box, stroked in currentColor), so they take the color
-// of the kind they stand for.
+// 剪贴板历史各类型的标志：某条记录在行首图块里画成什么。
+// 采用框架自带的绘制语言（24 单位画布、用 currentColor 描边），
+// 因此会取所属类型的颜色。
 var (
 	//go:embed history-text.svg
 	historyTextSVG []byte
@@ -80,10 +73,8 @@ var (
 	historyCodeSVG []byte
 )
 
-// The translation window's own marks: what it copies, what keeps it open,
-// and how it closes. They are drawn as marks rather than words because the
-// window is a card the size of a sentence, and a row of words at its foot
-// would outweigh what it is showing.
+// 翻译窗口自身的标志：复制、保持打开与关闭方式。用标志而非文字，
+// 因为该窗口只有一句话大小，脚部一排文字会压过它展示的内容。
 var (
 	//go:embed copy.svg
 	copySVG []byte
@@ -101,11 +92,8 @@ var (
 	returnSVG []byte
 )
 
-// The settings window's sidebar marks: what each section of the page is
-// reached by. They are the same 24-unit stroked drawings the rest of the
-// application uses, so they take the color of the line they sit on. Every
-// other entry draws the mark its own section already carries
-// (§2.1 of the design system).
+// 设置窗口侧栏的标志：进入页面各分区的方式。与全应用一致的 24 单位描边图，
+// 会取所在行文字的颜色。
 var (
 	//go:embed key.svg
 	keySVG []byte
@@ -121,9 +109,8 @@ var (
 	gripSVG []byte
 )
 
-// gaugeSVG is the placeholder mark of a block whose provider has no drawing of
-// its own in the repository yet: a gauge, which says "a measure" without
-// pretending to be a brand.
+// gaugeSVG 是仓库里尚无自身绘图的 provider 所用块的占位标志：一个仪表，
+// 表示「一种度量」而不假装是某个品牌。
 //
 //go:embed gauge.svg
 var gaugeSVG []byte
@@ -146,12 +133,10 @@ var chevronRightSVG []byte
 //go:embed steam.svg
 var steamSVG []byte
 
-// The playtime title's controller marks. All three are flat colored drawings,
-// shown as images so the tones survive. Switch Pro is the black body with a
-// light rim and the Super Famicom button colors. Xbox, including a third-party
-// pad on the Xbox protocol, is the black body with the green guide button and
-// the classic face colors. The title draws them about as tall as its own type,
-// on the same midline.
+// 游戏时长标题的手柄标志。三者都是平面彩色绘制，以图片形式展示以保留色调。
+// Switch Pro 是黑色机身、浅色边框与 Super Famicom 按键配色。Xbox（含走
+// Xbox 协议的第三方手柄）是黑色机身、绿色 guide 键与经典按键配色。
+// 标题按约自身字高、同一中线绘制它们。
 var (
 	//go:embed dualsense.svg
 	dualSenseSVG []byte
@@ -161,38 +146,30 @@ var (
 	xboxSVG []byte
 )
 
-// DeepSeek returns the DeepSeek mark as the SVG document it is. The caller
-// parses it once and keeps the result: parsing belongs to the framework,
-// and this package depends on the standard library alone.
+// DeepSeek 返回 DeepSeek 标志的 SVG 文档。调用方解析一次并保留结果：
+// 解析属于框架，本包只依赖标准库。
 func DeepSeek() []byte { return deepseekSVG }
 
-// Copy returns the mark for copying a value.
 func Copy() []byte { return copySVG }
 
-// Pin returns the mark for keeping a window open.
 func Pin() []byte { return pinSVG }
 
-// Close returns the mark for dismissing a window.
 func Close() []byte { return closeSVG }
 
 func Command() []byte { return commandSVG }
 func Return() []byte  { return returnSVG }
 
-// Translate returns the mark that heads the translation section: the
-// application's own drawing rather than a brand's.
+// Translate 返回翻译分区标题所用标志：应用自绘，而非品牌。
 func Translate() []byte { return translateSVG }
 
-// Live returns the realtime-translation mark.
 func Live() []byte { return liveSVG }
 
-// Clipboard returns the clipboard mark as the SVG document it is.
+// Clipboard 返回剪贴板标志的 SVG 文档。
 func Clipboard() []byte { return clipboardSVG }
 
-// Key returns the mark that heads the key section and its sidebar entry:
-// the drawing of a key the design gives it.
 func Key() []byte { return keySVG }
 
-// Info returns the mark of the application itself, drawn beside 关于.
+// Info 返回应用自身的标志，画在「关于」旁。
 func Info() []byte { return infoSVG }
 
 func Layout() []byte { return layoutSVG }
@@ -200,73 +177,71 @@ func Eye() []byte    { return eyeSVG }
 func EyeOff() []byte { return eyeOffSVG }
 func Grip() []byte   { return gripSVG }
 
-// Gauge returns the placeholder mark of a block whose provider has no drawing
-// of its own: a measure rather than a brand.
+// Gauge 返回无自身绘图的 provider 块的占位标志：表示度量而非品牌。
 func Gauge() []byte { return gaugeSVG }
 
-// Codex returns the Codex product mark, drawn in the caller's current color.
+// Codex 返回 Codex 产品标志，取调用方当前颜色。
 func Codex() []byte { return codexSVG }
 
-// Grok returns the Grok mark, drawn in the caller's current color.
+// Grok 返回 Grok 标志，取调用方当前颜色。
 func Grok() []byte { return grokSVG }
 
-// TV returns the small television mark used for scheduled animation updates.
+// TV 返回用于定时动画更新块的小电视标志。
 func TV() []byte { return tvSVG }
 
 func Steam() []byte { return steamSVG }
 
-// DualSense, SwitchPro and Xbox are the controller marks drawn beside the
-// playtime title. Anything that is not a DualSense or a Switch Pro uses Xbox.
-// DualSense and Switch Pro keep their own colors; Xbox takes the caller's.
+// DualSense、SwitchPro 与 Xbox 是画在游戏时长标题旁的手柄标志。
+// 不是 DualSense 或 Switch Pro 的一律用 Xbox。DualSense 与 Switch Pro
+// 保留自身颜色，Xbox 取调用方颜色。
 func DualSense() []byte { return dualSenseSVG }
 func SwitchPro() []byte { return switchProSVG }
 func Xbox() []byte      { return xboxSVG }
 
-// TVBilibili returns the small television mark that heads the followed-UP
-// block: rounded set, two antennae, two eyes — the shape the service's own
-// logo is built from. It is a different drawing from TV so that the two
-// blocks sharing a colour family are still told apart at a glance.
+// TVBilibili 返回追更 UP 主块标题所用的小电视标志。与 TV 是不同的绘制，
+// 以便同属一个色系的两种块仍能一眼区分。
 func TVBilibili() []byte { return tvBilibiliSVG }
 
-// ChevronRight returns the compact disclosure mark used by clickable rows.
+// ChevronRight 返回可点击行使用的紧凑展开标志。
 func ChevronRight() []byte { return chevronRightSVG }
 
-// Refresh returns the refresh mark as the SVG document it is.
+// Refresh 返回刷新标志的 SVG 文档。
 func Refresh() []byte { return refreshSVG }
 
-// Settings returns the settings mark as the SVG document it is.
+// Settings 返回设置标志的 SVG 文档。
 func Settings() []byte { return settingsSVG }
 
-// Quit returns the quit mark as the SVG document it is.
+// Quit 返回退出标志的 SVG 文档。
 func Quit() []byte { return quitSVG }
 
-// Lightbulb returns the mark that opens flashes.
+// Diary 返回打开日记的标志。
+func Diary() []byte { return diarySVG }
+
+// Lightbulb 返回打开闪念的标志。
 func Lightbulb() []byte { return lightbulbSVG }
 
-// Screenshot returns the region-capture mark used beside settings.
+// Screenshot 返回设置旁使用的区域截图标志。
 func Screenshot() []byte { return screenshotSVG }
 
-// QR returns the mark that starts recognition of a QR code on the screen.
+// QR 返回启动屏幕二维码识别的标志。
 func QR() []byte { return qrSVG }
 
-// HistoryText returns the mark for a copy that is text.
+// HistoryText 返回内容为文本的记录所用标志。
 func HistoryText() []byte { return historyTextSVG }
 
-// HistoryImage returns the mark for a copy that is an image.
+// HistoryImage 返回内容为图片的记录所用标志。
 func HistoryImage() []byte { return historyImageSVG }
 
-// HistoryLink returns the mark for a copy that is a link.
+// HistoryLink 返回内容为链接的记录所用标志。
 func HistoryLink() []byte { return historyLinkSVG }
 
-// HistoryCode returns the mark for a copy that reads as code.
+// HistoryCode 返回内容读起来像代码的记录所用标志。
 func HistoryCode() []byte { return historyCodeSVG }
 
-// Icon returns the application icon as a PNG, scaled to size×size pixels.
+// Icon 返回缩放到 size×size 像素的应用图标 PNG。
 //
-// It is the same picture in two places: MyGo wants roughly 16×16 points for
-// the tray, 32×32 pixels on a Retina display, and a view shows it larger in
-// a header. The embedded file is larger than both so that it stays sharp
-// wherever it is shown.
+// 同一张图用在两处：MyGo 托盘约需 16×16 点（Retina 下 32×32 像素），
+// 视图中会更大；嵌入文件比两者都大，以保证在任何位置都清晰。
 func Icon(size int) ([]byte, error) {
 	if size <= 0 {
 		return nil, fmt.Errorf("assets: icon size %d is not positive", size)
@@ -283,9 +258,8 @@ func Icon(size int) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// scale returns src resized to size×size pixels with box filtering: each
-// destination pixel averages the source pixels it covers, which keeps an
-// icon crisp when it is shrunk a lot.
+// scale 用盒式滤波把 src 缩放到 size×size 像素：每个目标像素取它所覆盖源像素
+// 的平均值，使图标大幅缩小时仍清晰。
 func scale(src image.Image, size int) *image.NRGBA {
 	dst := image.NewNRGBA(image.Rect(0, 0, size, size))
 	b := src.Bounds()
@@ -307,8 +281,8 @@ func scale(src image.Image, size int) *image.NRGBA {
 	return dst
 }
 
-// average returns the mean of the source pixels in [x0,x1)×[y0,y1),
-// weighted by alpha so that transparent pixels do not darken the edges.
+// average 返回 [x0,x1)×[y0,y1) 内源像素的均值，按 alpha 加权，
+// 以免透明像素把边缘压暗。
 func average(src image.Image, x0, y0, x1, y1 int) color.NRGBA {
 	var r, g, b, a, n uint64
 	for y := y0; y < y1; y++ {

@@ -11,7 +11,7 @@ import (
 
 type testBilibili struct {
 	live, dynamic bool
-	// noUIDs answers with an empty followed list; otherwise one creator.
+	// noUIDs 时返回空的关注列表；否则返回一个创作者。
 	noUIDs bool
 }
 

@@ -16,11 +16,11 @@ import (
 	"github.com/ebitengine/purego/objc"
 )
 
-// loginItemLocation is where macOS lists the application's login item. It is
-// a page in System Settings, not a file: the system keeps the record.
+// loginItemLocation 是 macOS 列出应用登录项的页面。它是系统设置里的一页而非文件：
+// 记录由系统保管。
 const loginItemLocation = "系统设置 > 通用 > 登录项与扩展"
 
-// loginItemStatus is SMAppServiceStatus. The numbers are the framework's.
+// loginItemStatus 是 SMAppServiceStatus，数值取自框架。
 type loginItemStatus int
 
 const (
@@ -30,23 +30,19 @@ const (
 	loginItemNotFound         loginItemStatus = 3
 )
 
-// loginItemService is the part of SMAppService this package uses. It is an
-// interface so the state machine can be tested without registering the test
-// binary as a login item.
+// loginItemService 是本包用到的 SMAppService 部分。用接口是为了让状态机可测，
+// 而不必把测试二进制注册成登录项。
 type loginItemService interface {
 	Status() (loginItemStatus, error)
 	Register() error
 	Unregister() error
 }
 
-// SMAppService is the macOS Manager: the application's own login item, the
-// one System Settings > General > Login Items & Extensions lists and the user
-// can switch off there.
+// SMAppService 是 macOS 的 Manager：应用自身的登录项，即系统设置 > 通用 >
+// 登录项与扩展里列出、用户可关闭的那一项。
 //
-// macOS also has launch agents, and the package used one before. An agent is
-// a background item: it does not appear in the login items list, and a user
-// who looks in the place the system names for "open at login" cannot find it.
-// The main application's login item is the mechanism that matches the switch.
+// macOS 另有 launch agent（本包此前用的机制）：它是后台项，不出现在登录项列表中，
+// 用户在系统为「登录时打开」指示的位置找不到它。主应用的登录项才是与该开关对应的机制。
 type SMAppService struct {
 	service   loginItemService
 	legacyDir string
@@ -54,14 +50,11 @@ type SMAppService struct {
 	migrate   sync.Once
 }
 
-// NewSMAppService returns the manager over the application's login item.
+// NewSMAppService 返回管理应用登录项的 manager。
 func NewSMAppService() *SMAppService {
-	// A home directory that cannot be read leaves the legacy directory empty
-	// rather than joining onto nothing: filepath.Join("", "Library", ...) is a
-	// relative path, and a relative path is resolved against whatever working
-	// directory the application happens to have been started in — so the
-	// migration step would look for, and could delete, somebody else's files.
-	// Empty is the value the migration already checks for.
+	// 家目录读不出时，旧目录保持空串而不是拼接到空值上：filepath.Join("", "Library", ...)
+	// 是相对路径，会按应用碰巧的工作目录解析，迁移步骤可能找到并删掉别人的文件。
+	// 空值正是迁移步骤已经检查的情况。
 	return &SMAppService{
 		service:   objcLoginItem{},
 		legacyDir: legacyLaunchAgentsDir(),
@@ -69,8 +62,7 @@ func NewSMAppService() *SMAppService {
 	}
 }
 
-// legacyLaunchAgentsDir is where the pre-SMAppService login agent lived, or ""
-// when the home directory cannot be read.
+// legacyLaunchAgentsDir 是 SMAppService 之前的登录 agent 所在目录，家目录读不出时返回 ""。
 func legacyLaunchAgentsDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -83,9 +75,8 @@ func legacyLaunchAgentsDir() string {
 	return filepath.Join(home, "Library", "LaunchAgents")
 }
 
-// Read reports whether the system has an enabled login item for this
-// application. A record the user turned off in System Settings is not "off":
-// it is ErrNeedsApproval, which the settings page can explain.
+// Read 报告系统是否为该应用启用了登录项。用户在系统设置里关掉的记录不算「关」，
+// 而是返回 ErrNeedsApproval，由设置页面解释。
 func (s *SMAppService) Read(l Launcher) (bool, error) {
 	s.migrateLegacy(l)
 	status, err := s.service.Status()
@@ -104,15 +95,13 @@ func (s *SMAppService) Read(l Launcher) (bool, error) {
 	}
 }
 
-// Location is the System Settings page that lists the login item. The system
-// owns the record, so there is no file path to show.
+// Location 是列出登录项的系统设置页面。记录由系统保管，没有文件路径可展示。
 func (s *SMAppService) Location(Launcher) (string, error) {
 	return loginItemLocation, nil
 }
 
-// Start registers the application as a login item. Registering again is how a
-// record the user switched off in System Settings is switched back on: the
-// system replaces the record rather than making a second one.
+// Start 把应用注册为登录项。重新注册就是把用户在系统设置里关掉的记录重新打开：
+// 系统会替换该记录，而不是新建一条。
 func (s *SMAppService) Start(l Launcher) error {
 	s.migrateLegacy(l)
 	if err := s.installed(); err != nil {
@@ -121,17 +110,15 @@ func (s *SMAppService) Start(l Launcher) error {
 	if err := s.service.Register(); err != nil {
 		return err
 	}
-	// registerAndReturnError: can succeed while the item still waits for the
-	// user's approval. The page should say where to allow it rather than
-	// claim the switch did nothing.
+	// registerAndReturnError: 可能成功但该项仍在等待用户授权。页面应说明去哪里允许，
+	// 而不是声称开关什么也没做。
 	if status, err := s.service.Status(); err == nil && status == loginItemRequiresApproval {
 		return ErrNeedsApproval
 	}
 	return nil
 }
 
-// Stop removes the login item. A record that is not there is the state the
-// user asked for, not a failure.
+// Stop 移除登录项。记录本就不存在正是用户想要的状态，不算失败。
 func (s *SMAppService) Stop(l Launcher) error {
 	s.migrateLegacy(l)
 	status, err := s.service.Status()
@@ -141,14 +128,11 @@ func (s *SMAppService) Stop(l Launcher) error {
 	return s.service.Unregister()
 }
 
-// migrateLegacy removes the launch agent the previous mechanism wrote. It
-// also registers the login item when the agent was there, so an existing
-// "on" survives the change; the agent's own RunAtLoad is not consulted, which
-// matches what the old switch showed.
+// migrateLegacy 移除旧机制写入的 launch agent。若 agent 存在，同时注册登录项，
+// 使已有的「开」状态在切换中保留；不读取 agent 自身的 RunAtLoad，与旧开关显示一致。
 //
-// This is a one-time migration. It retires itself once every installed copy
-// has run a build that knows the login item; removal is safe because the
-// label belongs to this application and the file is not read after this.
+// 这是一次性迁移：等每份已安装副本都跑过认识登录项的版本后即自行失效。
+// 删除是安全的：label 属于本应用，且此后不再读取该文件。
 func (s *SMAppService) migrateLegacy(l Launcher) {
 	s.migrate.Do(func() {
 		if strings.TrimSpace(l.Label) == "" || s.legacyDir == "" {
@@ -163,8 +147,7 @@ func (s *SMAppService) migrateLegacy(l Launcher) {
 		}
 		if s.installed != nil {
 			if err := s.installed(); err != nil {
-				// A build outside Applications must not move the installed
-				// application's login start.
+				// 不在 Applications 里的构建不得改动已安装应用的登录启动。
 				return
 			}
 		}
@@ -185,10 +168,8 @@ func (s *SMAppService) migrateLegacy(l Launcher) {
 	})
 }
 
-// requireInstalledApp refuses a login item for a program that will not be in
-// the same place at the next login: a development build, a mounted disk image,
-// a copy that is about to be replaced. The system login item names the bundle,
-// so the bundle has to be in an Applications folder.
+// requireInstalledApp 拒绝为下次登录时不在同一位置的程序写登录项：开发构建、挂载的磁盘镜像、
+// 即将被替换的副本。系统登录项指向 bundle，因此 bundle 必须位于 Applications 文件夹。
 func requireInstalledApp() error {
 	exe, err := BinaryPath()
 	if err != nil {
@@ -198,9 +179,8 @@ func requireInstalledApp() error {
 	if bundle == "" {
 		return ErrNotInstalled
 	}
-	// Only the system Applications folder when the home directory cannot be
-	// read: joining onto an empty home would ask whether the bundle is inside
-	// a relative "Applications", which is not a place this check means.
+	// 家目录读不出时只查系统 Applications：拼接到空家目录会变成相对 "Applications"，
+	// 那不是本检查想查的位置。
 	roots := []string{"/Applications"}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		roots = append(roots, filepath.Join(home, "Applications"))
@@ -215,7 +195,7 @@ func requireInstalledApp() error {
 	return ErrNotInstalled
 }
 
-// appBundle walks up from an executable to the bundle that contains it.
+// appBundle 从可执行文件向上查找包含它的 bundle。
 func appBundle(exe string) string {
 	for dir := filepath.Dir(exe); ; dir = filepath.Dir(dir) {
 		if strings.HasSuffix(dir, ".app") {
@@ -228,8 +208,7 @@ func appBundle(exe string) string {
 	}
 }
 
-// inside reports whether path is root or below it, without treating a
-// sibling whose name starts with root's as inside.
+// inside 报告 path 是否为 root 或其下，且不把名字以 root 开头的同级目录误判为在内。
 func inside(root, path string) bool {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
@@ -238,12 +217,11 @@ func inside(root, path string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-// objcLoginItem is SMAppService.mainApp reached through the Objective-C
-// runtime. The package builds without cgo, as the rest of the application
-// does, so the framework is called through purego.
+// objcLoginItem 通过 Objective-C 运行时访问 SMAppService.mainApp。本包与其余应用一样
+// 在不启用 cgo 下构建，因此经 purego 调用框架。
 type objcLoginItem struct{}
 
-// Status reports SMAppService.mainApp.status.
+// Status 报告 SMAppService.mainApp.status。
 func (objcLoginItem) Status() (loginItemStatus, error) {
 	service, err := mainApp()
 	if err != nil {
@@ -252,7 +230,7 @@ func (objcLoginItem) Status() (loginItemStatus, error) {
 	return loginItemStatus(objc.Send[int64](service, statusSel)), nil
 }
 
-// Register calls -[SMAppService registerAndReturnError:].
+// Register 调用 -[SMAppService registerAndReturnError:]。
 func (objcLoginItem) Register() error {
 	service, err := mainApp()
 	if err != nil {
@@ -265,7 +243,7 @@ func (objcLoginItem) Register() error {
 	return nil
 }
 
-// Unregister calls -[SMAppService unregisterAndReturnError:].
+// Unregister 调用 -[SMAppService unregisterAndReturnError:]。
 func (objcLoginItem) Unregister() error {
 	service, err := mainApp()
 	if err != nil {
@@ -289,7 +267,7 @@ var (
 	localizedDescriptionSel objc.SEL
 )
 
-// bridge loads ServiceManagement and resolves the class and selectors once.
+// bridge 加载 ServiceManagement 并一次性解析类与 selector。
 func bridge() {
 	if _, err := purego.Dlopen(
 		"/System/Library/Frameworks/ServiceManagement.framework/ServiceManagement",
@@ -302,8 +280,7 @@ func bridge() {
 		return
 	}
 	smClass = class
-	// The Objective-C class property is mainAppService; Swift shortens it to
-	// SMAppService.mainApp.
+	// Objective-C 的类属性名为 mainAppService；Swift 简写为 SMAppService.mainApp。
 	mainAppSel = objc.RegisterName("mainAppService")
 	statusSel = objc.RegisterName("status")
 	registerSel = objc.RegisterName("registerAndReturnError:")
@@ -312,7 +289,7 @@ func bridge() {
 	smBridgeOK = true
 }
 
-// mainApp resolves SMAppService.mainApp.
+// mainApp 解析 SMAppService.mainApp。
 func mainApp() (objc.ID, error) {
 	smBridgeOnce.Do(bridge)
 	if !smBridgeOK {
@@ -325,10 +302,8 @@ func mainApp() (objc.ID, error) {
 	return service, nil
 }
 
-// loginItemError turns the NSError the framework returned into a Go error.
-// The description is the system's own sentence, which is what the settings
-// page can show; a pointer this package cannot read is not a reason to lose
-// the failure itself.
+// loginItemError 把框架返回的 NSError 转成 Go error。描述是系统自己的句子，
+// 正是设置页要展示的；本包读不出的指针不应成为丢失失败信息本身的理由。
 func loginItemError(action string, nsErr objc.ID) error {
 	if nsErr != 0 {
 		if description := nsString(nsErr, localizedDescriptionSel); description != "" {
@@ -338,8 +313,7 @@ func loginItemError(action string, nsErr objc.ID) error {
 	return fmt.Errorf("autostart: could not %s", action)
 }
 
-// nsString copies an NSString returned by the system. It is bounded: the
-// description is a sentence, and a bad pointer must not walk forever.
+// nsString 复制系统返回的 NSString。有上界：描述只是一句句子，坏指针不得无限遍历。
 func nsString(value objc.ID, sel objc.SEL) string {
 	if value == 0 {
 		return ""
@@ -352,8 +326,7 @@ func nsString(value objc.ID, sel objc.SEL) string {
 	if ptr == nil {
 		return ""
 	}
-	// The system owns the string for the duration of the call; 4096 bytes is
-	// far more than a localized description, and the NUL ends it earlier.
+	// 字符串由系统在本次调用期间持有；4096 字节远超一条本地化描述，且 NUL 会更早终止。
 	buf := unsafe.Slice(ptr, 4096)
 	for i, b := range buf {
 		if b == 0 {

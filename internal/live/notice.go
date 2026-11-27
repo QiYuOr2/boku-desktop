@@ -11,8 +11,8 @@ import (
 	"boku/internal/platform/httpc"
 )
 
-// downloadNotice is the settings line for a failed download. The pinned file
-// name stays; local paths and URLs do not.
+// downloadNotice 是下载失败时显示在设置里的文案。固定的文件名保留，
+// 本地路径和 URL 不显示。
 func downloadNotice(err error) string {
 	if err == nil {
 		return ""

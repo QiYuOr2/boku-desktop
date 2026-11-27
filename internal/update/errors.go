@@ -8,9 +8,8 @@ import (
 	"boku/internal/domain"
 )
 
-// unavailableFrom keeps the distinction a caller needs when a failure comes
-// from the injected updater: a bad response stays one, and everything else is
-// an update that could not be had. No URL is quoted.
+// unavailableFrom 在失败来自注入的 updater 时保留调用方需要的区分：坏响应仍是
+// 坏响应，其余都是取不到的更新。不引用 URL。
 func unavailableFrom(reason string, err error) error {
 	if errors.Is(err, domain.ErrProviderBadResponse) {
 		return fmt.Errorf("%w: %s: %v", domain.ErrProviderBadResponse, reason, err)

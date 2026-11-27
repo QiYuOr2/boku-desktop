@@ -1,26 +1,16 @@
-// Package screenoverlay gives Boku's region-selection overlay the native
-// window properties MyGo's window options cannot express.
+// Package screenoverlay 为框选遮罩设置 MyGo 窗口选项无法表达的本地窗口属性。
 //
-// The overlay must cover a whole display, including the menu bar and the Dock.
-// On macOS AppKit refuses that to a titled window: a frame whose title bar
-// would be off screen is shifted down by the menu bar's height as the window
-// is shown, and MyGo's floating window level stays below the menu bar and the
-// Dock, which keep drawing over it. The overlay is therefore made borderless
-// and put at the screen saver's level. It is also given no window animation:
-// an NSPanel fades out after it closes, and the pixel read that follows a
-// selection would capture the fading mask instead of the desktop. MyGo exposes
-// none of these, so this package reaches the native window through the handle
-// MyGo does expose. The rest of Boku sees only Cover; when MyGo grows the
-// options, the macOS implementation is deleted and Cover becomes a no-op (or
-// the call goes away).
+// 遮罩必须覆盖整个屏幕，包括菜单栏和 Dock。macOS 下带标题栏的窗口做不到：
+// 标题栏会跑到屏幕外，AppKit 显示窗口时把 frame 下移菜单栏的高度，而 MyGo
+// 的悬浮层级又低于菜单栏和 Dock，会被持续覆盖。遮罩因此改为无边框并置于
+// 屏幕保护程序层级。同时关闭窗口动画：NSPanel 关闭后会淡出，紧接着的选区
+// 像素读取会拍到正在淡出的遮罩而非桌面。MyGo 不暴露这些能力，本包通过 MyGo
+// 暴露的窗口句柄直接操作原生窗口。
 package screenoverlay
 
-// Cover prepares a window that was created hidden and not yet placed to cover
-// a whole display: it removes the title bar, raises the window above the menu
-// bar and the Dock, and turns its open/close animation off so that the window
-// is gone as soon as it is closed. Call it before the window is given its
-// bounds and shown: the title bar is what made AppKit constrain the frame.
+// Cover 让一个创建后隐藏、尚未定位的窗口覆盖整个屏幕：去掉标题栏、抬高到
+// 菜单栏与 Dock 之上，并关闭开/关动画，使窗口一关闭即消失。必须在给窗口设置
+// 边界并显示之前调用，否则 AppKit 已按标题栏约束了 frame。
 //
-// It reports the platform's failure to change the window. A platform whose
-// window options already suffice returns nil without doing anything.
+// 返回平台修改窗口失败的错误；窗口选项已足够的平台直接返回 nil。
 func Cover(window uintptr) error { return cover(window) }

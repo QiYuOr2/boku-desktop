@@ -39,7 +39,7 @@ func TestSecretsSetGetAndMask(t *testing.T) {
 		t.Errorf("Masked leaked the value: %q", masked)
 	}
 
-	// The key is stored under the provider's namespace, not under "apiKey".
+	// 键按厂商命名空间存储，而不是裸 "apiKey"。
 	stored, err := store.Get(ctx, "deepseek.apiKey")
 	if err != nil || stored.Text() != "sk-abcdef1234" {
 		t.Fatalf("stored credential after masking = %q, %v", stored.Text(), err)

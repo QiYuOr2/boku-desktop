@@ -8,22 +8,14 @@ import (
 	"boku/internal/platform/autostart"
 )
 
-// The login-start switch is the settings page's only switch about the
-// machine rather than about Boku: no key in settings.json, and every frame
-// asks the platform. These tests drive it with a manager the test decides, so
-// they say what the switch does — not what the section draws, which is a
-// runtime acceptance.
-
-// testAutostart is a login start the test decides: whether it is on, and what
-// it fails with.
 type testAutostart struct {
 	on bool
-	// onErr and setErr are what each answer fails with; nil means it works.
+	// onErr 与 setErr 是各次回答的失败原因；nil 表示成功。
 	onErr  error
 	setErr error
-	// writes records every Start and Stop, in the order they happened.
+	// writes 按发生顺序记录每次 Start 和 Stop。
 	writes []bool
-	// keys records where the start was said to live.
+	// keys 记录开机启动被说成存放的位置。
 	keys []string
 }
 
@@ -56,8 +48,6 @@ func (a *testAutostart) Stop(autostart.Launcher) error {
 	return nil
 }
 
-// autostartState with an injected manager: the fake state is the real one,
-// with the platform's login start replaced.
 func autostartState(t *testing.T, manager autostart.Manager) *State {
 	t.Helper()
 	state := &State{}
@@ -65,8 +55,6 @@ func autostartState(t *testing.T, manager autostart.Manager) *State {
 	return state
 }
 
-// The switch is drawn from the platform: on when it says on, off when it says
-// off, and drawn at all only where the platform has a login start.
 func TestAutostartStateReadsThePlatform(t *testing.T) {
 	manager := &testAutostart{}
 	state := autostartState(t, manager)
@@ -80,8 +68,7 @@ func TestAutostartStateReadsThePlatform(t *testing.T) {
 	}
 }
 
-// A State with no manager is one nothing was injected into — a test, or a
-// build without an assembly. It draws no switch, and asking it is safe.
+// 没有注入管理器的 State（测试或未装配的构建）不画开关，询问它也安全。
 func TestAutostartWithoutAManager(t *testing.T) {
 	state := &State{}
 	on, enabled, status := state.autostartState()
@@ -91,16 +78,13 @@ func TestAutostartWithoutAManager(t *testing.T) {
 	if status.text != "" {
 		t.Errorf("without a manager the section said %q, want nothing", status.text)
 	}
-	// Pressing it anyway must not panic or write anywhere.
+	// 即便如此按下也不能 panic，也不能写任何地方。
 	state.setAutostart(true)
 	if status := state.autostartStatus; status.text != "" {
 		t.Errorf("setAutostart without a manager said %q, want nothing", status.text)
 	}
 }
 
-// The switch turning it on writes the start; turning it off takes it away.
-// The section then reads the platform again, so what it shows is the system's
-// record rather than what was asked for.
 func TestAutostartSwitchWritesTheStart(t *testing.T) {
 	manager := &testAutostart{}
 	state := autostartState(t, manager)
@@ -120,8 +104,7 @@ func TestAutostartSwitchWritesTheStart(t *testing.T) {
 	}
 }
 
-// A write the system refused leaves the switch where it was and says so: the
-// page must not draw a start that did not happen.
+// 系统拒绝的写入应让开关停在原位并说明原因：页面不能画出并未发生的启动。
 func TestAutostartSwitchReportsARefusedWrite(t *testing.T) {
 	manager := &testAutostart{setErr: errors.New("the registry refused the write")}
 	state := autostartState(t, manager)
@@ -135,8 +118,6 @@ func TestAutostartSwitchReportsARefusedWrite(t *testing.T) {
 	}
 }
 
-// A platform that cannot answer does not get a switch to draw: the section
-// says the mechanism is missing rather than showing a switch that would fail.
 func TestAutostartUnsupportedPlatform(t *testing.T) {
 	manager := &testAutostart{onErr: autostart.ErrUnsupported}
 	state := autostartState(t, manager)
@@ -149,9 +130,8 @@ func TestAutostartUnsupportedPlatform(t *testing.T) {
 	}
 }
 
-// A login item the user turned off in System Settings is not the same as one
-// that was never registered: the switch is off, but the note says where to
-// allow it instead of pretending the feature is missing or broken.
+// 用户在系统设置里关掉的登录项，与从未登记的不同：开关为关，但提示说明去哪里允许，
+// 而不是谎称功能缺失或损坏。
 func TestAutostartNeedsApproval(t *testing.T) {
 	manager := &testAutostart{onErr: autostart.ErrNeedsApproval}
 	state := autostartState(t, manager)
@@ -164,8 +144,6 @@ func TestAutostartNeedsApproval(t *testing.T) {
 	}
 }
 
-// A start the system recorded but still needs approval for says so after the
-// press too, rather than showing a danger line for a write that happened.
 func TestAutostartStartNeedsApproval(t *testing.T) {
 	manager := &testAutostart{setErr: autostart.ErrNeedsApproval}
 	state := autostartState(t, manager)
@@ -175,8 +153,6 @@ func TestAutostartStartNeedsApproval(t *testing.T) {
 	}
 }
 
-// A build outside an Applications folder cannot be registered: the page says
-// where to put the application instead of showing the system's raw error.
 func TestAutostartStartNotInstalled(t *testing.T) {
 	manager := &testAutostart{setErr: autostart.ErrNotInstalled}
 	state := autostartState(t, manager)
@@ -186,8 +162,7 @@ func TestAutostartStartNotInstalled(t *testing.T) {
 	}
 }
 
-// A read that fails is not the same as "off": the page says it could not tell,
-// rather than telling the user the start is off when nobody knows.
+// 读取失败不等于「关闭」：页面应说无法判断，而不是在无人确知时告诉用户启动已关闭。
 func TestAutostartReadFailureIsNotOff(t *testing.T) {
 	manager := &testAutostart{onErr: errors.New("the launch agent could not be read")}
 	state := autostartState(t, manager)

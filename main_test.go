@@ -28,11 +28,14 @@ func TestServicesLoadAndPersistQuickWindowLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	layout := preferences.NewQuickWindowLayout()
-	_, _, _, _, _, _, _, appearance, prefs, recorder, _, _, err := services(userData, "test", layout)
+	_, _, _, _, _, _, _, appearance, prefs, recorder, _, diarySvc, _, err := services(userData, "test", layout)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(recorder.Stop)
+	if diarySvc != nil {
+		t.Cleanup(func() { _ = diarySvc.Close() })
+	}
 	if layout.Order()[0] != "playtime" || layout.Order()[1] != "anime" || layout.Visible("bilibili") {
 		t.Fatalf("loaded layout=%v", layout.Order())
 	}
@@ -45,11 +48,14 @@ func TestServicesLoadAndPersistQuickWindowLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	reloaded := preferences.NewQuickWindowLayout()
-	_, _, _, _, _, _, _, _, _, again, _, _, err := services(userData, "test", reloaded)
+	_, _, _, _, _, _, _, _, _, again, _, diaryAgain, _, err := services(userData, "test", reloaded)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(again.Stop)
+	if diaryAgain != nil {
+		t.Cleanup(func() { _ = diaryAgain.Close() })
+	}
 	if reloaded.Order()[len(reloaded.Order())-1] != "anime" || reloaded.Visible("codex") || reloaded.Visible("bilibili") {
 		t.Fatalf("saved layout=%v", reloaded.Order())
 	}
@@ -62,21 +68,21 @@ func TestServicesLoadAndPersistQuickWindowLayout(t *testing.T) {
 	}
 }
 
-// The assembly is the one place a provider and its adapter, or a panel and
-// its provider, can be paired wrongly. That is a startup error, and it can
-// be checked without a window.
+// 装配是 Provider 与 Adapter、面板与 Provider 唯一可能配错的地方；这属于启动错误，无需窗口即可检查。
 func TestServicesAssembleThePanels(t *testing.T) {
 	userData := t.TempDir()
-	panels, anime, bilibili, secrets, clip, translation, _, appearance, prefs, recorder, _, _, err := services(userData, "0.1.0")
+	panels, anime, bilibili, secrets, clip, translation, _, appearance, prefs, recorder, _, diarySvc, _, err := services(userData, "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}
 	t.Cleanup(recorder.Stop)
-	if panels == nil || anime == nil || bilibili == nil || secrets == nil || clip == nil || translation == nil {
+	if diarySvc != nil {
+		t.Cleanup(func() { _ = diarySvc.Close() })
+	}
+	if panels == nil || anime == nil || bilibili == nil || secrets == nil || clip == nil || translation == nil || diarySvc == nil {
 		t.Fatal("services returned no services")
 	}
-	// The appearance is a section of the same settings file, registered with
-	// the store: a change to it has to be one the store accepts and writes.
+	// 外观是同一设置文件的一个 section，经 store 注册；它的修改必须是 store 能接受并写入的。
 	if appearance.Mode() != "system" {
 		t.Errorf("the appearance starts at %q, want system", appearance.Mode())
 	}
@@ -89,8 +95,7 @@ func TestServicesAssembleThePanels(t *testing.T) {
 	if appearance.Mode() != "dark" {
 		t.Errorf("the appearance after a save = %q, want dark", appearance.Mode())
 	}
-	// The clipboard starts off, and nothing here reads the system
-	// clipboard: assembling a service is not using it.
+	// 剪贴板默认关闭，且此处不读取系统剪贴板：装配服务不等于使用它。
 	if settings := clip.Settings(); settings.Monitoring || settings.RegionVisible {
 		t.Errorf("the clipboard starts enabled: %+v", settings)
 	}
@@ -128,16 +133,12 @@ func TestServicesAssembleThePanels(t *testing.T) {
 	if descriptor.UsageURL != paneldeepseek.UsageURL {
 		t.Errorf("descriptor usage link = %q, want %q", descriptor.UsageURL, paneldeepseek.UsageURL)
 	}
-	// The page the panel's headline opens comes from the provider's own
-	// descriptor, through the use case, to the view: the assembly is where
-	// that link can go missing without anything failing to compile.
+	// 面板标题打开的页面来自 Provider 自己的 descriptor，经用例传到视图；装配处是这条链接可能悄然丢失却不影响编译的地方。
 	if view := panels.View(listed[0].ID); view.UsageURL != paneldeepseek.UsageURL {
 		t.Errorf("the panel opens %q, want the provider's page %q", view.UsageURL, paneldeepseek.UsageURL)
 	}
 
-	// The quota panel is assembled the same way, and its credential is the
-	// one the Codex CLI keeps rather than a key of Boku's: what the
-	// descriptor asks for is the name the source answers to.
+	// 额度面板同样装配；它的凭据是 Codex CLI 自己保存的，而非 Boku 的 key——descriptor 要的就是数据源认的那个名字。
 	quota, err := panels.Descriptor(panelcodex.ProviderID)
 	if err != nil {
 		t.Fatalf("Descriptor failed for the quota: %v", err)
@@ -155,10 +156,7 @@ func TestServicesAssembleThePanels(t *testing.T) {
 		t.Errorf("the quota panel shows %d metrics, want %d", len(view.Metrics), len(panelcodex.Metrics()))
 	}
 
-	// With no credential stored, the balance panel says so instead of asking
-	// the network: nothing here reaches out. (The quota panel's credential is
-	// the Codex CLI's own login, which this machine may well have: reading it
-	// is not this test's business.)
+	// 没有存凭据时，余额面板直接说明而不是请求网络：此处不发任何请求。额度面板的凭据是 Codex CLI 自己的登录，本机可能已有，读取它不是本测试的职责。
 	view := panels.View(listed[0].ID)
 	if view.HasSnapshot {
 		t.Error("a panel with no credential claims a snapshot")
@@ -170,8 +168,7 @@ func TestServicesAssembleThePanels(t *testing.T) {
 		t.Error("the view does not report the missing credential")
 	}
 
-	// The credential file lives under the user data directory the caller
-	// named, and is not created until something is stored in it.
+	// 凭据文件位于调用者指定的用户数据目录下，且在存入内容之前不会创建。
 	if path := secrets.Path(); path == "" {
 		t.Error("the credential store has no path")
 	} else if filepath.Base(path) != credential.FileName {
@@ -179,8 +176,7 @@ func TestServicesAssembleThePanels(t *testing.T) {
 	}
 }
 
-// The logs live beside the rest of the application's files, in a directory of
-// their own: one thing to look at, and one thing to delete.
+// 日志与应用其它文件放在一起，但有单独目录：便于查看，也便于整体删除。
 func TestLogDirectoryIsUnderTheUserData(t *testing.T) {
 	t.Setenv(logging.DirEnv, "")
 	userData := t.TempDir()
@@ -190,8 +186,7 @@ func TestLogDirectoryIsUnderTheUserData(t *testing.T) {
 	}
 }
 
-// BOKU_LOG_DIR moves the logs, which is what a support run wants: the file is
-// then somewhere that can be handed over whole.
+// BOKU_LOG_DIR 可移动日志位置，供排障使用：文件可整体交出。
 func TestLogDirectoryFollowsTheEnvironment(t *testing.T) {
 	elsewhere := filepath.Join(t.TempDir(), "somewhere else")
 	t.Setenv(logging.DirEnv, "  "+elsewhere+"  ")
@@ -200,10 +195,7 @@ func TestLogDirectoryFollowsTheEnvironment(t *testing.T) {
 	}
 }
 
-// The first record of a run is where a failure that happens before any window
-// exists is found afterwards, so the launch has to open the log, install it
-// process-wide, and say what this run is — under the user data directory the
-// caller named, and nowhere else.
+// 启动时的第一条记录，是事后定位窗口尚未存在时故障的地方；因此启动必须打开日志、进程级安装它并记录本次运行——且只在调用者指定的用户数据目录下。
 func TestStartLoggingRecordsTheLaunchUnderTheUserData(t *testing.T) {
 	keepStandardLoggers(t)
 	t.Setenv(logging.DirEnv, "")
@@ -217,8 +209,7 @@ func TestStartLoggingRecordsTheLaunchUnderTheUserData(t *testing.T) {
 	if !strings.HasPrefix(logFile.File(), lives+string(filepath.Separator)) {
 		t.Errorf("the log is at %q, want it under %q", logFile.File(), lives)
 	}
-	// Install is what puts the standard logger and slog's default logger
-	// here; both are process-wide, so this is the only place to check it.
+	// Install 会把标准 logger 与 slog 的默认 logger 装到这里；两者都是进程级的，所以只能在此检查。
 	slog.Info("through the default logger")
 	if err := logFile.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
@@ -236,8 +227,7 @@ func TestStartLoggingRecordsTheLaunchUnderTheUserData(t *testing.T) {
 	}
 }
 
-// keepStandardLoggers puts the process's loggers back the way they were: a
-// test that installs a log owns the whole process while it runs.
+// keepStandardLoggers 在测试结束后还原进程的 logger：安装日志的测试在运行期间独占整个进程。
 func keepStandardLoggers(t *testing.T) {
 	t.Helper()
 	previousLogger := slog.Default()
@@ -252,9 +242,7 @@ func keepStandardLoggers(t *testing.T) {
 	})
 }
 
-// A tray application has no console, so a panic that is only printed is a
-// crash nobody can explain. It is written down — and then raised again, so
-// that how the process ends is unchanged.
+// 托盘应用没有控制台，只打印出来的 panic 就是无人能解释的崩溃。它会被记录下来——然后原样再次抛出，进程结束方式不变。
 func TestRecordPanicsWritesItDownAndRaisesItAgain(t *testing.T) {
 	keepStandardLoggers(t)
 	dir := t.TempDir()
@@ -295,23 +283,21 @@ func TestRecordPanicsWritesItDownAndRaisesItAgain(t *testing.T) {
 	}
 }
 
-// The assembly is also where the translators are registered, and where they
-// are paired with the credentials and the settings their descriptors name:
-// a translator without a settings store, or one whose settings it cannot
-// read, is a startup mistake worth catching here.
+// 装配处也是翻译器注册、并与 descriptor 所指的凭据和设置配对的地方：翻译器缺设置存储、或读不到自己的设置，都是应在此发现的启动错误。
 func TestServicesAssembleTheTranslators(t *testing.T) {
-	_, _, _, _, _, translation, own, _, _, recorder, _, _, err := services(t.TempDir(), "0.1.0")
+	_, _, _, _, _, translation, own, _, _, recorder, _, diarySvc, _, err := services(t.TempDir(), "0.1.0")
 	if err != nil {
 		t.Fatalf("services failed: %v", err)
 	}
 	t.Cleanup(recorder.Stop)
+	if diarySvc != nil {
+		t.Cleanup(func() { _ = diarySvc.Close() })
+	}
 	views, err := translation.Providers(context.Background())
 	if err != nil {
 		t.Fatalf("Providers failed: %v", err)
 	}
-	// The three the application ships with. The user's own services are not
-	// among them: there are none until the user adds one, and a translator for
-	// a service nobody configured would be a row that cannot answer.
+	// 应用自带的三个。用户自己的服务不在其中：用户添加之前没有，为一个没人配置的服务生成翻译器会是一行无法作答的条目。
 	if len(views) != 3 {
 		t.Fatalf("the application has %d translators, want 3: %+v", len(views), views)
 	}
@@ -327,9 +313,7 @@ func TestServicesAssembleTheTranslators(t *testing.T) {
 			t.Errorf("translator %s is not registered: %+v", want, views)
 		}
 	}
-	// The free engines are the two choices a fresh installation has, and each
-	// is usable with nothing configured at all: that is the whole point of
-	// them.
+	// 免费引擎是全新安装时的两个选择，且无需任何配置即可使用——这正是它们的意义。
 	seen := 0
 	for _, view := range views {
 		if !strings.HasPrefix(view.ID, "free.") {
@@ -347,8 +331,7 @@ func TestServicesAssembleTheTranslators(t *testing.T) {
 		t.Errorf("a fresh installation translates with %q, want the Microsoft engine", settings.ProviderOr())
 	}
 
-	// A service of the user's own is added the whole way: stored, registered,
-	// and then a translator the tool can actually ask.
+	// 用户自建的服务完整走一遍：存储、注册，然后成为工具能真正询问的翻译器。
 	id, err := translation.AddCustomTranslator(context.Background(), translate.CustomSettings{
 		BaseURL:     "http://127.0.0.1:11434/v1",
 		DisplayName: "本地测试服务",
@@ -382,16 +365,13 @@ func TestServicesAssembleTheTranslators(t *testing.T) {
 	if !found {
 		t.Errorf("the added service has no translator: %+v", views)
 	}
-	// The first service takes the bare id, which is what a file written before
-	// there could be several services holds.
+	// 第一个服务使用裸 id，这是可能有多个服务之前写下的文件所保存的形式。
 	if id != "custom" {
 		t.Errorf("the first service was stored as %q, want custom", id)
 	}
 }
 
-// translationSettingsOf reads the tool's configuration, failing the test when
-// it cannot be read: an assembly that cannot be read back is a mistake of its
-// own.
+// translationSettingsOf 读取工具的配置，读不到就让测试失败：装配后读不回来本身就是一种错误。
 func translationSettingsOf(t *testing.T, translation *translate.Translate) translate.Settings {
 	t.Helper()
 	settings, err := translation.Settings()

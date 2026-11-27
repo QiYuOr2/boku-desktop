@@ -10,12 +10,9 @@ import (
 	"time"
 )
 
-// pruneOldLocked deletes the daily files that have fallen out of the
-// retention window. The caller holds the lock.
+// pruneOldLocked 删除已出保留窗口的每日文件。调用方持有锁。
 //
-// A failure is reported on the sink rather than returned: there is nobody to
-// return it to, and a file that cannot be deleted is not a reason to stop
-// logging into the one being written.
+// 失败在 sink 上报告而非返回：没有可返回的对象，且一个删不掉的文件不该阻止继续写入当前文件。
 func (l *Log) pruneOldLocked() {
 	if l.dir == "" || l.retention < 1 {
 		return
@@ -25,13 +22,10 @@ func (l *Log) pruneOldLocked() {
 	}
 }
 
-// prune deletes the daily files older than the window: the day now is in and
-// the retention-1 days before it are kept, and anything older goes.
+// prune 删除早于窗口的每日文件：当前所在的日期加之前 retention-1 天保留，更早的删除。
 //
-// Only files this package names — `boku-<date>.log` — are considered, so a
-// directory that holds something else, or a file from a build whose naming
-// changed, is left exactly as it is. Every deletion is attempted even when
-// one fails: one file held open by a reader must not keep the rest.
+// 只考虑本包命名的文件 `boku-<date>.log`，因此存有其它内容的目录、或命名已变的旧构建文件
+// 都原样保留。即使某个删除失败也继续处理其余文件：一个被读取方占用的文件不能拖累其它文件。
 func prune(dir string, retention int, now time.Time) error {
 	if retention < 1 {
 		retention = RetentionDays
@@ -58,13 +52,12 @@ func prune(dir string, retention int, now time.Time) error {
 	return errors.Join(errs...)
 }
 
-// fileName is the name of the file holding the day t is in.
+// fileName 是包含时刻 t 的那一天的文件名。
 func fileName(t time.Time) string {
 	return filePrefix + t.Format(dateLayout) + fileSuffix
 }
 
-// dayFromFileName reads the day out of a file this package wrote. A name that
-// does not have the shape is not one of ours, and false says so.
+// dayFromFileName 从本包写出的文件名中读出日期。形状不符的名字不属于本包，返回 false。
 func dayFromFileName(name string) (time.Time, bool) {
 	if !strings.HasPrefix(name, filePrefix) || !strings.HasSuffix(name, fileSuffix) {
 		return time.Time{}, false
@@ -77,8 +70,7 @@ func dayFromFileName(name string) (time.Time, bool) {
 	return day, true
 }
 
-// startOfDay is midnight at the beginning of t's own day, which is how two
-// log files written on the same date compare as equal.
+// startOfDay 是 t 所在那一天开始的午夜，使同日期写出的两个日志文件比较时相等。
 func startOfDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }

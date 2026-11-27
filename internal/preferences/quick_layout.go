@@ -122,8 +122,7 @@ func normalizeQuickBlockOrder(order []string) []string {
 			result = append(result, id)
 		}
 	}
-	// Playtime used to sit above the ordered blocks. An older file that
-	// never named it keeps that place; a file that already placed it does not.
+	// Playtime 过去位于各块之前。未点名它的旧文件保持该位置；已显式放置它的文件则不受影响。
 	if !mentionedPlaytime {
 		result = moveQuickBlockFront(result, quickBlockPlaytime)
 	}

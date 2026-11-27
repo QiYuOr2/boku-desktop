@@ -12,16 +12,6 @@ import (
 	"time"
 )
 
-// translateSection is the translation tool's own settings: whether it runs,
-// what it asks, how much it annotates, what its window does, and which key
-// opens it.
-//
-// Everything but the switch is drawn only while the tool is on. The rest of the
-// section configures a tool that is not running — which service to ask, how to
-// annotate, which key opens it — and a page full of controls for something the
-// user has just turned off is a page that invites them to configure a thing
-// that will not happen. The switch stays, because it is how they turn it back
-// on.
 func (s *State) translateSection(c *ui.Context, head *ui.Handle) {
 	if s.translate == nil {
 		return
@@ -53,38 +43,18 @@ func (s *State) translateSection(c *ui.Context, head *ui.Handle) {
 	})
 }
 
-// translateNoticeLine is what the last change to the tool's settings said.
 func (s *State) translateNoticeLine(c *ui.Context) {
 	if s.translateNotice != "" {
 		presentation.Notice(c, presentation.NotePlain, s.translateNotice)
 	}
 }
 
-// showsTranslationControls reports whether the translation section draws the
-// settings that configure the tool — the service picker, the annotation
-// switches, the window switches and the shortcut — or only the switch that
-// turns it on.
-//
-// It is the switch itself that decides, because it is the same fact: a tool
-// that is not running has nothing to configure, and the only thing its section
-// owes the user is the way back on.
 func showsTranslationControls(settings translate.Settings) bool {
 	return settings.Enabled
 }
 
-// providerPicker is the choice of translator, in the two groups the design
-// draws: the free services (no key, nothing to configure) above, and the
-// services that need an API key below.
-//
-// The split is not decoration. A user who has just installed Boku has to be
-// able to answer "which of these do I have to do something about" at a glance,
-// and the answer is "none of the first group".
-//
-// Each row is one translator, and picking one picks that translator: the free
-// engines are two choices, not one choice with a pool behind it. A user who
-// picks 微软 Edge 翻译 asks it, and if it fails the card says so rather than
-// quietly handing the text to the other endpoint — the choice is theirs, and
-// the answer is about the one they made.
+// providerPicker 每个引擎是独立选项，选中哪个就只请求哪个（免费引擎是两个选择，
+// 不是一个背后有池子的选择）；某个失败就如实报错，不悄悄改投另一个端点。
 func (s *State) providerPicker(c *ui.Context, settings translate.Settings) {
 	cards := pickerTranslateCards(s.translateCards())
 	presentation.Stacked(c, presentation.RowGap, func() {
@@ -110,18 +80,10 @@ func (s *State) providerPicker(c *ui.Context, settings translate.Settings) {
 	})
 }
 
-// pickerTranslateCards is the rows the picker draws, in the order the registry
-// gave them.
-//
-// The order is never rearranged — not even to put the service in use first —
-// because a list of choices that moves while the user is choosing is a list the
-// user cannot aim at: the row they press must still be the row they pressed.
-//
-// A service the user has to configure is hidden until they have: the user's own
-// service has an address to type before it is anything, and a row that cannot be
-// picked yet is a row that only takes up room. The ones that need a key are
-// still shown unconfigured, because that is how the user learns what they could
-// configure.
+// pickerTranslateCards 保持注册表给出的顺序，从不重排（包括不把在用服务提到最前）：
+// 选择列表在用户挑选时移动会让人点错行。
+// 用户自己的服务在填好地址前隐藏；需要 key 的服务即使未配置也照常显示，
+// 让用户知道可以配置什么。
 func pickerTranslateCards(cards []presentation.Connection) []presentation.Connection {
 	pickable := make([]presentation.Connection, 0, len(cards))
 	for _, card := range cards {
@@ -133,12 +95,8 @@ func pickerTranslateCards(cards []presentation.Connection) []presentation.Connec
 	return pickable
 }
 
-// splitTranslateCards is the picker's two groups: the free engines, and the
-// services that have something to configure.
-//
-// The user's own service is in the second group even though its key is
-// optional: its card is the one with an address to type, so it belongs under
-// the heading that says something has to be configured.
+// splitTranslateCards 把选择器分成免费引擎和需配置服务两组。用户自己的服务归入后者
+// （即使其 key 可选），因为它的卡片需要填地址。
 func splitTranslateCards(cards []presentation.Connection) (free, keyed []presentation.Connection) {
 	for _, card := range cards {
 		if isFreeTranslator(card.ID) {
@@ -150,29 +108,12 @@ func splitTranslateCards(cards []presentation.Connection) (free, keyed []present
 	return free, keyed
 }
 
-// pickerGroupLabel is the small line above a group of rows: smaller and
-// quieter than sectionLabel, because it names the group rather than the form.
 func pickerGroupLabel(c *ui.Context, label string) {
 	ui.Text(c, label).FontSize(presentation.SizeSmall).FontWeight(500).TextColor(presentation.ColorTextMuted)
 }
 
-// providerOption is one row of the picker: the service's name, its state, and
-// a dot that says which one is in use.
-//
-// The whole row is the target rather than the dot alone: a row that is about
-// one choice should answer anywhere on it. A service with nothing configured
-// is drawn but cannot be chosen, which is what tells the user what to
-// configure.
-//
-// The state on the right is the design's own three words: a free engine is
-// 免费 — the reason it can be picked at all — a keyed one with a credential is
-// 已配置, and one without is 未配置. The chip is the sky one the design gives
-// it, because it says "nothing to do here" rather than "you did this right".
-//
-// 免费 is the free engines' own word, and only theirs: the user's own service
-// needs no key either, but it is not one of the free ones — it is a service
-// the user runs, and calling it 免费 would be telling them something about a
-// price Boku does not know.
+// providerOption 渲染选择器的一行；整行都是点击目标。未配置的服务会画出但不可选。
+// 免费 一词只用于免费引擎：用户自建服务虽也无需 key，但价格 Boku 无从得知。
 func (s *State) providerOption(c *ui.Context, card presentation.Connection, settings translate.Settings) {
 	selected := settings.ProviderOr() == card.ID && card.Configured
 	row := ui.ButtonBase(c).Label("使用 "+card.DisplayName).
@@ -189,8 +130,6 @@ func (s *State) providerOption(c *ui.Context, card presentation.Connection, sett
 	}
 	row.Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
-			// The dot says which one is in use without taking the keyboard:
-			// the row itself is the control.
 			ui.Box(c).Size(float32(12), float32(12)).Radius(999).Shrink(0).
 				Border(1, chooseColor(selected, presentation.ColorBorder)).
 				Background(chooseColor(selected, presentation.ColorSurface)).
@@ -223,8 +162,6 @@ func (s *State) providerOption(c *ui.Context, card presentation.Connection, sett
 	}
 }
 
-// chooseColor picks between two colors for the dot that says which service
-// is in use.
 func chooseColor(chosen bool, fallback ui.Color) ui.Color {
 	if chosen {
 		return presentation.ColorBrand
@@ -232,8 +169,6 @@ func chooseColor(chosen bool, fallback ui.Color) ui.Color {
 	return fallback
 }
 
-// chooseTextColor is what a service's name is written in: the body color
-// when it can be used, and the muted one when it cannot.
 func chooseTextColor(configured bool) ui.Color {
 	if configured {
 		return presentation.ColorTextSoft
@@ -241,8 +176,6 @@ func chooseTextColor(configured bool) ui.Color {
 	return presentation.ColorTextMuted
 }
 
-// annotationSwitches are the Japanese enhancements: what the translator is
-// asked to say about each word.
 func (s *State) annotationSwitches(c *ui.Context, settings translate.Settings) {
 	presentation.Stacked(c, presentation.RowGap, func() {
 		presentation.SectionLabel(c, "日语增强（仅日语原文）")
@@ -257,8 +190,6 @@ func (s *State) annotationSwitches(c *ui.Context, settings translate.Settings) {
 	})
 }
 
-// windowSwitches are the card's own behavior: whether it stays, and how long
-// it waits before closing itself.
 func (s *State) windowSwitches(c *ui.Context, settings translate.Settings) {
 	presentation.Stacked(c, presentation.RowGap, func() {
 		presentation.SectionLabel(c, "浮窗行为")
@@ -276,13 +207,8 @@ func (s *State) windowSwitches(c *ui.Context, settings translate.Settings) {
 	})
 }
 
-// closeDelayField is the delay as a number field: a duration in
-// milliseconds, the unit a person thinks in.
-//
-// The value is written when the user asks for it rather than on every
-// keystroke: a half-typed number is not a setting, and writing one would make
-// the window close itself the moment a user selected the old value to
-// replace it.
+// closeDelayField 只在用户点「应用」时写入，而不是每次按键：输入一半的数字不是设置，
+// 写入它会让窗口在用户选中旧值准备替换的瞬间就自行关闭。
 func (s *State) closeDelayField(c *ui.Context, settings translate.Settings) {
 	field := ui.TextInput(c, &s.delayInput)
 	field.Placeholder(strconv.FormatInt(settings.CloseDelayOr().Milliseconds(), 10)).SingleLine()
@@ -306,8 +232,6 @@ func (s *State) closeDelayField(c *ui.Context, settings translate.Settings) {
 	}
 }
 
-// isDigits reports whether a string is a run of decimal digits, which is what
-// a millisecond count has to be.
 func isDigits(text string) bool {
 	if text == "" {
 		return false
@@ -320,14 +244,6 @@ func isDigits(text string) bool {
 	return true
 }
 
-// shortcutSwitches is the key that opens the window: one binding, because the
-// tool has one action.
-//
-// The button is the recorder. Pressing it waits for the next combination; the
-// combination is bound and remembered, and one the system or another
-// application already holds leaves the binding that was there in place, with
-// a line saying so. The design's other keys — 朗读原文、固定浮窗、关闭浮窗 —
-// are not implemented, and are not drawn as buttons that would do nothing.
 func (s *State) shortcutSwitches(c *ui.Context) {
 	presentation.Stacked(c, presentation.RowGap, func() {
 		presentation.SectionLabel(c, "快捷键")
@@ -344,9 +260,7 @@ func (s *State) shortcutSwitches(c *ui.Context) {
 			s.shortcutButton(c, shortcutScreenshot)
 		})
 
-		// What is bound now, or why nothing is. A registration that failed
-		// has to be visible rather than silent, which is what
-		// §6 of the tool design asks for.
+		// 当前绑定值，或未绑定的原因。注册失败必须可见而非静默，这是工具设计 §6 的要求。
 		text, kind := s.shortcutLine()
 		presentation.Notice(c, kind, text)
 		if note, noteKind := s.shortcutNote(); note != "" {
@@ -357,24 +271,17 @@ func (s *State) shortcutSwitches(c *ui.Context) {
 		}
 		if note := selectionPlatformNote(); note != "" && !s.selectionGranted {
 			presentation.Notice(c, presentation.NotePlain, note)
-			// One button, named for what the user is trying to get. It asks
-			// the system to put Boku in the Accessibility list; the system
-			// prompt is what shows the switch, and it offers System Settings
-			// itself. Opening the pane for a release build would cover that
-			// prompt; a development build is the exception, below.
+			// 只有一个按钮，名字就是用户想要的东西。它请求系统把 Boku 加入辅助功能列表；
+			// 系统弹窗才是显示开关的地方，且它会自己提供「系统设置」入口。正式版直接打开
+			// 面板会盖住该弹窗；开发版是例外，见下。
 			if button := presentation.DesignButton(c, "获取辅助功能权限", presentation.ButtonSecondary); button.Clicked() {
 				if !s.requestSelectionAccess() && os.Getenv("MYGO_DEV") != "" {
-					// mygo dev starts the app as a child of the terminal, and
-					// TCC attributes the request to the terminal: the system
-					// suppresses the prompt for a development build. Open the
-					// pane instead, where the developer can add Boku Dev.
+					// mygo dev 把应用作为终端的子进程启动，TCC 会把请求归到终端上：
+					// 系统对开发版会抑制该弹窗。于是改为打开面板，让开发者手动添加 Boku Dev。
 					c.OpenURL(accessibilitySettingsURL)
 				}
 			}
 		}
-		// An inline action at the end of the block, not another full-width
-		// control: resetting is a correction to the binding above it, and a
-		// block button would read as the section's main action.
 		ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
 			if button := presentation.DesignButton(c, "恢复默认快捷键", presentation.ButtonWarning).Shrink(0); button.Clicked() {
 				s.resetShortcut()
@@ -383,9 +290,8 @@ func (s *State) shortcutSwitches(c *ui.Context) {
 	})
 }
 
-// requestSelectionAccess asks macOS to add Boku to its Accessibility list.
-// The system owns the switch: the application can only ask, and the user then
-// turns it on. The note says so rather than pretending the click granted it.
+// requestSelectionAccess 请求 macOS 把 Boku 加入辅助功能列表。
+// 开关由系统掌握：应用只能请求，再由用户打开。提示文案据此说明，而不是假装点击就已授权。
 func (s *State) requestSelectionAccess() bool {
 	granted := s.RequestSelectionAccess()
 	slog.Info("selection access requested", "granted", granted)
@@ -394,19 +300,15 @@ func (s *State) requestSelectionAccess() bool {
 	} else {
 		s.translateNotice = "已请求辅助功能权限：请在「系统设置 > 隐私与安全性 > 辅助功能」中打开 Boku 的开关。"
 	}
-	// The request may have been granted before the call returned (an app
-	// that already has the permission), or the system prompt may still be
-	// up; the focus/activation refresh catches the latter.
+	// 请求可能在调用返回前就已获批（应用本就有权限），或系统弹窗仍未关闭；
+	// 后一种情况由焦点/激活时的刷新兜住。
 	s.RefreshSelectionAccess()
 	return granted
 }
 
-// RequestSelectionAccess asks the platform to show its permission prompt when
-// the translation tool is on. The settings button is the caller: the settings
-// window makes the app regular, which is what macOS needs before it shows the
-// Accessibility prompt. The app does not ask at launch or from the shortcut:
-// those run while it is accessory, and the system records such a request
-// without showing a prompt.
+// RequestSelectionAccess 在划词翻译开启时请求平台弹出授权提示。调用方是设置按钮：
+// 设置窗口会把应用变成 regular，这是 macOS 显示辅助功能提示的前提。不在启动或快捷键里
+// 请求：那时进程处于 accessory 状态，系统只会记录请求而不显示提示。
 func (s *State) RequestSelectionAccess() bool {
 	if s.translate == nil {
 		return false
@@ -418,12 +320,9 @@ func (s *State) RequestSelectionAccess() bool {
 	return s.translate.RequestSelectionAccess()
 }
 
-// shortcutButton is the recording control: it shows the binding, and pressing
-// it waits for the next combination.
-//
-// While it is recording it keeps the keyboard — the framework sends every key
-// of the focused element to HandleInput — so the combination the user presses
-// is read rather than acted on by the window.
+// shortcutButton 是录制控件：显示当前绑定，按下后等待下一个组合键。
+// 录制期间它持有键盘（框架会把聚焦元素的每个按键都送到 HandleInput），
+// 所以用户按下的组合会被读取，而不会由窗口执行。
 func (s *State) shortcutButton(c *ui.Context, kind shortcutKind) ui.Element {
 	state := s.shortcutStateFor(kind)
 	accelerator := state.accelerator
@@ -454,14 +353,10 @@ func (s *State) shortcutButton(c *ui.Context, kind shortcutKind) ui.Element {
 	}.View(c)
 }
 
-// setTranslationEnabled turns the tool on or off — and, with it, the global
-// shortcut.
-//
-// The shortcut follows the switch rather than the switch merely being read when
-// the shortcut fires: a key this process holds is a key no other application
-// can use, so a tool that is off must let it go. Turning it back on takes the
-// key again, which is why this is one action rather than two: the two states a
-// user can be in are "off, and the key is free" and "on, and the key opens it".
+// setTranslationEnabled 开关工具，同时开/关全局快捷键。
+// 快捷键跟随开关，而不是在触发时才读取：本进程持有的键别的应用就用不了，
+// 关闭的工具必须放掉它；重新打开则重新占用。二者合为一个动作，因为用户只有两种状态：
+// 「关，且键空闲」和「开，且键能唤起」。
 func (s *State) setTranslationEnabled(enabled bool) {
 	slog.Info("translation enabled setting changed", "event", "translation_enabled_changed", "enabled", enabled)
 	s.saveTranslationSetting("划词翻译已打开。", func(ctx context.Context) error {
@@ -470,7 +365,6 @@ func (s *State) setTranslationEnabled(enabled bool) {
 	s.bindShortcutForSwitch()
 }
 
-// setTranslationFurigana turns the reading of Japanese kanji on or off.
 func (s *State) setTranslationFurigana(on bool) {
 	slog.Info("furigana setting changed", "event", "translation_furigana_changed", "enabled", on)
 	s.saveTranslationSetting("已更新汉字读音的标注。", func(ctx context.Context) error {
@@ -478,8 +372,6 @@ func (s *State) setTranslationFurigana(on bool) {
 	})
 }
 
-// setTranslationLoanwordGloss turns the English original of a katakana
-// loanword on or off.
 func (s *State) setTranslationLoanwordGloss(on bool) {
 	slog.Info("loanword gloss setting changed", "event", "translation_loanword_gloss_changed", "enabled", on)
 	s.saveTranslationSetting("已更新外来语原词的标注。", func(ctx context.Context) error {
@@ -487,7 +379,6 @@ func (s *State) setTranslationLoanwordGloss(on bool) {
 	})
 }
 
-// setTranslationPinned decides whether the window starts pinned.
 func (s *State) setTranslationPinned(pinned bool) {
 	slog.Info("translation default pin setting changed", "event", "translation_default_pin_changed", "pinned", pinned)
 	s.saveTranslationSetting("浮窗行为已保存。", func(ctx context.Context) error {
@@ -495,8 +386,6 @@ func (s *State) setTranslationPinned(pinned bool) {
 	})
 }
 
-// setTranslationCloseDelay decides how long the window waits before closing
-// itself.
 func (s *State) setTranslationCloseDelay(delay time.Duration) {
 	slog.Info("translation close delay changed", "event", "translation_close_delay_changed", "delay", delay)
 	s.saveTranslationSetting("关闭延迟已保存。", func(ctx context.Context) error {
@@ -505,7 +394,6 @@ func (s *State) setTranslationCloseDelay(delay time.Duration) {
 	s.delayInput = ""
 }
 
-// setTranslationProvider chooses the translator to use.
 func (s *State) setTranslationProvider(id string) {
 	slog.Info("translation provider changed", "event", "translation_provider_changed", "provider", id)
 	s.saveTranslationSetting("已改用 "+id+"。", func(ctx context.Context) error {
@@ -513,10 +401,6 @@ func (s *State) setTranslationProvider(id string) {
 	})
 }
 
-// saveTranslationSetting writes one switch and says what happened. Every
-// translation switch goes through here, so that a failure to write the file
-// is answered the same way everywhere: the switch did not change, and the
-// window says so instead of showing a setting that is not stored.
 func (s *State) saveTranslationSetting(ok string, save func(context.Context) error) {
 	if s.translate == nil {
 		return

@@ -43,9 +43,9 @@ var (
 	regCloseKey                 = advapi32.NewProc("RegCloseKey")
 )
 
-// The fields the recorder reads sit at the front of SYSTEM_PROCESS_INFORMATION.
-// Later fields differ between Windows versions and are not declared: the next
-// record is found from NextEntryOffset, not from the size of this struct.
+// 记录器读取的字段位于 SYSTEM_PROCESS_INFORMATION 前部。
+// 之后字段随 Windows 版本变化，故不声明：下一条记录靠 NextEntryOffset
+// 定位，而不是靠本结构体大小。
 type processInfo struct {
 	NextEntryOffset              uint32
 	NumberOfThreads              uint32
@@ -79,9 +79,8 @@ type basicProcessInfo struct {
 	InheritedFromUniqueProcessID uintptr
 }
 
-// Snapshot lists processes without opening them. Creation time comes from
-// the same list the task manager uses, so a game noticed a poll late still
-// has its real start.
+// Snapshot 不打开进程即可列举。创建时间取自任务管理器所用的同一份列表，
+// 因此晚一拍才发现的游戏仍能得到真实启动时间。
 func Snapshot() ([]Process, error) {
 	buf, err := processBuffer()
 	if err != nil {
@@ -125,7 +124,7 @@ func processBuffer() ([]byte, error) {
 		if status == 0 {
 			return buf, nil
 		}
-		// STATUS_INFO_LENGTH_MISMATCH: the list grew while it was being read.
+		// STATUS_INFO_LENGTH_MISMATCH：读取期间列表变长了。
 		if status == 0xC0000004 {
 			if needed <= size {
 				needed = size * 2
@@ -137,8 +136,7 @@ func processBuffer() ([]byte, error) {
 	}
 }
 
-// ReadClocks reads the two boot clocks. Their difference is time spent
-// asleep, which wall time cannot separate from a clock change.
+// ReadClocks 读取两个开机时钟。两者之差即休眠耗时，墙上时间无法把它与改时钟区分开。
 func ReadClocks() (Clocks, error) {
 	awake, err := ticks(queryUnbiasedInterruptTime)
 	if err != nil {
@@ -166,8 +164,7 @@ func ticks(proc *syscall.LazyProc) (uint64, error) {
 	return value, nil
 }
 
-// ImagePath is the full executable path. The process list only carries the
-// file name, which is not enough to tell two games apart.
+// ImagePath 是完整可执行文件路径。进程列表只带文件名，不足以区分两个游戏。
 func ImagePath(pid int) (string, error) {
 	handle, err := openProcess(processQueryLimited, pid)
 	if err != nil {
@@ -191,9 +188,8 @@ func ImagePath(pid int) (string, error) {
 	return syscall.UTF16ToString(buf[:n]), nil
 }
 
-// SteamAppID reads SteamAppId or SteamGameId from a process's own
-// environment. The rest of the environment is discarded here: it is not a
-// value the recorder keeps.
+// SteamAppID 从进程自身环境变量读取 SteamAppId 或 SteamGameId。
+// 其余环境变量在此丢弃：记录器不保留它们。
 func SteamAppID(pid int) (string, error) {
 	handle, err := openProcess(processQueryInformation|processVMRead, pid)
 	if err != nil {
@@ -217,7 +213,7 @@ func SteamAppID(pid int) (string, error) {
 	return "", nil
 }
 
-// SteamRoot is the Steam installation recorded for the current user.
+// SteamRoot 是当前用户登记的 Steam 安装目录。
 func SteamRoot() (string, error) {
 	if path, err := regString(syscall.HKEY_CURRENT_USER, `Software\Valve\Steam`, "SteamPath"); err == nil && path != "" {
 		return path, nil
@@ -244,9 +240,8 @@ var (
 	exitCallback uintptr
 )
 
-// WatchExit asks to be told when pid exits. The notification carries the
-// wall time of the exit, so the session does not wait for the next poll to
-// end. A process that cannot be opened is simply polled instead.
+// WatchExit 请求在 pid 退出时收到通知。通知携带退出的墙上时间，
+// 会话无需等到下一次轮询才结束。无法打开的进程改为轮询。
 func WatchExit(pid int, created time.Time) error {
 	callbackOnce.Do(func() {
 		exitCallback = syscall.NewCallback(onProcessExit)
@@ -262,8 +257,8 @@ func WatchExit(pid int, created time.Time) error {
 	watches[key] = watch
 	watchMu.Unlock()
 	var registration uintptr
-	// The token is an integer so the callback does not take a Go pointer.
-	// The map keeps the watch alive until the exit is collected.
+	// token 是整数，避免回调持有 Go 指针。
+	// map 持有 watch 直到退出被取回。
 	r, _, err := registerWaitForSingleObject.Call(
 		uintptr(unsafe.Pointer(&registration)),
 		uintptr(handle),
@@ -286,7 +281,7 @@ func WatchExit(pid int, created time.Time) error {
 	return nil
 }
 
-// TakeExit reports the exit time recorded for the process, once.
+// TakeExit 报告该进程记录的退出时间，仅一次。
 func TakeExit(pid int, created time.Time) (time.Time, bool) {
 	key := watchKey(pid, created)
 	watchMu.Lock()
@@ -306,8 +301,8 @@ func TakeExit(pid int, created time.Time) (time.Time, bool) {
 }
 
 func onProcessExit(param, timedOut uintptr) uintptr {
-	// BOOLEAN is one byte. On x64 the rest of the register is undefined, so a
-	// signaled exit still arrives with a non-zero uintptr.
+	// BOOLEAN 只占一个字节。在 x64 上寄存器其余位未定义，
+	// 因此已发出信号的退出仍可能带着非零的 uintptr 到达。
 	if param == 0 || timedOut&0xFF != 0 {
 		return 0
 	}

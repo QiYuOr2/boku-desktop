@@ -1,0 +1,14 @@
+{
+  "changes": [
+    {
+      "cursor": "c-43",
+      "entityType": "diary_entry",
+      "entityId": "0198b000-0000-7000-8000-0000000000e3",
+      "version": 5,
+      "operation": "delete",
+      "payload": null
+    }
+  ],
+  "nextCursor": "c-43",
+  "hasMore": false
+}

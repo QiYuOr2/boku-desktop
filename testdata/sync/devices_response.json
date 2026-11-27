@@ -1,0 +1,20 @@
+{
+  "devices": [
+    {
+      "deviceId": "0198b000-0000-7000-8000-0000000000d1",
+      "deviceName": "七宇的 iPhone",
+      "platform": "ios",
+      "createdAt": "2026-11-20T00:00:00Z",
+      "lastSeenAt": "2026-11-24T00:00:00Z",
+      "revokedAt": null
+    },
+    {
+      "deviceId": "0198b000-0000-7000-8000-0000000000d2",
+      "deviceName": "旧 iPad",
+      "platform": "ios",
+      "createdAt": "2026-10-01T00:00:00Z",
+      "lastSeenAt": "2026-10-02T00:00:00Z",
+      "revokedAt": "2026-11-01T00:00:00Z"
+    }
+  ]
+}

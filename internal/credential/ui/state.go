@@ -1,4 +1,4 @@
-// Package ui owns credential and connection configuration presentation.
+// Package ui 负责凭据与连接配置的展示层。
 package ui
 
 import (
@@ -21,8 +21,7 @@ type State struct {
 	keyMark       *ui.SVG
 }
 
-// Connections is the cross-feature service contract of the connection form.
-// The Shell supplies it; credential presentation does not construct translators.
+// Connections 是连接表单的跨功能服务契约，由 Shell 注入；凭据展示层不自行构造翻译器。
 type Connections interface {
 	Settings() (translate.Settings, error)
 	Providers(context.Context) ([]translate.TranslatorView, error)

@@ -10,20 +10,18 @@ import (
 	"strconv"
 )
 
-// Download writes endpoint to dest.
+// Download 把 endpoint 写入 dest。
 //
-// It is the path a model file takes. GetBytes reads the body into memory and
-// stops at 1 MiB, which is smaller than any of these files. An existing dest
-// is continued when the server accepts Range; the caller hashes dest after
-// this returns. Cancelling ctx leaves whatever has already been written.
+// 这是模型文件的下载路径。GetBytes 会把响应读进内存并在 1 MiB 处截断，比这些
+// 文件都小。dest 已存在且服务端接受 Range 时断续下载；返回后由调用方对 dest
+// 做哈希校验。取消 ctx 会留下已写入的部分。
 func Download(ctx context.Context, endpoint, dest string) error {
 	return DownloadProgress(ctx, endpoint, dest, nil)
 }
 
-// DownloadProgress is Download, and report sees how many bytes dest holds.
-// The count includes bytes already on disk when the server resumes, so a
-// continued file does not start at zero. report may be nil. It runs about
-// once a megabyte, and once more when the body ends.
+// DownloadProgress 同 Download，report 可看到 dest 当前持有的字节数。服务端
+// 续传时该计数包含磁盘上已有的字节，因此续传文件不从零开始。report 可为 nil，
+// 大约每读写一兆字节调用一次，正文结束时再调一次。
 func DownloadProgress(ctx context.Context, endpoint, dest string, report func(written int64)) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -75,7 +73,7 @@ func DownloadProgress(ctx context.Context, endpoint, dest string, report func(wr
 	return file.Sync()
 }
 
-// StatusError is an HTTP status a download cannot continue from.
+// StatusError 表示下载无法继续的 HTTP 状态码。
 type StatusError struct {
 	Code int
 }
@@ -84,8 +82,8 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("download: status %d", e.Code)
 }
 
-// copyDownload writes body onto file, which already holds offset bytes.
-// report sees the file's size, not just the bytes of this response.
+// copyDownload 把 body 写到已持有 offset 字节的 file 上。
+// report 看到的是文件大小，而不只是本次响应的字节数。
 func copyDownload(file *os.File, body io.Reader, offset int64, report func(int64)) error {
 	marked := int64(-1)
 	note := func(n int64) {
@@ -120,8 +118,8 @@ func copyDownload(file *os.File, body io.Reader, offset int64, report func(int64
 	}
 }
 
-// LocalPort is a free TCP port on 127.0.0.1. The listener is closed before
-// this returns; the caller is about to hand the port to another process.
+// LocalPort 返回 127.0.0.1 上的一个空闲 TCP 端口。返回前监听器已关闭；
+// 调用方随即把该端口交给另一个进程。
 func LocalPort() (int, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

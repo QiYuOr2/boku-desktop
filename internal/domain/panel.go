@@ -5,19 +5,17 @@ import (
 	"strings"
 )
 
-// PanelKind tells where a panel's numbers come from: recorded by hand, or
-// pulled from a provider.
+// PanelKind 说明面板的数字从哪来：用户手动记录，还是从 provider 拉取。
 type PanelKind string
 
 const (
-	// PanelKindManual is a panel whose entries the user records.
+	// PanelKindManual 是用户自行录入数据的面板。
 	PanelKindManual PanelKind = "manual"
-	// PanelKindProvider is a panel a provider fetches.
+	// PanelKindProvider 是由 provider 拉取数据的面板。
 	PanelKindProvider PanelKind = "provider"
 )
 
-// MetricUnit is what a metric's number counts. It decides how the value is
-// stored and how it is shown.
+// MetricUnit 是指标数字计量的对象，决定该值如何存储与显示。
 type MetricUnit string
 
 const (
@@ -30,7 +28,7 @@ const (
 	UnitText     MetricUnit = "text"
 )
 
-// ValueType is the shape a metric's value takes.
+// ValueType 是指标值所取的形状。
 type ValueType string
 
 const (
@@ -39,8 +37,8 @@ const (
 	ValueTypeText     ValueType = "text"
 )
 
-// Comparison says which direction of change is good, so the interface can
-// tell a shrinking balance from a growing bill. It never changes a value.
+// Comparison 说明哪个方向的变动是好的，好让界面区分余额缩水与账单增长。
+// 它从不改变值本身。
 type Comparison string
 
 const (
@@ -49,20 +47,19 @@ const (
 	ComparisonHigherIsBetter Comparison = "higher_is_better"
 )
 
-// Panel is one card: what it is called, where its numbers come from, and
-// how often they are worth fetching again.
+// Panel 是一张卡片：叫什么、数字从哪来、隔多久值得再取一次。
 type Panel struct {
 	ID           string
 	Kind         PanelKind
 	Title        string
 	ProviderID   string
 	MetricKeys   []string
-	RefreshEvery int // seconds; 0 means only when asked
+	RefreshEvery int // 秒；0 表示仅在请求时刷新
 	SortOrder    int
 	Enabled      bool
 }
 
-// Validate reports what is wrong with the panel.
+// Validate 报告面板有什么问题。
 func (p Panel) Validate() error {
 	if strings.TrimSpace(p.ID) == "" {
 		return fmt.Errorf("%w: panel id is empty", ErrInvalidArgument)
@@ -98,22 +95,22 @@ func (p Panel) Validate() error {
 	return nil
 }
 
-// Metric describes what one number of a panel is.
+// Metric 描述面板里的一个数字是什么。
 type Metric struct {
 	Key       string
 	Label     string
 	Unit      MetricUnit
 	ValueType ValueType
 	Precision int
-	// Currency is the currency the values are in, when the panel knows it.
+	// Currency 是指标值所用的货币，面板已知时填写。
 	Currency string
-	// CurrencyFromProvider is set when only the response knows the currency:
-	// the adapter then fills Snapshot.Currency. It excludes Currency.
+	// CurrencyFromProvider 表示只有响应才知道货币：此时由 adapter 填充
+	// Snapshot.Currency。它与 Currency 互斥。
 	CurrencyFromProvider bool
 	Comparison           Comparison
 }
 
-// Validate reports what is wrong with the metric.
+// Validate 报告指标有什么问题。
 func (m Metric) Validate() error {
 	if strings.TrimSpace(m.Key) == "" {
 		return fmt.Errorf("%w: a metric has no key", ErrInvalidArgument)

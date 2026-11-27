@@ -1,5 +1,4 @@
-// This file guesses a language from the scripts a text is written in. It is
-// a pure function of the text, like everything else in this package.
+// 本文件从文本使用的书写系统猜测语言。与包内其他内容一样，是文本的纯函数。
 package kit
 
 import (
@@ -9,20 +8,13 @@ import (
 	"boku/internal/domain"
 )
 
-// Language guesses which language a piece of text is written in, from the
-// scripts its letters come from.
-//
-// It is a guess by design, and a cheap one: it reads the text the user
-// already copied, so the window can name the source language and pick a
-// target before anything is sent anywhere. It is not a detector that costs a
-// request, and it does not claim to be right about a language whose script
-// is shared with another (Chinese and Japanese both write 漢字).
-//
-// The order below is what makes the shared scripts work: kana decide
-// Japanese even in a text that is mostly 漢字, Hangul decides Korean, and
-// only a text with no kana and no Hangul is read as Chinese. The result is
-// the language code the rest of the application uses; an empty string means
-// the text gave nothing to go on — numbers, punctuation, an empty string.
+// DetectLanguage 根据文本字母所属的书写系统猜测语言。
+// 这是刻意的、廉价的猜测：读取用户已复制的文本，让窗口在任何内容发出前
+// 就能命名源语言并选择目标。它不是会消耗请求的检测器；对于与其他语言共用
+// 书写系统的情况（中文和日文都写漢字）也不保证正确。
+// 下面的顺序让共用书写系统得以区分：假名判定日语（即便文本多为漢字），
+// 谚文判定韩语，只有不含假名和谚文时才判为中文。返回应用使用的语言代码；
+// 空字符串表示文本没有可用线索——数字、标点或空字符串。
 func DetectLanguage(text string) string {
 	var han, kana, hangul, cyrillic, arabic, thai, latin, other int
 	for _, r := range text {
@@ -45,9 +37,8 @@ func DetectLanguage(text string) string {
 			other++
 		}
 	}
-	// A single kana character is enough to tell Japanese from Chinese: no
-	// Chinese text has one, and a Japanese text that is mostly 漢字 always
-	// has a few.
+	// 一个假名字符就足以区分日语与中文：中文文本没有假名，
+	// 而多为漢字的日文总会有几个。
 	switch {
 	case kana > 0:
 		return "ja"
@@ -64,19 +55,16 @@ func DetectLanguage(text string) string {
 	case latin > 0:
 		return "en"
 	case other > 0:
-		// Letters of a script this build has no word for: the code is the
-		// best honest answer, and the window shows it as it is.
+		// 本版本没有对应词的书写系统：返回空代码是最诚实的答案，窗口如实显示。
 		return ""
 	}
 	return ""
 }
 
-// ImageSourceLanguage reconciles an image model's claimed source language
-// with the text it recognized. A model may return an unsupported code, or
-// label a script it visibly read as English. A local script match is the
-// stronger answer; an otherwise valid model answer remains useful for scripts
-// this build cannot recognize. Unknown is intentional and keeps a good
-// source/translation pair visible without a false language badge.
+// ImageSourceLanguage 用识别出的文本校正图片模型声称的源语言。
+// 模型可能返回不支持的语言代码，或把它明显识别出的书写系统标成英语。
+// 本地书写系统匹配是更强的答案；否则有效的模型答案在本版本无法识别的
+// 书写系统上仍有用。Unknown 是刻意为之，让好的源/译对保持可见而不出现错误语言徽标。
 func ImageSourceLanguage(claimed domain.Language, sourceText string) domain.Language {
 	if detected := domain.Language(DetectLanguage(sourceText)); detected.Valid() {
 		return detected
@@ -87,8 +75,7 @@ func ImageSourceLanguage(claimed domain.Language, sourceText string) domain.Lang
 	return domain.LangUnknown
 }
 
-// LanguageName is what the interface calls a language code, in the
-// language's own words. A code nobody knows is named by itself.
+// LanguageName 返回界面某语言代码的称呼，用该语言自己的文字。没人认识的代码原样返回。
 func LanguageName(code string) string {
 	switch strings.ToLower(strings.TrimSpace(code)) {
 	case "zh", "zh-cn", "zh-hans", "zh-tw", "zh-hant":
@@ -120,9 +107,8 @@ func LanguageName(code string) string {
 	}
 }
 
-// IsChinese reports whether the code names Chinese, whatever variant it
-// carries: the tool treats 中文 as one target, and a service that answers
-// "zh-Hans" has named the same thing.
+// IsChinese 判断代码是否指中文，无论带何种变体：工具把中文当作同一目标，
+// 服务返回 "zh-Hans" 也是同一个意思。
 func IsChinese(code string) bool {
 	switch strings.ToLower(strings.TrimSpace(code)) {
 	case "zh", "zh-cn", "zh-hans", "zh-tw", "zh-hant", "cn", "chi", "zho":
@@ -131,10 +117,8 @@ func IsChinese(code string) bool {
 	return false
 }
 
-// TargetLanguage is the language the tool translates into, given what the
-// source text is: anything that is not Chinese becomes Chinese, and Chinese
-// becomes English. It is what the design asks for — 任意语言 → 中文 — with a
-// second direction so that Chinese text is not a dead end.
+// TargetLanguage 根据源文本给出翻译目标语言：非中文一律译为中文，中文则译为英语。
+// 这符合设计要求的「任意语言 → 中文」，第二个方向让中文文本不至于成为死胡同。
 func TargetLanguage(source string) string {
 	if IsChinese(source) {
 		return "en"

@@ -15,9 +15,8 @@ func (s *State) cacheBilibiliAvatars() {
 	}
 }
 
-// NoteBilibiliChanges is called by the feature after a successful refresh.
-// The first result only establishes the baseline; notifications describe a
-// change since the user began monitoring, never every item already on screen.
+// NoteBilibiliChanges 在功能成功刷新后调用。首次结果只用来建立基线；
+// 通知描述的是用户开始监控以来的变化，绝不是屏幕上已有的每一项。
 func (s *State) NoteBilibiliChanges(previous, current []domain.FollowedUpdate) {
 	if s.bilibiliUI == nil {
 		s.bilibiliUI = bilibiliui.New(s.bilibiliService)

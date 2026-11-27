@@ -12,21 +12,15 @@ import (
 	"unsafe"
 )
 
-// Windows keeps the login start as a value in the Run key of the user, and
-// quietly turns it off in a second one.
+// Windows 把登录启动存为用户 Run 键下的一个值，并悄悄在另一个键里把它关掉。
 //
-// Task Manager's Startup page does not delete the command when the user
-// disables an entry: it sets a flag in StartupApproved\Run, and the start
-// stops happening while the Run value is still there. So "is it on" is two
-// questions — the value exists and it names this program, and it has not been
-// turned off — and "turn it on" has to clear that flag, or a user who disabled
-// it once could never enable it again from Boku.
+// 任务管理器启动页在用户禁用条目时并不删除命令：它会在 StartupApproved\Run 里设一个标记，
+// 启动就此不再发生，而 Run 值仍在。因此「是否开启」是两个问题——值是否存在且指向本程序，
+// 以及它是否未被关闭；而「开启它」必须清除该标记，否则曾经禁用过的用户将再也无法从 Boku 打开它。
 //
-// The registry is reached through advapi32 directly, as the proxy reader of
-// platform/httpc does: this build has no cgo, and a handful of values in the
-// user's own key does not need a library. Everything is read and written in
-// HKCU, the user's own hive: a login start is the user's, and the application
-// never writes the machine's.
+// 注册表经 advapi32 直接访问，与 platform/httpc 的代理读取器做法一致：本构建无 cgo，
+// 用户自己键里的几个值不值得引入库。一切都读写在 HKCU（用户自己的 hive）：
+// 登录启动属于用户，应用从不写机器的 hive。
 const (
 	runKeyPath      = `Software\Microsoft\Windows\CurrentVersion\Run`
 	approvedKeyPath = `Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run`
@@ -38,11 +32,9 @@ const (
 	regSZ     = 1
 	regBinary = 3
 
-	// errnoFileNotFound is ERROR_FILE_NOT_FOUND, which RegOpenKeyEx gives for
-	// a key that does not exist.
+	// errnoFileNotFound 是 ERROR_FILE_NOT_FOUND，RegOpenKeyEx 对不存在的键返回它。
 	errnoFileNotFound = syscall.Errno(2)
-	// errnoMoreData is ERROR_MORE_DATA, which a fixed buffer returns when the
-	// value is longer than it: a command line is read in two steps.
+	// errnoMoreData 是 ERROR_MORE_DATA，固定缓冲区装不下值时返回它：命令行分两步读取。
 	errnoMoreData = syscall.Errno(234)
 )
 
@@ -56,23 +48,21 @@ var (
 	regCloseKey     = advapi32.NewProc("RegCloseKey")
 )
 
-// errKeyNotFound and errValueNotFound are the two ordinary "there is nothing
-// here" answers, told apart from a real failure so that a login start that
-// was never written is simply off.
+// errKeyNotFound 与 errValueNotFound 是两种普通的「这里什么都没有」结果，
+// 与真实失败区分开，使从未写入的登录启动只是「关」。
 var (
 	errKeyNotFound   = errors.New("autostart: the registry key is not there")
 	errValueNotFound = errors.New("autostart: the registry value is not there")
 )
 
-// Windows is the Manager over the registry of the current user. It touches
-// nothing when it is built: the registry is read when a question is asked,
-// which is after the application is running.
+// Windows 是当前用户注册表上的 Manager。构建它时不碰任何东西：注册表在提问时才读取，
+// 那是应用运行之后。
 type Windows struct{}
 
-// NewWindows returns the Windows manager.
+// NewWindows 返回 Windows 的 manager。
 func NewWindows() *Windows { return &Windows{} }
 
-// Document is the Run value: its full name, and the command line in it.
+// Document 是 Run 值：其完整名称，以及其中的命令行。
 func (w *Windows) Document(l Launcher) (Document, error) {
 	if strings.TrimSpace(l.Name) == "" {
 		return Document{}, errors.New("autostart: the login start needs a name")
@@ -83,8 +73,7 @@ func (w *Windows) Document(l Launcher) (Document, error) {
 	}, nil
 }
 
-// Location is the Run value's full name, which is what the settings page
-// shows under the switch.
+// Location 是 Run 值的完整名称，即设置页在开关下方展示的内容。
 func (w *Windows) Location(l Launcher) (string, error) {
 	doc, err := w.Document(l)
 	if err != nil {
@@ -93,11 +82,9 @@ func (w *Windows) Location(l Launcher) (string, error) {
 	return doc.Key, nil
 }
 
-// Read reports whether the Run value names this program and Task Manager has
-// not turned it off.
+// Read 报告 Run 值是否指向本程序，且任务管理器未将其关闭。
 //
-// A value that names another copy of the application reads as off: the start
-// would launch a program that is not the one the login start was made for.
+// 指向应用另一份副本的值读作关：该启动会运行一个并非为此登录启动而设的程序。
 func (w *Windows) Read(l Launcher) (bool, error) {
 	doc, err := w.Document(l)
 	if err != nil {
@@ -117,16 +104,14 @@ func (w *Windows) Read(l Launcher) (bool, error) {
 	if !ok || kind != regBinary || len(state) == 0 {
 		return true, nil
 	}
-	// The first byte is odd when Task Manager has the entry off.
+	// 任务管理器关闭该条目时，首字节为奇数。
 	return state[0]&1 == 0, nil
 }
 
-// Start writes the Run value and clears what Task Manager recorded about it.
+// Start 写入 Run 值并清除任务管理器关于它的记录。
 //
-// The flag belongs to a user who turned the entry off there once. The
-// application asking for the login start again is the user's answer to that,
-// so the flag goes with it. The approval key does not exist on every machine,
-// and its absence is not a failure: there is nothing to turn back on.
+// 该标记属于曾在任务管理器关掉它的用户。应用再次请求登录启动就是用户的回应，因此一并清除标记。
+// 审批键并非每台机器都存在，其缺失不是失败：没有可恢复的东西。
 func (w *Windows) Start(l Launcher) error {
 	doc, err := w.Document(l)
 	if err != nil {
@@ -141,9 +126,8 @@ func (w *Windows) Start(l Launcher) error {
 	return nil
 }
 
-// Stop takes both values away. A Run value that is gone with a flag left
-// behind is a start that does nothing — and a later Boku that wrote the value
-// again would find itself off, with nothing on screen explaining why.
+// Stop 移除两个值。只删 Run 值而留下标记，会是一次什么也不做的启动——
+// 而之后重新写入该值的 Boku 会发现自己处于关闭状态，屏幕上却无任何解释。
 func (w *Windows) Stop(l Launcher) error {
 	if err := deleteRegistryValue(runKeyPath, l.Name); err != nil && !errors.Is(err, errValueNotFound) {
 		return err
@@ -154,7 +138,7 @@ func (w *Windows) Stop(l Launcher) error {
 	return nil
 }
 
-// regError tells the two "there is nothing here" answers from a real failure.
+// regError 把两种「这里什么都没有」结果与真实失败区分开。
 func regError(errno syscall.Errno) error {
 	if errno == errnoFileNotFound {
 		return errKeyNotFound
@@ -162,8 +146,7 @@ func regError(errno syscall.Errno) error {
 	return errno
 }
 
-// missingValue reads RegQueryValueEx's "nothing there" as a value rather than
-// an error: both a missing key and a missing value mean the start is off.
+// missingValue 把 RegQueryValueEx 的「什么都没有」读作正常值而非错误：键缺失与值缺失都意味着启动为关。
 func missingValue(errno syscall.Errno) error {
 	if errno == errnoFileNotFound || errno == errnoMoreData {
 		return nil
@@ -171,9 +154,8 @@ func missingValue(errno syscall.Errno) error {
 	return errno
 }
 
-// openKey opens a key of the current user, reporting a key that is not there
-// as errKeyNotFound: a login start that was never written is a key that was
-// never created.
+// openKey 打开当前用户的一个键，把不存在的键报告为 errKeyNotFound：
+// 从未写入的登录启动就是从未创建过的键。
 func openKey(path string) (syscall.Handle, error) {
 	name, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
@@ -187,8 +169,7 @@ func openKey(path string) (syscall.Handle, error) {
 	return key, nil
 }
 
-// readRegistryString reads a value of a key. ok is false when the key or the
-// value is not there, which is not an error: the start is then simply off.
+// readRegistryString 读取键下的一个值。键或值不存在时 ok 为 false，这不是错误：启动即视为关。
 func readRegistryString(path, name string) (string, uint32, bool, error) {
 	key, err := openKey(path)
 	if err != nil {
@@ -211,8 +192,7 @@ func readRegistryString(path, name string) (string, uint32, bool, error) {
 	if size == 0 {
 		return "", kind, true, nil
 	}
-	// size counts bytes, and the value ends with a NUL: one more unit than
-	// the value needs is room for both.
+	// size 计字节，且值以 NUL 结尾：所需单元数多一个才容纳两者。
 	buffer := make([]uint16, size/2+1)
 	if rc, _, _ := regQueryValueEx.Call(uintptr(key), uintptr(unsafe.Pointer(value)), 0,
 		uintptr(unsafe.Pointer(&kind)), uintptr(unsafe.Pointer(&buffer[0])), uintptr(unsafe.Pointer(&size))); rc != 0 {
@@ -221,8 +201,7 @@ func readRegistryString(path, name string) (string, uint32, bool, error) {
 	return syscall.UTF16ToString(buffer), kind, true, nil
 }
 
-// readRegistryBytes reads a value that is not a string, which is how Task
-// Manager's flag is stored.
+// readRegistryBytes 读取非字符串的值，任务管理器的标记就是以这种方式存储的。
 func readRegistryBytes(path, name string) ([]byte, uint32, bool, error) {
 	key, err := openKey(path)
 	if err != nil {
@@ -253,8 +232,7 @@ func readRegistryBytes(path, name string) ([]byte, uint32, bool, error) {
 	return buffer[:size], kind, true, nil
 }
 
-// writeRegistryString writes one string value, creating the key when it is
-// not there. The key's own permissions are left to Windows.
+// writeRegistryString 写入一个字符串值，键不存在时创建。键自身的权限交给 Windows。
 func writeRegistryString(path, name, text string) error {
 	keyPath, err := syscall.UTF16PtrFromString(path)
 	if err != nil {
@@ -280,8 +258,8 @@ func writeRegistryString(path, name, text string) error {
 	return nil
 }
 
-// deleteRegistryValue removes one value, reporting a key or value that is not
-// there as errValueNotFound so the caller can say it had nothing to do.
+// deleteRegistryValue 移除一个值，把不存在的键或值报告为 errValueNotFound，
+// 以便调用方说它无事可做。
 func deleteRegistryValue(path, name string) error {
 	key, err := openKey(path)
 	if err != nil {
@@ -304,14 +282,11 @@ func deleteRegistryValue(path, name string) error {
 	return nil
 }
 
-// BinaryPath is the program a login start runs.
+// BinaryPath 是登录启动要运行的程序。
 //
-// It is not os.Executable. The installer's shortcut is the program's home: an
-// update replaces the files the shortcut points at, and the next start runs
-// them. A login start pointing anywhere else would be a second copy. The
-// shortcut's target therefore answers first, and the running program answers
-// when there is no shortcut to read — a development build, or an application
-// unpacked by hand.
+// 它不是 os.Executable。安装器的快捷方式才是程序的家：更新会替换快捷方式指向的文件，
+// 下次启动即运行它们。登录启动若指向别处，就成了第二份副本。因此优先取快捷方式的目标，
+// 在没有可读快捷方式时（开发构建、手工解包的应用）回退到当前运行的程序。
 func BinaryPath() (string, error) {
 	if link := applicationShortcutPath(); link != "" {
 		if target := CleanShortcutTarget(ShortcutTarget(link)); target != "" {

@@ -11,28 +11,20 @@ import (
 	"testing"
 )
 
-// The settings store is one file and knows nothing about what is in it. What
-// it is tested for here is therefore its own job: reading the file into the
-// sections that are registered, handing each of them every key and taking back
-// the keys they own, writing the result, and never losing a change to one
-// feature because another one was made at the same time.
-//
-// What a feature's own keys mean is that feature's business and is tested
-// there; this file uses a stand-in section.
-//
-// A test works on its own directory, never on a real user's data.
+// 测的是存储自身：读文件、把全部键交给每个 Section 并收回它们拥有的键、写出结果，
+// 以及并发改动时不丢失任一功能的改动。各功能键的含义由各功能自己测，本文件用替身 Section。
+// 每个测试只用自己的临时目录，绝不碰真实用户数据。
 
-// testSection is a Section that remembers what it decoded and answers with
-// what the test tells it to write.
+// testSection 是一个记住 Decode 内容、按测试指定内容输出的 Section。
 type testSection struct {
 	name string
-	// seen is what Decode was handed, for a test to look at.
+	// seen 是 Decode 拿到的内容，供测试查看。
 	seen map[string]json.RawMessage
-	// decodes counts the reads, so a test can tell one Load from two.
+	// decodes 统计读取次数，便于区分一次与两次 Load。
 	decodes int
-	// value is what Encode hands back.
+	// value 是 Encode 交回的内容。
 	value map[string]any
-	// decodeErr and encodeErr make the store's error paths reachable.
+	// decodeErr 与 encodeErr 让存储的错误路径可达。
 	decodeErr error
 	encodeErr error
 }
@@ -82,8 +74,7 @@ func TestNewRequiresAPathAndDistinctSections(t *testing.T) {
 	}
 }
 
-// A file that is not there is not an error: every section keeps its own
-// defaults and writes on the first change.
+// 文件不存在不算错误：各 Section 保留默认值，首次改动时再写入。
 func TestLoadWithoutAFileReadsNothing(t *testing.T) {
 	section := newTestSection("clipboard")
 	store, _ := newStore(t, section)
@@ -95,8 +86,7 @@ func TestLoadWithoutAFileReadsNothing(t *testing.T) {
 	}
 }
 
-// Every section is handed every key: the file is one flat object, and which
-// keys belong to whom is the sections' own business.
+// 每个 Section 都拿到全部键：文件是扁平对象，哪些键属于谁由各 Section 自行判断。
 func TestEverySectionSeesEveryKey(t *testing.T) {
 	first, second := newTestSection("first"), newTestSection("second")
 	store, path := newStore(t, first, second)
@@ -117,7 +107,7 @@ func TestEverySectionSeesEveryKey(t *testing.T) {
 	}
 }
 
-// What the sections hand back is what the file holds, under one flat object.
+// 文件内容就是各 Section 交回的键，放在同一个扁平对象里。
 func TestWrittenFileIsTheSectionsOwnKeys(t *testing.T) {
 	section := newTestSection("clipboard")
 	section.value = map[string]any{"clipboardMonitoring": true, "clipboardHistorySize": 30}
@@ -139,9 +129,7 @@ func TestWrittenFileIsTheSectionsOwnKeys(t *testing.T) {
 	if len(doc.Tools) != 2 {
 		t.Fatalf("the file holds %d keys, want 2: %s", len(doc.Tools), data)
 	}
-	// The keys are what the section named, not the section's own name: the
-	// file is one flat object, which is what makes an existing user's file
-	// readable without a migration.
+	// 写的是 Section 声明的键，而非 Section 的名字：扁平对象正是已有用户文件无需迁移的原因。
 	if string(doc.Tools["clipboardMonitoring"]) != "true" {
 		t.Errorf("clipboardMonitoring = %s", doc.Tools["clipboardMonitoring"])
 	}
@@ -150,10 +138,8 @@ func TestWrittenFileIsTheSectionsOwnKeys(t *testing.T) {
 	}
 }
 
-// A key no section owns survives a save. A person may write one by hand, and
-// an older build may have left one behind: changing any other setting must not
-// quietly shrink their file, which is the promise "a missing key keeps its
-// default" makes from the other side.
+// 无人认领的键在保存后仍保留（可能是手写或旧版本遗留）。改别的设置不能悄悄缩小
+// 用户的文件，这是「缺失的键保持默认」从另一侧的承诺。
 func TestAnUnclaimedKeySurvivesASave(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	original := `{"version":1,"tools":{"handWritten":"kept","clipboardMonitoring":true}}`
@@ -169,7 +155,7 @@ func TestAnUnclaimedKeySurvivesASave(t *testing.T) {
 	if err := store.Load(context.Background()); err != nil {
 		t.Fatalf("Load failed: %v", err)
 	}
-	// The change a user makes is to something else entirely.
+	// 用户改的是完全不相干的另一项。
 	section.value = map[string]any{"clipboardMonitoring": false}
 	if err := store.Save(context.Background()); err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -185,14 +171,13 @@ func TestAnUnclaimedKeySurvivesASave(t *testing.T) {
 	if got := string(doc.Tools["handWritten"]); got != `"kept"` {
 		t.Errorf("handWritten = %s, want it kept as it was: %s", got, data)
 	}
-	// And the setting the user did change is the one that changed.
+	// 用户改动的那一项确实变了。
 	if got := string(doc.Tools["clipboardMonitoring"]); got != "false" {
 		t.Errorf("clipboardMonitoring = %s, want false", got)
 	}
 }
 
-// Update rereads the file and writes it back whole, so it has to keep the
-// unclaimed keys too — it is the path every setting change takes.
+// Update 会重读并整份写回，因此同样必须保留无人认领的键——它是每次设置改动的必经路径。
 func TestUpdateKeepsAnUnclaimedKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	original := `{"version":1,"tools":{"futureBuildKey":{"nested":[1,2]}}}`
@@ -227,8 +212,7 @@ func TestUpdateKeepsAnUnclaimedKey(t *testing.T) {
 	}
 }
 
-// A key a section does own is the section's to write: the store does not put
-// the old value back over the new one, or the change would undo itself.
+// Section 拥有的键归该 Section 写：存储不会把旧值覆盖回新值之上，否则改动会自我撤销。
 func TestAClaimedKeyIsWrittenByItsSection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	original := `{"version":1,"tools":{"clipboardMonitoring":true}}`
@@ -260,9 +244,7 @@ func TestAClaimedKeyIsWrittenByItsSection(t *testing.T) {
 	}
 }
 
-// Two features writing one key is a mistake in the assembly, not something to
-// settle silently: whichever won would be decided by the order the sections
-// happened to be registered in.
+// 两个功能写同一个键属于装配错误，不能静默取舍：谁赢只会取决于注册顺序。
 func TestTwoSectionsWritingOneKeyIsRefused(t *testing.T) {
 	first, second := newTestSection("first"), newTestSection("second")
 	first.value = map[string]any{"shared": 1}
@@ -277,7 +259,7 @@ func TestTwoSectionsWritingOneKeyIsRefused(t *testing.T) {
 	}
 }
 
-// A file from another version is refused rather than partly understood.
+// 版本不符或无法解析的文件会被拒绝，而不是被部分解读。
 func TestLoadRefusesAnotherVersion(t *testing.T) {
 	section := newTestSection("clipboard")
 	store, path := newStore(t, section)
@@ -295,9 +277,7 @@ func TestLoadRefusesAnotherVersion(t *testing.T) {
 	}
 }
 
-// A section that cannot read its own keys stops the load: the file is the
-// user's configuration, and starting with a different one silently would be
-// worse than not starting.
+// 读不出自身键的 Section 会中止加载：文件是用户的配置，静默改用另一份比不启动更糟。
 func TestASectionThatCannotDecodeStopsTheLoad(t *testing.T) {
 	section := newTestSection("clipboard")
 	section.decodeErr = errors.New("that is not a number")
@@ -314,8 +294,7 @@ func TestASectionThatCannotDecodeStopsTheLoad(t *testing.T) {
 	}
 }
 
-// A canceled context is answered with the context's error, like every other
-// store in the application.
+// 取消的 context 返回 context 的错误，与应用里其他存储一致。
 func TestContextIsHonoured(t *testing.T) {
 	store, _ := newStore(t, newTestSection("clipboard"))
 	ctx, cancel := context.WithCancel(context.Background())
@@ -338,14 +317,10 @@ func TestUpdateRefusesAnUnknownSection(t *testing.T) {
 	}
 }
 
-// A change made through Update cannot be lost by another one.
+// 经 Update 做出的改动不会被另一处改动弄丢。
 //
-// The file holds every feature's settings, and each feature changes only its
-// own. Both go through Update, which reads the file again, runs the change and
-// writes it back as one step. Done as a load and a save instead, the two would
-// read the same file, each write back what it read plus its own change, and the
-// second write would undo the first — which is the bug this test exists to keep
-// out.
+// 两个功能都走 Update：它在同一步内重读、改动并写回。若改用 Load + Save，双方读到同一份
+// 文件、各写回「读到的 + 自己的改动」，后写的撤销先写的——本测试守住这个 bug 不复现。
 func TestTwoChangesAtOnceBothSurvive(t *testing.T) {
 	first, second := newTestSection("first"), newTestSection("second")
 	store, _ := newStore(t, first, second)
@@ -387,7 +362,7 @@ func TestTwoChangesAtOnceBothSurvive(t *testing.T) {
 	}
 }
 
-// A change that fails leaves the file as it was.
+// 失败的改动保持文件原样。
 func TestUpdateLeavesTheFileAloneWhenTheChangeFails(t *testing.T) {
 	section := newTestSection("clipboard")
 	section.value = map[string]any{"clipboardMonitoring": true}
@@ -413,9 +388,7 @@ func TestUpdateLeavesTheFileAloneWhenTheChangeFails(t *testing.T) {
 	}
 }
 
-// Concurrent writes must not interleave into one file: the rename is what
-// makes the file whole, and the lock is what keeps two writers from racing
-// over the temporary file's name.
+// 并发写入不能交错进同一个文件：rename 保证文件完整，锁保证两个写者不争抢临时文件名。
 func TestConcurrentWrites(t *testing.T) {
 	section := newTestSection("clipboard")
 	store, path := newStore(t, section)
@@ -443,8 +416,7 @@ func TestConcurrentWrites(t *testing.T) {
 	}
 }
 
-// The file is written through a temporary file, so a directory left behind
-// holds no half-written document.
+// 文件经临时文件写入，目录里不应留下写了一半的残留文件。
 func TestWriteLeavesNoTemporaryFile(t *testing.T) {
 	section := newTestSection("clipboard")
 	section.value = map[string]any{"clipboardMonitoring": true}

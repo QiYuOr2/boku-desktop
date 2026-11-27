@@ -44,7 +44,7 @@ func TestMetricsAreValidAndMatchThePanel(t *testing.T) {
 			t.Errorf("the panel lists metric %q, which is not defined", key)
 		}
 	}
-	// The headline metric is the first one: the card shows it large.
+	// 主指标是第一个：卡片会把它放大显示。
 	if metrics[0].Key != MetricBalanceMinor {
 		t.Errorf("the first metric is %s, want %s", metrics[0].Key, MetricBalanceMinor)
 	}

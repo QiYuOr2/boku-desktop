@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -146,7 +147,7 @@ func TestServiceFetchesWatchingAnimeAndTodayEpisodes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// At 00:30 Shanghai time, yesterday's date must already be excluded.
+	// 上海时间 00:30，昨天的日期必须已被排除。
 	s.now = func() time.Time { return time.Date(2026, 10, 19, 16, 30, 0, 0, time.UTC) }
 	if err := s.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
@@ -205,19 +206,15 @@ func TestServiceLoadsCollectionCoverWithoutFailingTheReleaseList(t *testing.T) {
 	}
 }
 
-// TestShanghaiSurvivesAMissingTimeZoneDatabase is the regression for the crash
-// a packaged build had when the tray flyout opened: `mygo build` passes
-// -trimpath, so time.LoadLocation cannot find zoneinfo.zip and answers
-// (nil, error). Reading a nil location panicked with "time: missing Location
-// in call to Time.In" inside a Window.Update callback, which is the main
-// thread and has no recover around it — the process died.
+// TestShanghaiSurvivesAMissingTimeZoneDatabase 是回归测试：打包版缺少时区数据库
+// （`mygo build` 的 -trimpath 使 LoadLocation 返回 nil）时不得 panic，
+// 否则会因主线程无 recover 而杀进程。
 func TestShanghaiSurvivesAMissingTimeZoneDatabase(t *testing.T) {
 	loc := shanghai()
 	if loc == nil {
 		t.Fatal("shanghai() returned a nil location")
 	}
-	// The day it names is the Shanghai calendar day, whatever the machine's
-	// own zone is: 16:30 UTC is already the next day there.
+	// 它命名的日期是上海日历日，与机器自身时区无关：16:30 UTC 在上海已是次日。
 	at := time.Date(2026, 10, 19, 16, 30, 0, 0, time.UTC).In(loc)
 	if at.Year() != 2026 || at.Month() != time.October || at.Day() != 20 {
 		t.Errorf("Shanghai day = %s, want 2026-10-20", at.Format(time.DateOnly))
@@ -227,8 +224,8 @@ func TestShanghaiSurvivesAMissingTimeZoneDatabase(t *testing.T) {
 	}
 }
 
-// TestRefreshKeepsTodayOnAFixedClock checks the day a release is dated in
-// without asking the time zone database at all, as the packaged build must.
+// TestRefreshKeepsTodayOnAFixedClock 检查剧集归属的日期，完全不查时区数据库
+// （打包版必须如此）。
 func TestRefreshKeepsTodayOnAFixedClock(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -251,7 +248,7 @@ func TestRefreshKeepsTodayOnAFixedClock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 21:00 in Shanghai on the 20th.
+	// 20 日上海时间 21:00。
 	service.now = func() time.Time { return time.Date(2026, 10, 20, 13, 0, 0, 0, time.UTC) }
 	if err := service.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
@@ -323,5 +320,115 @@ func TestFailedRefreshDropsYesterdayReleases(t *testing.T) {
 	got, fetchedAt, _, _ := service.View()
 	if len(got) != 0 || !fetchedAt.IsZero() {
 		t.Fatalf("yesterday's releases survived: %#v, fetchedAt=%s", got, fetchedAt)
+	}
+}
+
+func TestRefreshRetriesOnceAfterTimeoutAndDoesNotRetryBadResponse(t *testing.T) {
+	var collectionHits atomic.Int32
+	var episodeHits atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/users/sai/collections":
+			if collectionHits.Add(1) == 1 {
+				time.Sleep(120 * time.Millisecond)
+				return
+			}
+			_, _ = w.Write([]byte(`{"total":1,"data":[{"subject_id":7,"subject":{"name_cn":"测试动画"}}]}`))
+		case "/v0/episodes":
+			if episodeHits.Add(1) == 1 {
+				time.Sleep(120 * time.Millisecond)
+				return
+			}
+			_, _ = w.Write([]byte(`{"data":[{"id":9,"type":0,"sort":3,"name_cn":"第三集","airdate":"2026-10-20"}]}`))
+		}
+	}))
+	defer server.Close()
+	old := bangumiAPIBaseURL
+	bangumiAPIBaseURL = server.URL
+	t.Cleanup(func() { bangumiAPIBaseURL = old })
+
+	section := NewSection()
+	section.Set(Settings{Enabled: true, Username: "sai"})
+	service, err := New(httpc.New(httpc.Options{UserAgent: "Boku/test"}), section, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.requestTimeout = 50 * time.Millisecond
+	service.retryDelay = 10 * time.Millisecond
+	service.now = func() time.Time { return time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC) }
+
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh should succeed on retry: %v", err)
+	}
+	if collectionHits.Load() != 2 || episodeHits.Load() != 2 {
+		t.Fatalf("hits = collections:%d episodes:%d, want 2/2", collectionHits.Load(), episodeHits.Load())
+	}
+
+	// 非超时错误（500）不得触发重试。
+	var errHits atomic.Int32
+	errServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		errHits.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer errServer.Close()
+	bangumiAPIBaseURL = errServer.URL
+	if err := service.Refresh(context.Background()); !errors.Is(err, domain.ErrProviderUnavailable) {
+		t.Fatalf("500 error = %v, want ErrProviderUnavailable", err)
+	}
+	if errHits.Load() != 1 {
+		t.Fatalf("500 hit %d times, want 1 (no retry)", errHits.Load())
+	}
+}
+
+func TestRefreshFetchesEpisodesConcurrentlyWithBoundedLimit(t *testing.T) {
+	var inFlight atomic.Int32
+	var maxInFlight atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v0/users/sai/collections":
+			_, _ = w.Write([]byte(`{"total":6,"data":[
+				{"subject_id":1,"subject":{"name_cn":"番剧A"}},
+				{"subject_id":2,"subject":{"name_cn":"番剧B"}},
+				{"subject_id":3,"subject":{"name_cn":"番剧C"}},
+				{"subject_id":4,"subject":{"name_cn":"番剧D"}},
+				{"subject_id":5,"subject":{"name_cn":"番剧E"}},
+				{"subject_id":6,"subject":{"name_cn":"番剧F"}}
+			]}`))
+		case "/v0/episodes":
+			cur := inFlight.Add(1)
+			for {
+				prev := maxInFlight.Load()
+				if cur <= prev || maxInFlight.CompareAndSwap(prev, cur) {
+					break
+				}
+			}
+			time.Sleep(40 * time.Millisecond)
+			inFlight.Add(-1)
+			sid := r.URL.Query().Get("subject_id")
+			_, _ = w.Write([]byte(`{"data":[{"id":1` + sid + `,"type":0,"sort":1,"name_cn":"第一集","airdate":"2026-10-20"}]}`))
+		}
+	}))
+	defer server.Close()
+	old := bangumiAPIBaseURL
+	bangumiAPIBaseURL = server.URL
+	t.Cleanup(func() { bangumiAPIBaseURL = old })
+
+	section := NewSection()
+	section.Set(Settings{Enabled: true, Username: "sai"})
+	service, err := New(httpc.New(httpc.Options{UserAgent: "Boku/test"}), section, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC) }
+
+	if err := service.Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	items, _, _, err := service.View()
+	if err != nil || len(items) != 6 {
+		t.Fatalf("items = %d, err = %v", len(items), err)
+	}
+	if peak := maxInFlight.Load(); peak < 2 || peak > bangumiConcurrency {
+		t.Fatalf("max concurrent episode requests = %d, want in [2, %d]", peak, bangumiConcurrency)
 	}
 }

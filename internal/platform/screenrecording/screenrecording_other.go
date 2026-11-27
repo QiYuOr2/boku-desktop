@@ -2,10 +2,9 @@
 
 package screenrecording
 
-// granted and request report the permission as granted: these platforms
-// require none for reading the screen.
+// granted 和 request 恒报告已授权：这些平台读取屏幕无需权限。
 func granted() bool { return true }
 func request() bool { return true }
 
-// settingsURL is empty: these platforms have no Screen Recording switch.
+// settingsURL 为空：这些平台没有「屏幕录制」开关。
 func settingsURL() string { return "" }

@@ -77,7 +77,7 @@ func TestSnapshotValidateAndCurrency(t *testing.T) {
 		t.Errorf("MetricCurrency = %q, %v; want CNY", currency, err)
 	}
 
-	// A metric that names its own currency does not need the snapshot's.
+	// 自行指定货币的指标不需要快照的货币。
 	fixed := snapshot
 	fixed.Currency = ""
 	named := metric
@@ -87,7 +87,7 @@ func TestSnapshotValidateAndCurrency(t *testing.T) {
 		t.Errorf("MetricCurrency = %q, %v; want USD", currency, err)
 	}
 
-	// Without either, showing the amount would be a guess.
+	// 两者都没有时，显示金额只能是猜测。
 	if _, err := fixed.MetricCurrency(metric); !errors.Is(err, ErrInvalidMetricValue) {
 		t.Errorf("MetricCurrency error = %v, want ErrInvalidMetricValue", err)
 	}

@@ -16,13 +16,10 @@ import (
 	"boku/internal/kit"
 )
 
-// The platform half of this package cannot be exercised without a session,
-// so what is tested here is everything that decides around it: what happens
-// when the main thread never answers, and what a dispatcher that has already
-// gone away returns, and how a reading is classified.
+// 本包与平台相关的那一半没有会话无法执行，所以这里测的是围绕它的全部决策：
+// 主线程永不答复时如何、已消失的 dispatcher 返回什么、以及一次读取如何归类。
 
-// A dispatcher that never answers must not hold the poll: the reading is
-// dropped and the next poll tries again.
+// 永不答复的 dispatcher 不得卡住轮询：读取被丢弃，下一次轮询重试。
 func TestUnansweredDispatchIsDropped(t *testing.T) {
 	blocked := make(chan struct{})
 	t.Cleanup(func() { close(blocked) })
@@ -40,14 +37,13 @@ func TestUnansweredDispatchIsDropped(t *testing.T) {
 	if !errors.Is(err, domain.ErrUnsupportedClipboardFormat) {
 		t.Errorf("Read = %v, want ErrUnsupportedClipboardFormat", err)
 	}
-	// A write is dropped the same way rather than blocking a window close.
+	// 一次写入也同样被丢弃，而不是阻塞窗口关闭。
 	if err := device.WriteText(context.Background(), "text"); err != nil {
 		t.Errorf("WriteText = %v, want nil", err)
 	}
 }
 
-// A dispatcher that has already gone away — the application is quitting —
-// runs nothing and says so.
+// 已经消失的 dispatcher（应用正在退出）什么都不执行并如实返回。
 func TestDispatchAfterShutdown(t *testing.T) {
 	device := New(func(func()) bool { return false })
 	device.timeout = time.Second
@@ -60,8 +56,7 @@ func TestDispatchAfterShutdown(t *testing.T) {
 	}
 }
 
-// Without a dispatcher the calls run here, which is what a test and a
-// single-threaded assembly need.
+// 没有 dispatcher 时调用就地运行，这是测试和单线程装配所需的。
 func TestNilDispatcherRunsInPlace(t *testing.T) {
 	var mu sync.Mutex
 	runs := 0
@@ -78,7 +73,7 @@ func TestNilDispatcherRunsInPlace(t *testing.T) {
 	}
 }
 
-// A canceled context ends the wait rather than leaving the caller there.
+// 被取消的 context 结束等待，而不是把调用方留在那里。
 func TestCanceledContextEndsTheWait(t *testing.T) {
 	blocked := make(chan struct{})
 	t.Cleanup(func() { close(blocked) })
@@ -111,8 +106,7 @@ func TestNewUsesTheDefaultTimeout(t *testing.T) {
 	}
 }
 
-// A picture the platform could not hand over is still recorded — the user
-// copied something — and the reading says why, in the application's words.
+// 平台无法交出的图片仍被记录——用户确实复制了东西——并由读取用应用自己的话说明原因。
 func TestAPictureThatCouldNotBeReadIsNoted(t *testing.T) {
 	content := Convert(platformFacts{
 		formats:  []transfer.Format{transfer.PNG},
@@ -132,8 +126,7 @@ func TestAPictureThatCouldNotBeReadIsNoted(t *testing.T) {
 		t.Errorf("the note says %q", content.Observation)
 	}
 
-	// A file list with an unreadable picture beside it says so as well: the
-	// file is still what gets copied back.
+	// 旁边有读不出的图片的文件列表也会说明：文件仍是被复制回去的内容。
 	withFiles := Convert(platformFacts{
 		formats:  []transfer.Format{transfer.FileList, transfer.PNG},
 		files:    []string{"/tmp/a.png"},
@@ -147,9 +140,8 @@ func TestAPictureThatCouldNotBeReadIsNoted(t *testing.T) {
 		t.Error("a file list with an unreadable picture was not noted")
 	}
 
-	// A complete reading carries no note, and carries the bitmap itself: a
-	// picture that was read can be put back, which is what a click on it in
-	// the history does.
+	// 完整的读取不带说明，且携带位图本身：读到的图片可以被放回，这正是历史中
+	// 点击它时所做的。
 	complete := Convert(platformFacts{
 		formats:  []transfer.Format{transfer.PNG},
 		hasImage: true,
@@ -176,9 +168,8 @@ func TestHasFormat(t *testing.T) {
 	}
 }
 
-// A picture this device read is handed out again while it is still fresh, so
-// that a screenshot sitting on the clipboard is not decoded and encoded on
-// every poll.
+// 本设备读过的图片在仍新鲜期间再次交出，使留在剪贴板上的截图不必每次轮询都
+// 解码再编码。
 func TestAPictureIsHandedOutAgainWhileItIsFresh(t *testing.T) {
 	now := time.Now()
 	device := New(nil)
@@ -197,17 +188,15 @@ func TestAPictureIsHandedOutAgainWhileItIsFresh(t *testing.T) {
 		t.Error("the picture that was remembered has no name")
 	}
 
-	// Past the window it is read again rather than handed out forever.
+	// 超出窗口就重新读取，而不是永远交出。
 	now = now.Add(pictureFresh)
 	if device.pictureStillThere() {
 		t.Error("a picture older than the window is still handed out")
 	}
 }
 
-// A copy made while the window is still open is a new picture: the time alone
-// does not say that, the clipboard's own write counter does. Without this, a
-// second screenshot taken within the window would be handed out as the first
-// one and never recorded.
+// 窗口仍开着时发生的一次复制是新的图片：仅凭时间看不出，需靠剪贴板自身的写
+// 计数器。没有它，窗口内截的第二张会被当作第一张交出、永不记录。
 func TestAClipboardWriteInvalidatesThePicture(t *testing.T) {
 	now := time.Now()
 	count := uint32(7)
@@ -226,8 +215,8 @@ func TestAClipboardWriteInvalidatesThePicture(t *testing.T) {
 	}
 }
 
-// Two runs of the same bytes are the same picture: the name a reading carries
-// has to be the one the loop already knows, or every poll records a new copy.
+// 同样字节的两次运行是同一张图片：读取携带的名字必须是循环已认识的那个，否则
+// 每次轮询都会记录一份新副本。
 func TestARememberedPictureKeepsItsName(t *testing.T) {
 	png := []byte("89504e470d0a1a0a")
 	now := time.Now()
@@ -239,16 +228,15 @@ func TestARememberedPictureKeepsItsName(t *testing.T) {
 	if got, want := device.pictureRef, kit.ClipImageRef(png); got != want {
 		t.Errorf("pictureRef = %q, want %q", got, want)
 	}
-	// Remembering the same bytes again is the same name.
+	// 再次记住同样的字节仍是同一个名字。
 	device.rememberPicture(png, now)
 	if got, want := device.pictureRef, kit.ClipImageRef(png); got != want {
 		t.Errorf("pictureRef changed to %q, want %q", got, want)
 	}
 }
 
-// A reading that found no picture, or could not read one, leaves nothing to
-// hand out: a picture kept from earlier would have the next reading claim to
-// hold a picture that is not there.
+// 未发现图片、或读不出图片的读取不留下可交出的东西：否则从早前留存的图片会让
+// 下一次读取声称持有并不存在的图片。
 func TestForgettingAPicture(t *testing.T) {
 	now := time.Now()
 	device := New(nil)
@@ -266,9 +254,8 @@ func TestForgettingAPicture(t *testing.T) {
 	}
 }
 
-// A reading that was handed a picture it did not read still has to name it:
-// the loop identifies the reading by that name, and a reading that carried
-// none would look like a different picture and be recorded a second time.
+// 被直接交出、并非本次读到的图片仍须命名：循环用该名字识别这次读取，若不带名字
+// 会被当成另一张图片而被记录两次。
 func TestAReusedPictureKeepsItsNameInTheReading(t *testing.T) {
 	const ref = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
 	content := Convert(platformFacts{
@@ -291,8 +278,7 @@ func TestAReusedPictureKeepsItsNameInTheReading(t *testing.T) {
 	}
 }
 
-// A file list read from the platform's own file URLs: the paths that come
-// out are what a copy back writes.
+// 从平台自身的文件 URL 读到的文件列表：输出的路径正是复制回去时所写的内容。
 func TestFilePathsFromAReading(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.pdf")

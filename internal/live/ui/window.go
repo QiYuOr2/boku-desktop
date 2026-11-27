@@ -18,8 +18,7 @@ const (
 	liveMinHeight = 64
 	liveMaxHeight = 480
 
-	// The card's border box is the lines plus this padding and border.
-	// windowView uses the same numbers on the bar.
+	// 卡片边框盒 = 文本行 + 此内边距 + 边框；windowView 在窗口栏上使用相同数值。
 	captionPadTop        float32 = 10
 	captionPadRight      float32 = 8
 	captionPadBottom     float32 = 8
@@ -32,12 +31,12 @@ const (
 	captionControlHeight float32 = 24
 	captionBodyGap       float32 = 6
 	captionSourceLines           = 3
-	// Includes the header and both options so the popup can open downward.
+	// 含标题和两个选项，使弹窗能向下展开。
 	captionMenuRoom = 128
 )
 
 var (
-	// Text is independent of the bar opacity and stays at least 80% opaque.
+	// 文字不随窗口栏透明度变化，且至少保持 80% 不透明。
 	subtitleInk   = ui.RGBA(255, 255, 255, 1)
 	subtitleMuted = ui.RGBA(255, 255, 255, 0.92)
 	subtitleFaint = ui.RGBA(255, 255, 255, 0.84)
@@ -74,13 +73,11 @@ func (s *State) newCaption() *mygo.Window {
 			tray = s.tray()
 		}
 		if tray != nil {
-			// An ordinary transparent window's frames are opaque, so the
-			// bar's alpha only shades its own background, and a HUD
-			// vibrancy draws the system caption buttons. A tray flyout
-			// composites that alpha over whatever is behind it. The text
-			// stays solid; do not fade the whole window. SetContentSize
-			// would snap it back to the tray icon, so later moves use
-			// SetContentBounds.
+			// 普通透明窗口的边框不透明：栏的 alpha 只影响自身背景，
+			// 系统标题栏按钮由 HUD 毛玻璃绘制，而托盘浮层会把该 alpha
+			// 合成到背后内容上。文字保持实心，不要整体淡化窗口。
+			// SetContentSize 会把它吸回托盘图标位置，后续移动须用
+			// SetContentBounds。
 			return mygo.NewFlyout(mygo.FlyoutOptions{
 				Tray:      tray,
 				Width:     liveWidth,
@@ -107,9 +104,8 @@ func (s *State) newCaption() *mygo.Window {
 		BackgroundColor: "#00000000",
 		AlwaysOnTop:     true,
 		SkipTaskbar:     true,
-		// A non-activating panel keeps the app the user is listening to
-		// in front. Windows uses the flyout above; this is the macOS path
-		// and the fallback when the tray does not exist yet.
+		// 非激活面板让用户正在收听的 App 保持在前。Windows 走上面的浮层；
+		// 这里用于 macOS，以及托盘尚不存在时的回退。
 		Panel:   runtime.GOOS == "darwin",
 		Content: content,
 	})
@@ -120,8 +116,7 @@ func (s *State) close() {
 	if window == nil {
 		return
 	}
-	// Drop the window before Close so the settings switch turns off in this
-	// frame. OnClosed still stops listening.
+	// 先丢弃窗口再 Close，让设置开关本帧就关掉；OnClosed 仍会停止监听。
 	s.window = nil
 	s.forgetCaption()
 	window.Close()
@@ -140,7 +135,7 @@ func (s *State) place(window *mygo.Window) {
 		y = area.Y
 		height = max(bottom-y, liveMinHeight)
 	}
-	// Leave room below the fixed top edge for a full caption.
+	// 固定顶边下方留出完整字幕所需空间。
 	window.SetContentBounds(mygo.Rectangle{
 		X: area.X + (area.Width-liveWidth)/2, Y: y, Width: liveWidth, Height: height,
 	})
@@ -152,8 +147,7 @@ func (s *State) windowView(c *ui.Context) {
 	fill, edge := subtitleChrome(view.Settings.Opacity)
 	var captionBottom, popupBottom float32
 	root := c.Root().Background(ui.Transparent).DrawOver(func(_ *ui.Painter, _ ui.Rect) {
-		// The select's overlay paints after the caption. Fit only once,
-		// after both have reported their current layout.
+		// 下拉浮层的遮罩在字幕之后绘制；须在两者都上报当前布局后再适配一次。
 		s.fitCaption(int(math.Ceil(float64(max(captionBottom, popupBottom)))))
 	})
 	root.Children(func() {
@@ -172,7 +166,7 @@ func (s *State) windowView(c *ui.Context) {
 			c.Key("body")
 			ui.Column(c).FillWidth().Shrink(0).Gap(captionBodyGap).Children(func() {
 				s.controlRow(c, view).DrawOver(func(_ *ui.Painter, box ui.Rect) {
-					// Keep the overlay's window-edge margin when fitting macOS.
+					// 在 macOS 适配时保留浮层的窗口边缘留白。
 					popupBottom = box.Y + box.H + 4
 				})
 				ui.Column(c).FillWidth().Gap(captionGroupGap).Children(func() {
@@ -240,8 +234,8 @@ func captionStatus(view live.View) (string, ui.Color) {
 	}
 }
 
-// Sentence boundaries do not add line breaks. Keep the newest complete pairs
-// within three wrapped Japanese lines, using exactly the spans being drawn.
+// 句界不额外换行。只用实际绘制的 span，在三条换行后的日语行内保留
+// 最新的完整句子对。
 func visibleCaptions(c *ui.Context, view live.View) live.View {
 	width := float32(liveWidth) - captionPadLeft - captionPadRight - 2*captionBorder
 	budget := float32(liveMaxHeight) - captionPadTop - captionPadBottom - 2*captionBorder - captionControlHeight - captionBodyGap
@@ -262,7 +256,7 @@ func visibleCaptions(c *ui.Context, view live.View) live.View {
 			height += targetHeight + captionGroupGap
 		}
 		if sourceHeight > sourceLineHeight*captionSourceLines || height > budget {
-			// Keep a long current sentence whole; only older pairs leave.
+			// 过长的当前句整句保留，只有更早的句子退出。
 			if i == len(view.Lines)-1 && view.Draft == "" {
 				start = i
 			}
@@ -290,7 +284,7 @@ func (s *State) fitCaption(height int) {
 		return
 	}
 	if runtime.GOOS == "windows" {
-		// Keep Windows' compositing surface stable; only expose the content.
+		// 保持 Windows 合成表面稳定，仅暴露内容区域。
 		if height != s.clipped && windowshape.ClipTop(s.window.NativeHandle(), height) {
 			s.clipped = height
 		}
@@ -346,7 +340,7 @@ func (s *State) inputPicker(c *ui.Context, view live.View) ui.Element {
 			opening := ev.Kind == ui.InputPointerUp && ev.Button == 0 ||
 				ev.Kind == ui.InputKeyDown && (ev.Key == ui.KeyEnter || ev.Key == ui.KeySpace || ev.Key == ui.KeyDown || ev.Key == ui.KeyUp)
 			if opening && s.window != nil {
-				// Reserve room before SelectBase lays out its first popup frame.
+				// 在 SelectBase 布局第一帧弹窗之前预留空间。
 				s.fitCaption(max(s.window.ContentBounds().Height, captionMenuRoom))
 			}
 			return false

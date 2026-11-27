@@ -16,20 +16,15 @@ import (
 	"boku/internal/domain"
 )
 
-// The selection is read through the Accessibility API first: the focused
-// element publishes its selected text, and reading it disturbs neither the
-// application nor the clipboard. That interface needs the user's permission
-// in System Settings > Privacy & Security > Accessibility; without it the
-// copy fallback below is the answer, which is why the two live together.
+// 优先通过辅助功能 API 读取选中文本：焦点元素会发布其选中文本，读取它既不干扰应用
+// 也不碰剪贴板。该接口需要在「系统设置 > 隐私与安全性 > 辅助功能」中授权；没有权限时
+// 回退到下面的复制方案，所以两者放在一起。
 //
-// The copy fallback is the same logic Windows uses (selection.go): press the
-// platform's copy combination, watch the clipboard's write counter to learn
-// whether anything was selected, read the text, and put the clipboard back.
-// The only platform-specific parts are the key press and the counter.
+// 复制方案与 Windows 相同（selection.go）：按下平台的复制组合键，监视剪贴板的写计数器
+// 判断是否有选中内容，读取文本，再把剪贴板还原。平台相关部分只有按键和计数器。
 //
-// A system with neither — permission refused and an application that does not
-// answer the copy — is the ordinary "the platform cannot say" answer, and the
-// caller falls back to the clipboard it already has.
+// 两者都不可用（权限被拒且应用不响应复制）属于「平台无法回答」的常见情况，调用方回退到
+// 已有的剪贴板。
 func New(opts Options) domain.SelectionDevice {
 	return Device{
 		clipboard:  opts.Clipboard,
@@ -38,28 +33,21 @@ func New(opts Options) domain.SelectionDevice {
 	}
 }
 
-// Device reads the selection through macOS' Accessibility API, and asks the
-// application to copy it when that answers nothing.
+// Device 通过 macOS 的辅助功能 API 读取选中文本，读不到时请应用复制。
 type Device struct {
-	// clipboard is what the copy fallback reads and puts back.
+	// clipboard 是复制方案读取并还原的剪贴板。
 	clipboard domain.ClipboardDevice
-	// beforeCopy is called just before the synthetic copy, so that the
-	// clipboard tool can keep the borrowed value out of the history.
+	// beforeCopy 在合成复制前调用，以便剪贴板工具把借来的值排除在历史之外。
 	beforeCopy func()
-	// sequence is the clipboard's write counter. A device without one can
-	// read what Accessibility publishes, but cannot tell a copy that selected
-	// nothing from one that copied the same text again.
+	// sequence 是剪贴板的写计数器。没有它的设备能读辅助功能发布的内容，
+	// 但无法区分「复制了空」和「又复制了同样的文本」。
 	sequence func() uint32
 }
 
-// SelectedText asks macOS what is selected in the application the user is
-// working in.
+// SelectedText 询问 macOS 用户当前应用里选中了什么。
 //
-// Accessibility is tried a few times, for the same reason Windows does it: a
-// browser turns its accessibility tree on when it is first asked, and the
-// first answer can be empty while the selection is right there on screen. A
-// call that hangs is left behind after the reading's bound; the copy fallback
-// is the older answer and is always at hand.
+// 与 Windows 一样会重试几次：浏览器首次被询问时才开启辅助功能树，第一次可能返回空，
+// 而选中内容就在屏幕上。挂起的调用在读取时限后被放弃；复制方案是更旧的答案，始终可用。
 func (d Device) SelectedText(ctx context.Context) (string, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -76,9 +64,8 @@ func (d Device) SelectedText(ctx context.Context) (string, error) {
 	return "", domain.ErrSelectionUnavailable
 }
 
-// readAXWithin is one reading of the selection on a thread of its own, waited
-// for with a bound: the call belongs to another application's accessibility
-// implementation, and may not return.
+// readAXWithin 在独立线程上做一次读取，并带时限等待：该调用属于另一个应用的辅助功能
+// 实现，可能不返回。
 func readAXWithin(ctx context.Context, within time.Duration) string {
 	done := make(chan string, 1)
 	go func() { done <- readSelectionAX() }()
@@ -94,9 +81,8 @@ func readAXWithin(ctx context.Context, within time.Duration) string {
 	}
 }
 
-// readSelectionAX reads the selected text of the focused element, or answers
-// nothing. A missing permission, an element that publishes no text, a
-// selection of nothing and a failed call are all the same answer here.
+// readSelectionAX 读取焦点元素的选中文本，或返回空。无权限、元素不发布文本、空选中和
+// 调用失败在这里都是同一个答案。
 func readSelectionAX() string {
 	if !loadAX() || !axIsProcessTrusted() {
 		return ""
@@ -121,7 +107,7 @@ func readSelectionAX() string {
 	return strings.TrimSpace(cfString(selected))
 }
 
-// --- Accessibility and Core Foundation, as plain calls --------------------
+// --- 辅助功能与 Core Foundation，以直接调用方式使用 --------------------
 
 const kCFStringEncodingUTF8 = 0x08000100
 
@@ -196,11 +182,9 @@ func axIsProcessTrusted() bool {
 	return axIsProcessTrustedFunc != nil && axIsProcessTrustedFunc() != 0
 }
 
-// RequestSelectionAccess asks the system to show its Accessibility prompt. The
-// app cannot grant itself the permission, and macOS does not even list it in
-// System Settings until it asks: that is what this call does. The answer is
-// whether the permission is granted now; false after the prompt means the user
-// still has to turn the switch on.
+// RequestSelectionAccess 请系统显示辅助功能授权提示。应用不能自行授予权限，且 macOS
+// 在应用请求前不会在系统设置里列出它；这个调用就是发起请求。返回值是当前是否已授权：
+// 提示后仍为 false 表示用户还需手动打开开关。
 func (d Device) RequestSelectionAccess() bool {
 	if !loadAX() {
 		return false
@@ -211,14 +195,13 @@ func (d Device) RequestSelectionAccess() bool {
 	return requestAccessibilityPrompt()
 }
 
-// SelectionAccessGranted reports the current permission without asking for it.
+// SelectionAccessGranted 报告当前权限，不发起请求。
 func (d Device) SelectionAccessGranted() bool {
 	return loadAX() && axIsProcessTrusted()
 }
 
-// requestAccessibilityPrompt is the prompt half, shared by the settings button
-// and the first copy fallback. It returns the current permission, not the
-// user's answer: the system does not tell an application what the user chose.
+// requestAccessibilityPrompt 是提示那一半，由设置按钮和首次复制回退共用。它返回当前
+// 权限，而非用户的选择：系统不会告诉应用用户选了什么。
 func requestAccessibilityPrompt() bool {
 	if !loadAX() || axIsProcessTrustedWithOptionsFunc == nil {
 		return false
@@ -237,8 +220,8 @@ func requestAccessibilityPrompt() bool {
 	return axIsProcessTrustedWithOptionsFunc(options) != 0
 }
 
-// dataReference reads a Core Foundation object held in a global variable, such
-// as kAXTrustedCheckOptionPrompt or kCFBooleanTrue.
+// dataReference 读取全局变量里保存的 Core Foundation 对象，如 kAXTrustedCheckOptionPrompt
+// 或 kCFBooleanTrue。
 func dataReference(handle uintptr, name string) uintptr {
 	p, err := purego.Dlsym(handle, name)
 	if err != nil || p == 0 {
@@ -247,8 +230,7 @@ func dataReference(handle uintptr, name string) uintptr {
 	return **(**uintptr)(unsafe.Pointer(&p))
 }
 
-// dataAddress is the address of a global struct, such as the dictionary key
-// callbacks; the C API wants the address, not the bytes it holds.
+// dataAddress 是全局结构体的地址，如字典 key callbacks；C API 要地址，而不是它持有的字节。
 func dataAddress(handle uintptr, name string) uintptr {
 	address, err := purego.Dlsym(handle, name)
 	if err != nil {
@@ -265,9 +247,8 @@ func axCopyAttribute(element, attribute uintptr) uintptr {
 	return value
 }
 
-// newCFString makes a Core Foundation string, with the NUL that the C
-// constructor reads to. The two attribute names above are kept for the life of
-// the process because they never change.
+// newCFString 构造 Core Foundation 字符串，带 C 构造器读取的 NUL 结尾。上面两个属性名
+// 在整个进程生命期内保留，因为它们永不变。
 func newCFString(value string) uintptr {
 	bytes := append([]byte(value), 0)
 	ref := cfStringCreateWithCString(0, &bytes[0], kCFStringEncodingUTF8)
@@ -275,14 +256,13 @@ func newCFString(value string) uintptr {
 	return ref
 }
 
-// cfString reads a Core Foundation string as a Go string.
+// cfString 把 Core Foundation 字符串读成 Go 字符串。
 func cfString(value uintptr) string {
 	if value == 0 || cfStringGetLength == nil || cfGetTypeID == nil || cfStringGetTypeID == nil {
 		return ""
 	}
 	if cfGetTypeID(value) != cfStringGetTypeID() {
-		// An accessibility attribute can be something other than text; a
-		// CFString call on it would be a crash rather than a wrong answer.
+		// 辅助功能属性可能不是文本；对它调用 CFString 函数会崩溃而非返回错误值。
 		return ""
 	}
 	length := cfStringGetLength(value)
@@ -303,10 +283,9 @@ func cfString(value uintptr) string {
 	return string(buffer)
 }
 
-// --- asking the application to copy ----------------------------------------
+// --- 请应用执行复制 ----------------------------------------
 
-// The virtual key codes and the flags of a synthetic Command+C, from
-// Carbon's Events.h and CoreGraphics' CGEventTypes.h.
+// 合成 Command+C 的虚拟键码与标志，来自 Carbon 的 Events.h 和 CoreGraphics 的 CGEventTypes.h。
 const (
 	keyCodeCommand = 0x37
 	keyCodeShift   = 0x38
@@ -357,8 +336,8 @@ func loadCoreGraphics() bool {
 	return cgOK
 }
 
-// dlsymFunc returns a callable symbol, or nil when this macOS version does not
-// have it. It is used for the two access-check calls, which arrived in 10.15.
+// dlsymFunc 返回可调用的符号，本 macOS 版本没有时返回 nil。用于两个访问检查调用，
+// 它们在 10.15 才出现。
 func dlsymFunc[T any](handle uintptr, name string) T {
 	var zero T
 	address, err := purego.Dlsym(handle, name)
@@ -370,13 +349,11 @@ func dlsymFunc[T any](handle uintptr, name string) T {
 	return fn
 }
 
-// canPostEvents reports whether this process may post keyboard events.
+// canPostEvents 报告本进程是否允许发送键盘事件。
 //
-// It is a check, not a request. Asking from the shortcut path happens while
-// Boku is an accessory app (no window has been opened), and macOS does not
-// show the Accessibility prompt for such a call: it records the app with the
-// permission off instead. The one place that asks is the settings button,
-// where the settings window makes the app active.
+// 这是检查，不是请求。在快捷路径中发起请求时 Boku 还是辅助应用（没开窗口），macOS 不会
+// 为这种调用显示辅助功能提示，反而会把应用记为未授权。唯一发起请求的地方是设置按钮，
+// 那里设置窗口会让应用变为活跃。
 func canPostEvents() bool {
 	if !loadCoreGraphics() {
 		return false
@@ -384,10 +361,8 @@ func canPostEvents() bool {
 	return cgPreflightPostEventAccess == nil || cgPreflightPostEventAccess() != 0
 }
 
-// secureInput reports whether a secure input field has the keyboard. Copying
-// a password into the clipboard to translate it is not what the user asked
-// for, and the clipboard would keep it after the tool put the old value back
-// only by accident.
+// secureInput 报告是否有安全输入框占据键盘。把密码复制到剪贴板去翻译不是用户想要的，
+// 而且工具还原旧值后剪贴板也可能意外保留密码。
 func secureInput() bool {
 	if secureEventInputEnabled == nil {
 		return false
@@ -408,10 +383,8 @@ func init() {
 	secureEventInputEnabled = dlsymFunc[func() uint8](carbon, "IsSecureEventInputEnabled")
 }
 
-// pressCopy presses Command+C, having first let go of whatever modifier the
-// user is still holding: the shortcut that got here is one of those, and a
-// copy made while Command and Shift are down is a copy the application may
-// read as something else.
+// pressCopy 按 Command+C，先松开用户仍按着的修饰键：触发本功能的快捷键就是其中之一，
+// 在 Command 和 Shift 按下时做的复制，应用可能当成别的东西。
 func pressCopy() {
 	if !loadCoreGraphics() {
 		return
@@ -423,7 +396,7 @@ func pressCopy() {
 	postKey(keyCodeCommand, false, 0)
 }
 
-// releaseHeldModifiers sends a key-up for every modifier that is still down.
+// releaseHeldModifiers 对每个仍按下的修饰键发送 key-up。
 func releaseHeldModifiers() {
 	for _, key := range []uint16{keyCodeShift, keyCodeControl, keyCodeOption, keyCodeCommand} {
 		if cgEventSourceKeyState(kCGEventSourceStateCombinedSessionState, key) != 0 {
@@ -433,8 +406,7 @@ func releaseHeldModifiers() {
 	time.Sleep(10 * time.Millisecond)
 }
 
-// postKey posts one keyboard event. The event is created autoreleased
-// equivalent (+1), so it is released after posting.
+// postKey 发送一个键盘事件。事件以 autorelease 等价（+1）创建，发送后释放。
 func postKey(key uint16, down bool, flags uint64) {
 	value := uint8(0)
 	if down {

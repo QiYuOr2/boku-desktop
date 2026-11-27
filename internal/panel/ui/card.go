@@ -15,17 +15,11 @@ import (
 	"boku/internal/panel"
 )
 
-// card draws the panels the quick window shows: one block each, with the line
-// between two of them that says where one ends. A panel draws itself by what
-// its headline is — a proportion is a bar, a figure is a number — so what a
-// provider reports decides the shape, and nothing here names a vendor.
+// 快速窗口里的面板：每个面板一个区块，区块之间画分隔线。
+// 面板按标题指标的类型决定形状（比例画成进度条，数值显示为数字），
+// 因此形态由 provider 上报的数据决定，这里不出现任何厂商名。
 //
-// Every state it can be in is drawn here: a panel that failed says why, and
-// never shows 0 in place of an answer it did not get. That rule is the whole
-// point of the card.
-//
-// The panel is a section of the window, the same shape the settings window
-// gives each of its own: a title line, then what the panel knows.
+// 失败的面板要说明原因，绝不能用 0 代替没有拿到的答案。
 func (s *State) QuickView(c *ui.Context, dark bool) {
 	s.dark = dark
 	panels := s.panelService.List()
@@ -37,8 +31,6 @@ func (s *State) QuickView(c *ui.Context, dark bool) {
 	}
 	for index, listed := range panels {
 		if index > 0 {
-			// Between two blocks, and only there: the line says where one
-			// panel ends, and it keeps the same edge the blocks keep.
 			presentation.QuickDivider(c)
 		}
 		s.panelBlock(c, s.panelService.View(listed.ID))
@@ -47,15 +39,12 @@ func (s *State) QuickView(c *ui.Context, dark bool) {
 
 func (s *State) ProviderMark(id string) presentation.PanelMark { return s.providerMark(id) }
 
-// Block renders one panel chosen by the Shell's layout.
 func (s *State) Block(c *ui.Context, panelID string, dark bool) {
 	s.dark = dark
 	c.Key(panelID)
 	s.panelBlock(c, s.panelService.View(panelID))
 }
 
-// panelBlock draws one panel: the design's room around the block, its head,
-// and what it knows.
 func (s *State) panelBlock(c *ui.Context, view panel.View) {
 	presentation.QuickBlock(c, func() {
 		ui.Column(c).FillWidth().Gap(float32(8)).Children(func() {
@@ -69,11 +58,8 @@ func (s *State) panelBlock(c *ui.Context, view panel.View) {
 	})
 }
 
-// panelHead is a block's first line: the mark of what it is about, its name,
-// and at the right the age of the numbers with the way to fetch them again.
-//
-// A quota block places the account tier beside its name as a badge. The line
-// below holds the window period and reset time, with usage at the far end.
+// panelHead 是区块首行：图标与名称，右侧是数据时间与刷新入口。
+// 额度区块会把账户档位作为徽标放在名称旁，下一行是窗口周期、重置时间与用量。
 func (s *State) panelHead(c *ui.Context, view panel.View) {
 	ui.Column(c).FillWidth().Gap(float32(2)).Children(func() {
 		ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
@@ -112,9 +98,7 @@ func (s *State) panelHead(c *ui.Context, view panel.View) {
 			}
 			ui.Spacer(c)
 			if used != "" {
-				// The same number the bar is drawn from, at the end of the
-				// line it belongs to: a bar alone does not say how much of
-				// it is gone.
+				// 与进度条同源的百分比：单看进度条看不出已经用掉多少。
 				ui.Text(c, used).
 					FontSize(presentation.SizeQuickFine).
 					TextColor(presentation.PanelFaint).
@@ -124,26 +108,17 @@ func (s *State) panelHead(c *ui.Context, view panel.View) {
 	})
 }
 
-// The tile of a block is the provider's own color, and the drawing on it is
-// white: the DeepSeek blue, and the black OpenAI signs its work with. A
-// provider with no color of its own — or no drawing — gets the placeholder
-// pair below instead, so that a block is never one nobody can tell apart.
 var (
 	deepseekBlue = ui.Hex("#4D6BFE")
-	// deepseekBar is the same brand blue, raised for a bar drawn on a dark
-	// page: the tile keeps the provider's own blue, but a bar and the small
-	// number over it are read against the page rather than inside the tile.
+	// deepseekBar 是深色页面上进度条用的同色品牌蓝：进度条与其中的小数字是
+	// 画在页面上、而非瓦片内，因此需要更亮的蓝。
 	deepseekBar = ui.Hex("#7C93FF")
 	codexBlack  = ui.Hex("#111111")
 )
 
-// providerMark is how a block's mark is drawn: the provider's own drawing, the
-// tile it sits on, the color it is drawn in and the color of a bar in that
-// block. The drawings are the application's own assets; the tiles are the
-// providers' own colors, which is what the design sheet draws a block's mark
-// on.
-//
-// A provider without an asset uses the application's neutral gauge placeholder.
+// providerMark 描述区块标记的绘制方式：provider 自己的图形、底瓦色、图形色，
+// 以及该区块内进度条的颜色。图形用应用自带资源，瓦片用 provider 自己的品牌色。
+// 没有资源的 provider 使用应用的中性仪表占位图。
 func (s *State) providerMark(providerID string) presentation.PanelMark {
 	switch providerID {
 	case "deepseek":
@@ -153,8 +128,7 @@ func (s *State) providerMark(providerID string) presentation.PanelMark {
 		}
 		return presentation.PanelMark{SVG: s.deepseekMark, Tile: deepseekBlue, Ink: presentation.ColorOnMark, Bar: bar}
 	case "codex":
-		// The monochrome tile reverses with the theme. The bar is drawn on
-		// the page and keeps its own contrasting ink.
+		// 单色瓦片随主题反转；进度条画在页面上，保留各自对比度合适的墨色。
 		bar := codexBlack
 		if s.dark {
 			bar = presentation.ColorTextSoft
@@ -171,14 +145,11 @@ func (s *State) providerMark(providerID string) presentation.PanelMark {
 	}
 }
 
-// quotaBody draws a quota: the bar and the number it stands for, or — when
-// there is nothing to draw — what to do about it.
+// quotaBody 绘制额度：进度条及其代表的数字，无可绘制内容时给出后续操作。
 //
-// The bar fills with what is *used*, not with what is left: the panel's metric
-// is the remaining share (§7 of the provider contract), and a bar that grows as the
-// window is spent is the one a person reads without thinking. A failure, an
-// empty answer and a window nothing is known about draw no fill at all, which
-// is what keeps "0% used" an answer rather than a missing one.
+// 进度条填充的是「已用」而非「剩余」：面板指标是剩余份额（见 provider 合约 §7），
+// 随窗口消耗而增长的进度条更符合直觉。失败、空结果和未知窗口都不画填充，
+// 这样「已用 0%」是一个答案，而不是缺失的答案。
 func (s *State) quotaBody(c *ui.Context, view panel.View) {
 	switch {
 	case view.NeedsCredentials():
@@ -206,9 +177,7 @@ func (s *State) quotaBody(c *ui.Context, view panel.View) {
 		if known {
 			label = "已用 " + strconv.FormatInt(used, 10) + "%"
 		}
-		// The bar takes the block's own colors: the design draws a bar in
-		// the tint of the block it belongs to, which is how a quota reads as
-		// part of that block rather than as a decoration of the window.
+		// 进度条使用区块自身的颜色，让额度读起来像是该区块的一部分。
 		mark := s.providerMark(view.Panel.ProviderID)
 		presentation.ProgressBar(c, used, mark.Bar, label, "已用额度")
 		windows := readWindows(view)
@@ -227,8 +196,7 @@ func (s *State) quotaBody(c *ui.Context, view panel.View) {
 		}
 	}
 
-	// The bar above stays on screen when a refresh fails: an old answer is
-	// worth more than none, as long as it is labelled as old.
+	// 刷新失败时进度条仍留在屏幕上：旧答案只要标明是旧的，就比没有好。
 	if view.Err != nil && view.HasSnapshot {
 		presentation.Notice(c, presentation.NoteDanger, presentation.FriendlyError(view.Err))
 	}
@@ -277,9 +245,7 @@ func (s *State) deviceLogin(c *ui.Context, view panel.View) {
 	})
 }
 
-// loginAction is the way to the login a quota panel is waiting for: the tool's
-// own login, started in a terminal, or its documentation when it cannot be
-// started here.
+// loginAction 通往额度面板所需的登录：启动该工具自己的登录，或打开其文档。
 func (s *State) loginAction(c *ui.Context, view panel.View) {
 	name := s.providerName(view.Panel.ProviderID)
 	ui.Row(c).FillWidth().Gap(float32(8)).Children(func() {
@@ -295,8 +261,7 @@ func (s *State) loginAction(c *ui.Context, view panel.View) {
 	})
 }
 
-// providerName is what a provider is called, for the words the window puts
-// around an action: the name belongs to the provider rather than to this file.
+// providerName 返回 provider 的显示名，用于界面文案；名称属于 provider 而非本文件。
 func (s *State) providerName(providerID string) string {
 	if descriptor, err := s.panelService.Descriptor(providerID); err == nil && strings.TrimSpace(descriptor.DisplayName) != "" {
 		return descriptor.DisplayName
@@ -304,15 +269,12 @@ func (s *State) providerName(providerID string) string {
 	return "这个数据源"
 }
 
-// startCredentialLogin starts the login a credential comes from, and says what
-// happened: a tool that is not installed, or a platform with no terminal, is
-// reported where the button is rather than swallowed.
+// startCredentialLogin 启动凭据来源的登录，并在按钮处报告结果，
+// 而不是把失败静默吞掉。
 //
-// The work runs off the main thread. Finding a CLI on macOS means asking the
-// user's login shell, which can take a moment; a click handler must return at
-// once and never wait on another process.
-// loginFailure says why a login could not be started, in words that name the
-// service the button was about.
+// 该工作在主线程之外运行：macOS 上查找 CLI 需要询问用户的登录 shell，可能耗时；
+// 点击回调必须立即返回，绝不能等待其它进程。
+// loginFailure 说明登录为何无法启动，措辞指向按钮对应的服务。
 func loginFailure(err error, name string) string {
 	switch {
 	case errors.Is(err, domain.ErrLoginCommandMissing):
@@ -324,10 +286,8 @@ func loginFailure(err error, name string) string {
 	}
 }
 
-// cardNumbers draws what the card knows, and nothing it does not. An empty
-// state — no credential, no snapshot, a failure — says what to do about it
-// instead of drawing numbers; a snapshot is drawn as its headline, and the
-// smaller numbers stay folded away until the user asks for them.
+// cardNumbers 只绘制卡片确实拥有的内容：空状态（无凭据、无快照、失败）给出操作提示
+// 而非数字；有快照时显示其标题指标，较小的数字折叠起来，等用户主动展开。
 func (s *State) cardNumbers(c *ui.Context, view panel.View) {
 	switch {
 	case view.NeedsCredentials():
@@ -349,9 +309,8 @@ func (s *State) cardNumbers(c *ui.Context, view panel.View) {
 		balance(c, view, &s.detailsOpen)
 	}
 
-	// The numbers above stay on screen when a refresh fails: an old answer
-	// is worth more than none, as long as it is labelled as old. The window
-	// says why it failed and offers to try again on the title line.
+	// 刷新失败时数字仍留在屏幕上：旧答案只要标明是旧的，就比没有好；
+	// 标题行会说明失败原因并提供重试。
 	if view.Err != nil && view.HasSnapshot {
 		presentation.Notice(c, presentation.NoteDanger, presentation.FriendlyError(view.Err))
 	}
@@ -360,13 +319,7 @@ func (s *State) cardNumbers(c *ui.Context, view panel.View) {
 	}
 }
 
-// balance draws the panel's numbers: the headline metric, and the rest folded
-// away under it — a panel that shows every number it has is a panel nobody
-// reads at a glance.
-//
-// The design puts the label over the number and the disclosure at the far end
-// of that same row: the label says what the big number is ("总余额"), and the
-// control beside it says there is more behind it.
+// balance 绘制面板的数字：标题指标，其余折叠在其下。
 func balance(c *ui.Context, view panel.View, detailsOpen *bool) {
 	if len(view.Metrics) == 0 {
 		return
@@ -380,8 +333,7 @@ func balance(c *ui.Context, view panel.View, detailsOpen *bool) {
 		})
 	}
 	if len(rows) == 0 {
-		// Nothing to fold away: a disclosure with nothing behind it is a
-		// control that lies.
+		// 没有可折叠的内容：背后空无一物的展开控件就是欺骗用户。
 		detailsOpen = nil
 	}
 
@@ -394,9 +346,6 @@ func balance(c *ui.Context, view panel.View, detailsOpen *bool) {
 	})
 }
 
-// balanceHeadline is the panel's big number with what it is called over it,
-// and at the end of that row the control that opens the rest, when there is a
-// rest to open.
 func balanceHeadline(c *ui.Context, view panel.View, headline domain.Metric, detailsOpen *bool) {
 	ui.Row(c).FillWidth().AlignItems(ui.End).Children(func() {
 		ui.Column(c).Gap(float32(2)).Children(func() {
@@ -413,11 +362,8 @@ func balanceHeadline(c *ui.Context, view panel.View, headline domain.Metric, det
 	})
 }
 
-// balanceNumber is the number itself, and the way to the provider's own page
-// for it when the provider names one: a balance is worth seeing in full where
-// it is kept, and the number is the thing the user is looking at when that
-// thought arrives. It wears a pointer and the brand green under the pointer,
-// so that it is not a hidden action.
+// balanceNumber 显示数字本身；当 provider 提供官网链接时，数字同时是跳转入口。
+// 它带有指针光标与悬停时的品牌绿，让这个动作不至于被忽略。
 func balanceNumber(c *ui.Context, view panel.View, headline domain.Metric) {
 	number := formatMetric(view.Snapshot, headline)
 	if view.UsageURL == "" {
@@ -444,22 +390,14 @@ func balanceNumber(c *ui.Context, view panel.View, headline domain.Metric) {
 		}
 	})
 	if button.Clicked() {
-		// The system opens the link; nothing here waits for it, and a
-		// browser that does not open is not this window's failure.
+		// 由系统打开链接，这里不等待结果；浏览器打不开不是本窗口的失败。
 		c.OpenURL(view.UsageURL)
 	}
 }
 
-// disclosure is a control that opens and closes the rows under a headline: the
-// label and a small chevron, which the pointer, Enter and Space toggle. It is
-// drawn on the row of whatever it discloses rather than above the content it
-// opens, which ui.Collapsible cannot do — its trigger and its panel are one
-// column.
-//
-// The design draws it as a quiet word at the far end of the row: it is the
-// only thing there that can be clicked, and it takes the brand green under the
-// pointer so that it is found without shouting beside the number it belongs
-// to.
+// disclosure 是展开/收起标题下方各行的控件：一个标签加一个小箭头，
+// 指针、Enter 和空格均可切换。它画在被展开内容的同一行上，而不是其上方——
+// ui.Collapsible 做不到这点，因为它的触发器与面板同处一列。
 func disclosure(c *ui.Context, label string, open *bool) {
 	button := ui.ButtonBase(c).Focusable().Cursor(ui.CursorPointer).
 		Role(ui.RoleDisclosure).Expanded(*open).
@@ -485,13 +423,8 @@ func disclosure(c *ui.Context, label string, open *bool) {
 	}
 }
 
-// cardDisclosure is disclosure for the translation card, which reports the
-// click instead of flipping a flag: the card is as tall as what is in it, so
-// whoever opens it has to ask for the frames that measure it again.
-//
-// It is the same control — a chevron and a label on a face of their own — and
-// it is not drawn at the end of a line, so it does not wear the offset the
-// panels' headlines give theirs.
+// cardDisclosure 是翻译卡片用的 disclosure：它上报点击而不翻转标志位，
+// 因为卡片高度随内容变化，展开方需要重新请求测量它的帧。
 func cardDisclosure(c *ui.Context, label string, open bool) bool {
 	button := ui.ButtonBase(c).Focusable().Cursor(ui.CursorPointer).
 		Role(ui.RoleDisclosure).Expanded(open).
@@ -510,8 +443,6 @@ func cardDisclosure(c *ui.Context, label string, open bool) bool {
 	return button.Clicked()
 }
 
-// turn is how far the chevron of a disclosure is turned: pointing right while
-// closed, down while open.
 func turn(open bool) float32 {
 	if open {
 		return 90
@@ -519,12 +450,6 @@ func turn(open bool) float32 {
 	return 0
 }
 
-// disclosureArrow draws a chevron: pointing right, turned by deg degrees
-// clockwise, in the ink of the line it sits on.
-// actionRow puts one action at the left of its own row, where a column's
-// stretching does not turn it into a full-width button. It is a secondary
-// action — the form's main one is the other button beside it — so it keeps
-// the face of one rather than being a word the user has to hunt for.
 func actionRow(c *ui.Context, label string, run func()) {
 	ui.Row(c).FillWidth().Gap(float32(8)).Children(func() {
 		if button := presentation.DesignButton(c, label, presentation.ButtonSecondary); button.Clicked() && run != nil {
@@ -534,9 +459,8 @@ func actionRow(c *ui.Context, label string, run func()) {
 	})
 }
 
-// freshness says how old the numbers are. The design writes the clock alone
-// beside the refresh action; a number from a failed attempt is marked as old
-// in the color of a warning, because the number is still worth more than none.
+// freshness 显示数据有多旧。失败重试留下的数字用警告色标为旧数据，
+// 因为旧数字仍比没有好。
 func freshness(c *ui.Context, view panel.View) {
 	switch {
 	case view.HasSnapshot && view.Stale:
@@ -552,9 +476,6 @@ func freshness(c *ui.Context, view panel.View) {
 	}
 }
 
-// metricRows draws the small numbers under a section's headline: one line
-// each, label on the left and value on the right, close together so that a
-// section stays a section instead of turning into a page.
 func metricRows(c *ui.Context, rows []metricRow) {
 	ui.Column(c).FillWidth().Gap(float32(2)).Children(func() {
 		for _, row := range rows {
@@ -567,15 +488,13 @@ func metricRows(c *ui.Context, rows []metricRow) {
 	})
 }
 
-// metricRow is one line of a section: what a number is, and the number.
 type metricRow struct {
 	label string
 	value string
 }
 
-// formatMetric shows one observation. A metric the snapshot does not have
-// becomes a dash, never a zero: a zero is an answer, a dash is the absence
-// of one.
+// formatMetric 显示一个观测值。快照里没有的指标显示为破折号而非 0：
+// 0 是一个答案，破折号才表示没有答案。
 func formatMetric(snapshot domain.Snapshot, metric domain.Metric) string {
 	observation, ok := snapshot.Observation(metric.Key)
 	if !ok {
@@ -592,7 +511,6 @@ func formatMetric(snapshot domain.Snapshot, metric domain.Metric) string {
 	return kit.FormatMoney(number, currency, metric.Precision)
 }
 
-// clock is the time a snapshot was fetched, as a card shows it.
 func Clock(at time.Time) string {
 	if at.IsZero() {
 		return "—"

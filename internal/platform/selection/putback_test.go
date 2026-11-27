@@ -9,8 +9,6 @@ import (
 	"boku/internal/platform/logonce"
 )
 
-// recordingClipboard is a device that records what was written and can refuse
-// the write, which is the only thing putBack reads.
 type recordingClipboard struct {
 	written []string
 	err     error
@@ -53,8 +51,6 @@ func TestPutBackWritesWhatWasThere(t *testing.T) {
 func TestPutBackDoesNotFailTheReadingWhenTheWriteFails(t *testing.T) {
 	logonce.Reset()
 	device := &recordingClipboard{err: errors.New("剪贴板被占用")}
-	// The point of the test: this returns normally. The reading it belongs to
-	// has already been answered, and an error here has nowhere to go.
 	putBack(context.Background(), device, domain.ClipContent{Kind: domain.ClipKindText, Text: "x"}, nil)
 }
 

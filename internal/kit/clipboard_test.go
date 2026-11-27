@@ -18,7 +18,7 @@ func TestClipContentHashIsStableAndDiscriminating(t *testing.T) {
 	if first == ClipContentHash("hello ") {
 		t.Error("ClipContentHash does not tell two texts apart")
 	}
-	// The digest of the empty string is a digest, not an empty answer.
+	// 空字符串的摘要也是摘要，不是空答案。
 	if got := ClipContentHash(""); !strings.HasPrefix(got, ClipHashPrefix) || len(got) != len(first) {
 		t.Errorf("ClipContentHash(\"\") = %q", got)
 	}
@@ -55,8 +55,7 @@ func TestClipDisplayFoldsWhitespaceAndShortens(t *testing.T) {
 	if runes := []rune(got); len(runes) != ClipDisplayLimit+1 {
 		t.Errorf("ClipDisplay of an over-long value is %d runes, want %d", len(runes), ClipDisplayLimit+1)
 	}
-	// Truncation counts runes, not bytes: a Chinese value of the limit
-	// length is not shortened.
+	// 截断按 rune 计数而非字节：长度恰好达上限的中文值不会被截短。
 	cjk := strings.Repeat("中", ClipDisplayLimit)
 	if got := ClipDisplay(cjk); got != cjk {
 		t.Errorf("ClipDisplay shortened %d CJK runes: %q", ClipDisplayLimit, got)
@@ -123,8 +122,7 @@ func TestClipTextTruncatesToTheLimit(t *testing.T) {
 		t.Errorf("ClipText kept %d bytes, want %d", len(got), domain.MaxClipTextBytes)
 	}
 
-	// The cut lands on a rune boundary: three bytes per rune means the last
-	// rune may only be kept whole.
+	// 切割落在 rune 边界上：每 rune 三字节意味着最后一个 rune 只能整段保留。
 	cjk := strings.Repeat("中", domain.MaxClipTextBytes)
 	cut := ClipText(cjk)
 	if len(cut)%3 != 0 {

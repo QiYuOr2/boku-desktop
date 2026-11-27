@@ -7,18 +7,14 @@ import (
 	preferencesui "boku/internal/preferences/ui"
 )
 
-// This file is the appearance the user chose: light, dark, or following the
-// desktop.
+// 本文件是用户选择的外观：浅色、深色或跟随桌面。
 //
-// It is the one setting the presentation layer owns. The choice is written in
-// settings.json beside the features' own keys, and the look itself lives in
-// design.go: this file decides which palette design.go installs, and tells
-// the desktop so that the windows it draws for Boku — title bars, popover
-// material — are in the same appearance as the page inside them.
+// 它是表现层拥有的唯一设置。选择写在 settings.json 中功能键旁边，外观本身在 design.go 中：
+// 本文件决定 design.go 安装哪套配色，并告知桌面，使 Boku 的窗口（标题栏、popover 材质）
+// 与其中的页面外观一致。
 //
-// The setting is a Section like a feature's own; the store knows nothing about
-// it. "system" is the default, and what an absent or unreadable value means:
-// a user who never chose an appearance gets the one their computer is in.
+// 该设置和功能设置一样是一个 Section；存储对它一无所知。"system" 是默认值，
+// 也是缺失或不可读值的含义：从未选择外观的用户得到其电脑当前所在的外观。
 
 type AppearanceMode = preferences.AppearanceMode
 type Appearance = preferences.Appearance
@@ -32,15 +28,11 @@ const (
 
 const appearanceThemeKey = preferences.ThemeKey
 
-// NewAppearanceSection remains a compatibility constructor while callers
-// migrate to preferences.NewAppearanceSection.
+// NewAppearanceSection 是兼容构造器，调用方正在迁移到 preferences.NewAppearanceSection。
 func NewAppearanceSection() *Appearance { return preferences.NewAppearanceSection() }
 
-// ThemeSource is the appearance to give the desktop. It is what makes the
-// title bar and the menus match the page: Boku draws its own colors, but the
-// window around them is the system's. (The light quick window's popover
-// material follows this too; the dark one does not use a popover at all —
-// see State.Open.)
+// ThemeSource 是交给桌面的外观。它让标题栏和菜单与页面一致：
+// Boku 绘制自己的颜色，但包围它们的窗口是系统的。
 func ThemeSource(mode AppearanceMode) mygo.ThemeSource {
 	switch mode.Normalize() {
 	case AppearanceLight:
@@ -52,25 +44,18 @@ func ThemeSource(mode AppearanceMode) mygo.ThemeSource {
 	}
 }
 
-// PopoverAppearance gives an already-created native popover the dark
-// appearance a forced dark mode draws. It is the one place the presentation
-// knows a platform bridge exists; main supplies the implementation, and nil
-// means the platform has none, in which case forced dark uses the
-// application's card.
+// PopoverAppearance 给已创建的原生 popover 提供强制深色模式所需的深色外观。
+// 这是表现层知道平台桥接存在的唯一地方；main 提供实现，nil 表示平台没有，
+// 此时强制深色使用应用卡片。
 //
-// It is deliberately a single method: when MyGo exposes the popover's own
-// appearance, main replaces (or removes) the implementation and nothing in
-// the views or the state machine changes.
+// 它刻意只有一个方法：当 MyGo 暴露 popover 自身的外观时，main 替换（或移除）实现即可，
+// 视图和状态机都不变。
 type PopoverAppearance interface {
-	// SetDark gives the native window handle the dark appearance and reports
-	// whether it was set.
 	SetDark(window uintptr) bool
 }
 
-// SyncAppearance records what the desktop is doing and repaints every open
-// window. The main function calls it once the application is ready, and again
-// from mygo.Theme.OnUpdated: in the automatic mode, a desktop that turns dark
-// at sunset turns Boku dark with it.
+// SyncAppearance 记录桌面的状态并重绘所有已打开的窗口。main 在应用就绪时调用一次，
+// 并从 mygo.Theme.OnUpdated 再次调用：自动模式下，日落时变深的桌面会让 Boku 随之变深。
 func (s *State) SyncAppearance(systemDark bool) {
 	s.systemDark = systemDark
 	s.dark = s.appearance.Dark(systemDark)
@@ -78,16 +63,12 @@ func (s *State) SyncAppearance(systemDark bool) {
 	s.Refresh()
 }
 
-// syncPopoverAppearance brings the open quick window's carrier in line with
-// the appearance now in force.
+// syncPopoverAppearance 让已打开快捷窗口的载体与当前生效的外观一致。
 //
-// The application's card always repaints with the palette, so it needs
-// nothing. A native popover is the fragile one: 自动 follows the desktop, a
-// forced dark appearance needs the injected dark material, and a forced light
-// appearance cannot use a popover at all (the material would follow a dark
-// desktop) and closes it for the card the next open draws. A popover that
-// was given the injected dark material cannot be returned to the desktop's
-// appearance in place, so switching back to 自动 closes it too.
+// 应用卡片总随配色重绘，无需处理。原生 popover 才是脆弱的一环：自动跟随桌面，
+// 强制深色需要注入深色材质，强制浅色则根本不能用 popover（材质会跟随深色桌面），
+// 需关闭它，由下次打开绘制卡片。已被注入深色材质的 popover 无法就地回到桌面外观，
+// 因此切回自动时也关闭它。
 func (s *State) syncPopoverAppearance() {
 	if s.panel == nil || !s.panelPopover {
 		return
@@ -109,9 +90,8 @@ func (s *State) syncPopoverAppearance() {
 			s.panelInjectedDark = true
 			return
 		}
-		// The popover's native window may be adopted a moment after the
-		// flyout is created. Ask for one more frame and try once there; a
-		// closed or replaced window is left alone by the identity check.
+		// popover 的原生窗口可能在 flyout 创建后稍晚才被接收。再多请求一帧并在此重试；
+		// 已关闭或被替换的窗口由身份检查放过。
 		panel := s.panel
 		panel.Update(func() {
 			if s.panel != panel || !s.panelPopover {
@@ -122,23 +102,19 @@ func (s *State) syncPopoverAppearance() {
 	}
 }
 
-// setAppearance saves the user's choice and puts it on screen at once.
+// setAppearance 保存用户的选择并立即显示在屏幕上。
 //
-// It goes through the store's Update rather than changing the file a step at
-// a time, so that a theme change cannot put back a setting another feature
-// changed in between. A write that fails still changes the appearance for
-// this run and says so under the control: the user asked for it, and a window
-// that ignored the click would be the worse answer.
+// 它走存储的 Update 而非逐步修改文件，使主题变更不会把另一个功能在此期间改动的设置写回。
+// 写入失败仍会在本次运行内改变外观并在控件下方说明：用户要求如此，
+// 忽略点击的窗口是更糟的答复。
 func (s *State) setAppearance(mode AppearanceMode) {
 	mode = mode.Normalize()
 	if s.preferencesUI == nil {
 		s.preferencesUI = preferencesui.New(nil, s.featureHost())
 	}
 	s.preferencesUI.SaveAppearance(s.appearance, s.appearanceStore, mode)
-	// The fixed modes are known here; the automatic one is the desktop's
-	// answer, which the assembly re-reads after it has been told the new
-	// source (SyncAppearance). This is the answer for a state with nothing to
-	// tell, such as a test.
+	// 固定模式在此已知；自动模式是桌面的答复，装配在被告知新来源后会重新读取（SyncAppearance）。
+	// 这里是给无事可告知的状态（例如测试）的答复。
 	s.dark = s.appearance.Dark(s.systemDark)
 	s.syncPopoverAppearance()
 	if s.applyAppearance != nil {

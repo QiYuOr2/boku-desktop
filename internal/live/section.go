@@ -27,7 +27,6 @@ const (
 	InputMicrophone = "microphone"
 )
 
-// Settings is this feature's slice of settings.json.
 type Settings struct {
 	Enabled  bool
 	Input    string
@@ -38,9 +37,8 @@ type Settings struct {
 	Opacity  int
 }
 
-// Defaults is what a file without these keys means. A missing key is not the
-// zero value: the input stays the system audio. Enabled is kept so an old
-// file still round-trips; the window does not read it.
+// Defaults 表示文件缺少这些键时的含义。缺失的键不等于零值：输入保持系统音频。
+// Enabled 保留只是为了旧文件能原样读写，窗口不读它。
 func Defaults() Settings {
 	return Settings{
 		Input:    InputSystem,
@@ -50,13 +48,11 @@ func Defaults() Settings {
 	}
 }
 
-// StoreSettings is the part of the settings file this feature writes through.
 type StoreSettings interface {
 	Load(ctx context.Context) error
 	Update(ctx context.Context, section string, change func() error) error
 }
 
-// Section owns the live keys.
 type Section struct{ current Settings }
 
 func NewSection() *Section { return &Section{current: Defaults()} }

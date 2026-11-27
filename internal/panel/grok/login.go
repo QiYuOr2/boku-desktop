@@ -1,5 +1,5 @@
-// This file logs in with xAI's public device code and keeps the tokens in
-// Boku's own secret store. It does not read or write the Grok CLI's files.
+// 本文件用 xAI 的公开设备码登录，并把 token 存进 Boku 自己的机密存储；
+// 不读写 Grok CLI 的文件。
 package grok
 
 import (
@@ -19,15 +19,14 @@ import (
 
 const refreshSkew = 5 * time.Minute
 
-// SecretStore is the part of the credential service this login needs.
-// The credential package implements it; this package does not import it.
+// SecretStore 是本次登录所需的凭据服务子集；credential 包实现它，本包不 import 它。
 type SecretStore interface {
 	Get(ctx context.Context, providerID, credentialKey string) (string, error)
 	Set(ctx context.Context, providerID, credentialKey, value string) error
 	Delete(ctx context.Context, providerID, credentialKey string) error
 }
 
-// LoginOptions configures a Login. The zero value talks to xAI itself.
+// LoginOptions 配置 Login；零值指向 xAI 正式地址。
 type LoginOptions struct {
 	Client         *httpc.Client
 	Secrets        SecretStore
@@ -37,8 +36,7 @@ type LoginOptions struct {
 	Pause          func(context.Context, time.Duration) error
 }
 
-// Login is the credential source for the Grok panel. It is safe to use from
-// several goroutines.
+// Login 是 Grok 面板的凭据来源，可被多个 goroutine 安全使用。
 type Login struct {
 	client         *httpc.Client
 	secrets        SecretStore
@@ -62,7 +60,7 @@ type deviceAuthorization struct {
 	deadline   time.Time
 }
 
-// NewLogin returns the login source.
+// NewLogin 返回登录来源。
 func NewLogin(opts LoginOptions) *Login {
 	client := opts.Client
 	if client == nil {
@@ -103,12 +101,10 @@ func NewLogin(opts LoginOptions) *Login {
 	}
 }
 
-// ProviderID is the provider this source supplies.
 func (l *Login) ProviderID() string { return ProviderID }
 
-// Remember reads whether a login is already stored. The window asks this
-// once, at startup, and then trusts the memory flag. A stored pair is a
-// login; a missing one is the ordinary signed-out state.
+// Remember 读取是否已保存登录。窗口启动时只读一次，之后信任内存标志：
+// 存有 token 对即为已登录，缺失即普通的未登录状态。
 func (l *Login) Remember(ctx context.Context) error {
 	_, _, err := l.tokens(ctx)
 	if err != nil {
@@ -118,16 +114,14 @@ func (l *Login) Remember(ctx context.Context) error {
 	return nil
 }
 
-// LoggedIn reports the memory flag Remember, a completed login, or a logout
-// last set. It does not read the disk.
+// LoggedIn 返回内存标志（由 Remember、完成的登录或登出设置），不读磁盘。
 func (l *Login) LoggedIn() bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.loggedIn
 }
 
-// Credentials returns a usable access token, refreshing it first when its
-// own expiry is inside the skew.
+// Credentials 返回可用的 access token；其自身过期时间落在偏差窗口内时先刷新。
 func (l *Login) Credentials(ctx context.Context) (domain.Credentials, error) {
 	access, refresh, err := l.tokens(ctx)
 	if err != nil {
@@ -140,9 +134,8 @@ func (l *Login) Credentials(ctx context.Context) (domain.Credentials, error) {
 	return l.creds(access), nil
 }
 
-// RefreshCredentials exchanges the refresh token even when the access token
-// still looks alive. The panel calls it after the billing endpoint refuses
-// the access token.
+// RefreshCredentials 即使 access token 看起来仍有效也用 refresh token 换取新 token；
+// 面板在账单端点拒绝该 access token 后调用它。
 func (l *Login) RefreshCredentials(ctx context.Context) (domain.Credentials, error) {
 	_, refresh, err := l.tokens(ctx)
 	if err != nil {
@@ -151,8 +144,7 @@ func (l *Login) RefreshCredentials(ctx context.Context) (domain.Credentials, err
 	return l.refresh(ctx, refresh)
 }
 
-// BeginDeviceLogin asks xAI for a code the user can type. The device code
-// itself stays here.
+// BeginDeviceLogin 向 xAI 申请一个供用户输入的设备码；设备码本身留在本地。
 func (l *Login) BeginDeviceLogin(ctx context.Context) (domain.DevicePrompt, error) {
 	auth, err := l.requestDeviceCode(ctx)
 	if err != nil {
@@ -170,8 +162,7 @@ func (l *Login) BeginDeviceLogin(ctx context.Context) (domain.DevicePrompt, erro
 	return domain.DevicePrompt{UserCode: auth.userCode, VerificationURL: auth.url}, nil
 }
 
-// FinishDeviceLogin waits until the user finishes, the code expires, or the
-// login is cancelled.
+// FinishDeviceLogin 等待用户完成、设备码过期或登录被取消。
 func (l *Login) FinishDeviceLogin(ctx context.Context) error {
 	l.mu.Lock()
 	pending := l.pending
@@ -220,7 +211,7 @@ func (l *Login) FinishDeviceLogin(ctx context.Context) error {
 	}
 }
 
-// CancelDeviceLogin stops a login that is still waiting.
+// CancelDeviceLogin 停止仍在等待的登录。
 func (l *Login) CancelDeviceLogin() {
 	l.mu.Lock()
 	cancel := l.cancel
@@ -231,7 +222,7 @@ func (l *Login) CancelDeviceLogin() {
 	l.clearPending()
 }
 
-// Logout deletes the stored tokens.
+// Logout 删除已保存的 token。
 func (l *Login) Logout(ctx context.Context) error {
 	l.CancelDeviceLogin()
 	var err error
@@ -456,8 +447,7 @@ func badForm(endpoint string, result domain.FetchResult, reason string) error {
 	}
 }
 
-// flexible reads a JSON number or a numeric string. The device-code answer
-// has used both.
+// flexible 读取 JSON 数字或数字字符串；设备码响应两种都出现过。
 type flexible struct {
 	value float64
 	set   bool

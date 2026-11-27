@@ -1,0 +1,6 @@
+{
+  "code": 200,
+  "success": 0,
+  "errordetail": "NoChannel",
+  "errmsg": "device offline"
+}

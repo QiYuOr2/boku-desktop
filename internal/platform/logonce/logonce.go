@@ -1,40 +1,24 @@
-// Package logonce keeps a repeated log line from filling the file.
+// Package logonce 抑制重复日志，避免每帧都记录同一条错误把文件写满。
 //
-// A failure that is noticed every frame — a shortcut that will not register,
-// a clipboard write the system refuses — would otherwise write one record per
-// frame, turning a small problem into a large file and a busy disk. This
-// remembers the last record for each key and drops a repeat, so the first time
-// is written and the same thing happening again is not.
+// 判重只看消息内容而非时间：同一条记录无论间隔多短都算同一件事，只有直接重复才被丢弃；
+// 同一个 key 下换成不同的错误视为新事实，照常写出。
 //
-// The rule is deliberately about the message and not about time: an identical
-// record is the same fact, whether it happens twice in a millisecond or twice
-// in an hour. A different error under the same key is a new fact and is
-// written.
-//
-// It is a package of its own rather than a helper in the logging package,
-// because the logging package is imported only by main.go (AGENTS.md): every
-// other layer logs through the standard library's slog, and it would have to
-// import main's way of reaching the file to get this. Here it depends on
-// nothing but the standard library, which is what lets any layer use it — and
-// the logging package itself must not, or a log that cannot be written would
-// try to write about it.
+// 单独成包而非放进 logging 包：logging 包只被 main.go 引用，其它层都走标准库 slog；
+// 这里只依赖标准库，因此任何层都能用，而 logging 包自身不能用它。
 package logonce
 
 import "sync"
 
-// seen holds the last record written under each key. A key is a short,
-// fixed string the caller chooses — the name of the call site, not the error,
-// so that every different failure of one call site replaces the one before.
+// seen 记录每个 key 上次写出的消息。key 是调用方给定的固定短串（调用点名称，而非错误），
+// 因此同一调用点的不同失败会相互替换。
 var (
 	mu   sync.Mutex
 	seen = map[string]string{}
 )
 
-// Should reports whether key's message has changed since the last call, and
-// remembers it. It is safe to call from several goroutines.
+// Should 返回 key 的消息是否与上次不同并记住它；可被多个 goroutine 并发调用。
 //
-// A key that is written again after a different message — because the failure
-// changed — is written again: what is dropped is the exact repetition.
+// 同一 key 消息变了（失败变了）会重新写出，只丢弃完全相同的重复。
 func Should(key, message string) bool {
 	mu.Lock()
 	defer mu.Unlock()
@@ -45,18 +29,15 @@ func Should(key, message string) bool {
 	return true
 }
 
-// Forget makes the next call for key write, whatever it says. It is for the
-// caller that knows the situation resolved — a shortcut that registered, a
-// clipboard that accepted a write — so that the same failure happening later
-// is reported again rather than swallowed as a repeat.
+// Forget 让 key 下次调用必定写出。用于调用方确认问题已解决（快捷键注册成功、
+// 剪贴板写入成功）时，使之后再出现的同一失败重新上报，而不是被当成重复吞掉。
 func Forget(key string) {
 	mu.Lock()
 	defer mu.Unlock()
 	delete(seen, key)
 }
 
-// Reset forgets every key. It is for tests, so that one case does not decide
-// what another one sees.
+// Reset 清空所有 key，仅供测试使用。
 func Reset() {
 	mu.Lock()
 	defer mu.Unlock()

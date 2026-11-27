@@ -7,21 +7,8 @@ import (
 	"time"
 )
 
-// Translation is the second kind of third-party work Boku does, next to
-// fetching a panel: the user selects text somewhere, and an answer comes
-// back. It is deliberately not a Provider: a provider hands over a raw
-// payload for an adapter to interpret, while a translator answers in the
-// domain's own words — there is nothing between the two that an adapter
-// could decide.
-//
-// The vendor's field names live in internal/data/providers/translate/<id>,
-// never here: this file knows text, languages and segments, and nothing
-// about chat completions.
-
-// Language is a language the tool can name, as a two-letter code: "zh",
-// "ja", "en", "ko", "ru", "ar", "th". An empty Language means "not known":
-// a request without a source language asks the translator to detect one, and
-// a result that names none has not been classified.
+// Language 是工具可命名的语言，用两字母代码表示。空值表示“未知”：请求不带源语言
+// 即交给翻译器检测；结果未命名语言则表示尚未分类。
 type Language string
 
 const (
@@ -35,8 +22,7 @@ const (
 	LangThai     Language = "th"
 )
 
-// translationLanguages is the set a stored or detected code may be, so that
-// a value from a settings file or a model's answer can be rejected cheaply.
+// translationLanguages 是允许的代码集合，用于廉价地拒绝设置文件或模型返回的非法值。
 var translationLanguages = map[Language]string{
 	LangChinese:  "中文",
 	LangEnglish:  "English",
@@ -47,15 +33,13 @@ var translationLanguages = map[Language]string{
 	LangThai:     "ไทย",
 }
 
-// Valid reports whether the code is one the application knows.
 func (l Language) Valid() bool {
 	_, ok := translationLanguages[l]
 	return ok
 }
 
-// Name is what the interface calls the language, in the language's own
-// words. A code nobody knows is named by itself, so a translator may answer
-// with a language this build has no word for without the window going blank.
+// Name 返回界面显示的语言名，用该语言自身的写法。未知代码回退为代码本身，
+// 以免翻译器返回本版本不认识的语音时窗口空白。
 func (l Language) Name() string {
 	if name, ok := translationLanguages[l]; ok {
 		return name
@@ -63,42 +47,28 @@ func (l Language) Name() string {
 	return string(l)
 }
 
-// TranslationRequest is what to translate, from what, and into what.
 type TranslationRequest struct {
 	Text string
-	// SourceLang is what the caller already knows, and is empty when the
-	// caller wants the translator to detect it.
+	// SourceLang 是调用方已知的源语言；为空时要求翻译器自行检测。
 	SourceLang Language
-	// TargetLang is required: a request that does not say what language it
-	// wants is a request nobody can answer.
+	// TargetLang 必填：不说明目标语言的请求无法处理。
 	TargetLang Language
-	// Annotation is how much more than a translation to ask for. It is the
-	// caller's choice rather than the translator's, because it is the
-	// user's: the translator says what it can provide, and the settings say
-	// whether to ask.
+	// Annotation 是翻译之外额外要求的内容，由调用方按用户设置决定。
 	Annotation AnnotationOptions
 }
 
-// AnnotationOptions is what to ask the translator for beyond a translation:
-// the reading of each word, and the word a loanword came from.
-//
-// Both are about Japanese, which is why they live here rather than in a
-// provider: a translator that cannot annotate ignores them and answers with
-// the translation alone.
+// AnnotationOptions 是翻译之外可选要求的内容：逐词读音与外来词的原词。二者都针对
+// 日语；不支持标注的翻译器会忽略它们，只返回译文。
 type AnnotationOptions struct {
-	// Furigana asks for the reading of Japanese kanji, written in kana.
+	// Furigana 要求给出日语汉字的假名读音。
 	Furigana bool
-	// LoanwordGloss asks for the English word a katakana loanword came
-	// from.
+	// LoanwordGloss 要求给出片假名外来词对应的英文原词。
 	LoanwordGloss bool
 }
 
-// Wants reports whether anything beyond a translation was asked for.
 func (o AnnotationOptions) Wants() bool { return o.Furigana || o.LoanwordGloss }
 
-// Validate reports what is missing from the request. It runs before any
-// request is made: text that is not there, or a target that is not named, is
-// a caller's mistake rather than a service's failure.
+// Validate 在发起请求前检查缺项：缺文本或缺目标语言属于调用方错误，而非服务失败。
 func (r TranslationRequest) Validate() error {
 	if strings.TrimSpace(r.Text) == "" {
 		return fmt.Errorf("%w: there is no text to translate", ErrInvalidArgument)
@@ -112,31 +82,19 @@ func (r TranslationRequest) Validate() error {
 	return nil
 }
 
-// Segment is one word or one run of the source text, with what the
-// translator could say about it: how it is read, and — for a loanword
-// written in katakana — which word it came from.
-//
-// The three are separate because the interface draws them as separate lines:
-// a reading above the word, the word itself, and the loanword spelled out in
-// the same place the reading would be. Everything is optional: a translator
-// that can say nothing about a word still hands the word over, and the
-// window draws it on one line.
+// Segment 是源文本中的一个词或片段，及其可标注的信息：读音，以及片假名外来词的来源词。
+// 各字段均可选；翻译器对某词无所说时仍交出该词。
 type Segment struct {
-	// Text is the piece of the source text, as it is written.
+	// Text 是源文本片段本身。
 	Text string
-	// Reading is how it is read, in kana for Japanese. Empty when the
-	// translator has none.
+	// Reading 是读音（日语为假名）；翻译器未提供时为空。
 	Reading string
-	// Gloss is the word the piece came from, for a loanword written in
-	// katakana: コンパイラ → compiler.
+	// Gloss 是片假名外来词的来源词，如 コンパイラ → compiler。
 	Gloss string
-	// Target is this piece's own translation, when the translator gives
-	// one per piece. When no piece has one, the whole translated text is
-	// used instead.
+	// Target 是该片段自身的译文；若所有片段都无译文，则使用整体译文。
 	Target string
 }
 
-// Validate reports whether the segment says anything at all.
 func (s Segment) Validate() error {
 	if strings.TrimSpace(s.Text) == "" {
 		return fmt.Errorf("%w: a segment has no text", ErrInvalidArgument)
@@ -144,31 +102,21 @@ func (s Segment) Validate() error {
 	return nil
 }
 
-// TranslationResult is one answer, in the shape the window draws: the source
-// text, the translation, the languages, and — when the translator could give
-// them — the piece-by-piece readings.
 type TranslationResult struct {
 	SourceText     string
 	TranslatedText string
-	// SourceLang is what the translator decided the text is, which is the
-	// answer when the request did not name one.
+	// SourceLang 是翻译器判定的源语言；请求未指定源语言时即为检测结果。
 	SourceLang Language
 	TargetLang Language
 	ProviderID string
-	// Segments is the piece-by-piece annotation, empty when the translator
-	// gives none: the window then draws the source as one line and the
-	// translation as one paragraph.
+	// Segments 是逐片段标注；为空表示翻译器不提供，此时按整体处理。
 	Segments []Segment
-	// Note is what the translator noticed about the answer that the user
-	// should know: text that had to be shortened, pieces it could not
-	// annotate. It is empty when the answer was complete.
+	// Note 是翻译器对答案的提醒（被截短的文本、无法标注的片段）；答案完整时为空。
 	Note      string
 	CreatedAt time.Time
 }
 
-// Validate reports whether the result is an answer at all. It is checked at
-// the boundary, so that a translator which answers with nothing becomes a
-// visible failure instead of an empty window.
+// Validate 在边界处检查结果是否是有效答案，把空答案变成可见失败而非空白窗口。
 func (r TranslationResult) Validate() error {
 	if strings.TrimSpace(r.SourceText) == "" {
 		return fmt.Errorf("%w: the translation has no source text", ErrProviderBadResponse)
@@ -190,8 +138,7 @@ func (r TranslationResult) Validate() error {
 	return nil
 }
 
-// Annotated reports whether the result carries more than the text: whether
-// there is a piece-by-piece reading to draw.
+// Annotated 报告结果除文本外是否带有逐片段读音。
 func (r TranslationResult) Annotated() bool {
 	for _, segment := range r.Segments {
 		if segment.Reading != "" || segment.Gloss != "" {
@@ -201,36 +148,24 @@ func (r TranslationResult) Annotated() bool {
 	return false
 }
 
-// TranslatorDescriptor says what a translator is called, what it needs, and
-// where the user gets it.
 type TranslatorDescriptor struct {
 	ID          string
 	DisplayName string
-	// CredentialKeys are the secrets the translator needs, without the
-	// provider prefix, such as "apiKey".
+	// CredentialKeys 是翻译器所需的凭据 key（不含 provider 前缀），如 "apiKey"。
 	CredentialKeys []string
-	// DocsURL is where the user gets a credential, or the service's own
-	// page when it needs none.
+	// DocsURL 是获取凭据的页面；无需凭据时为服务自身页面。
 	DocsURL string
-	// Endpoint is the address asked with the settings as they are now, so
-	// that the interface can show where the text is going. It is empty for
-	// a translator whose address is not configured yet.
+	// Endpoint 是按当前设置实际请求的地址；未配置地址时为空。
 	Endpoint string
-	// BaseURLSetting names the setting that holds the address, for a
-	// translator the user points at a service of their own. It is empty
-	// for a translator with a fixed address.
+	// BaseURLSetting 指向保存地址的设置键，适用于用户指向自有服务的翻译器；固定地址时为空。
 	BaseURLSetting string
-	// AllowEmptyCredential is set by a translator that works without one:
-	// a local service the user runs themselves.
+	// AllowEmptyCredential 由无需凭据的本地服务翻译器设置。
 	AllowEmptyCredential bool
-	// SupportsImage says this translator can return both recognized text and
-	// its translation from an image.
+	// SupportsImage 表示该翻译器可从图片同时返回识别文本与译文。
 	SupportsImage bool
 }
 
-// Validate reports what is missing from the descriptor. The assembly checks
-// it at startup, where a translator nobody can configure is a mistake worth
-// failing on rather than a window that says nothing.
+// Validate 检查描述符缺项，装配时在启动阶段调用：配置不了的翻译器应启动失败。
 func (d TranslatorDescriptor) Validate() error {
 	if strings.TrimSpace(d.ID) == "" {
 		return fmt.Errorf("%w: a translator has no id", ErrInvalidArgument)
@@ -254,16 +189,14 @@ func (d TranslatorDescriptor) Validate() error {
 	if strings.TrimSpace(d.DocsURL) == "" {
 		return fmt.Errorf("%w: translator %s does not say where to get credentials", ErrInvalidArgument, d.ID)
 	}
-	// An address is either fixed or named as a setting: a translator with
-	// neither has nowhere to send the text.
+	// 地址要么固定要么由设置提供，两者皆无则无处发送文本。
 	if strings.TrimSpace(d.Endpoint) == "" && strings.TrimSpace(d.BaseURLSetting) == "" {
 		return fmt.Errorf("%w: translator %s does not say where it asks", ErrInvalidArgument, d.ID)
 	}
 	return nil
 }
 
-// NeedsCredential reports whether the translator can be used at all without
-// the named credential.
+// NeedsCredential 报告缺少指定凭据时翻译器是否无法使用。
 func (d TranslatorDescriptor) NeedsCredential(key string) bool {
 	if d.AllowEmptyCredential {
 		return false
@@ -276,28 +209,23 @@ func (d TranslatorDescriptor) NeedsCredential(key string) bool {
 	return false
 }
 
-// Translator turns text into another language. It does HTTP and error
-// translation, and it knows nothing about windows or panels.
+// Translator 将文本翻译为另一种语言，负责 HTTP 与错误翻译，不涉及窗口或面板。
 type Translator interface {
 	ID() string
 	Descriptor() TranslatorDescriptor
 	Translate(ctx context.Context, creds Credentials, req TranslationRequest) (TranslationResult, error)
 }
 
-// ImageTranslator is an optional extension for translators that accept image
-// bytes directly. The feature intentionally does no local OCR.
+// ImageTranslator 是可选扩展，供直接接受图片字节的翻译器实现；本功能刻意不做本地 OCR。
 type ImageTranslator interface {
 	TranslateImage(ctx context.Context, creds Credentials, image []byte, target Language) (TranslationResult, error)
 }
 
-// TranslatorRegistry is a use case's view of the registered translators: it
-// looks one up by id and never knows which ones exist. The registry that
-// implements it lives in internal/data; a use case depends on this
-// interface, not on that package.
+// TranslatorRegistry 是用例视角的已注册翻译器集合：按 id 查找，不关心存在哪些。
+// 具体实现在 internal/data；用例只依赖本接口，不依赖该包。
 type TranslatorRegistry interface {
-	// Translator returns the translator registered under an id, or
-	// ErrProviderNotFound.
+	// Translator 返回以 id 注册的翻译器，不存在时返回 ErrProviderNotFound。
 	Translator(id string) (Translator, error)
-	// TranslatorIDs returns the registered ids, sorted.
+	// TranslatorIDs 返回已排序的注册 id。
 	TranslatorIDs() []string
 }

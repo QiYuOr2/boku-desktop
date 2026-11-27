@@ -1,9 +1,7 @@
-// Package proc lists processes for the playtime recorder.
+// Package proc 为游玩时长记录器列举进程。
 //
-// The statistics themselves do not live here. This package only asks the
-// operating system who is running, when that process was created, and, on
-// Windows, when it exits. Other systems have no implementation: the recorder
-// stays quiet there instead of inventing a session.
+// 本包不存放统计数据，只向操作系统询问谁在运行、进程创建时间，以及在
+// Windows 上进程何时退出。其它系统无实现：记录器保持安静，不虚构会话。
 package proc
 
 import (
@@ -11,12 +9,10 @@ import (
 	"time"
 )
 
-// ErrUnsupported is returned where the operating system cannot supply the
-// snapshot the recorder needs.
+// ErrUnsupported 在操作系统无法提供记录器所需的快照时返回。
 var ErrUnsupported = errors.New("process snapshots are only available on windows")
 
-// Process is one running process. Exe is empty when the process could not be
-// opened; Name is still the file name from the process list.
+// Process 是一个运行中的进程。进程无法打开时 Exe 为空；Name 仍是进程列表里的文件名。
 type Process struct {
 	PID       int
 	PPID      int
@@ -25,15 +21,14 @@ type Process struct {
 	CreatedAt time.Time
 }
 
-// Clocks is time since boot. Awake does not include sleep. Biased does.
-// The recorder uses the difference to cut a session when the machine slept,
-// instead of counting the hours the lid was closed.
+// Clocks 是开机以来的时间。Awake 不含休眠，Biased 包含。
+// 记录器用两者之差在机器休眠时切断会话，而不是把合盖的小时也算进去。
 type Clocks struct {
 	Awake  time.Duration
 	Biased time.Duration
 }
 
-// Exit is the moment a watched process left, as wall time.
+// Exit 是被监视进程退出的时刻，按墙上时间表示。
 type Exit struct {
 	PID       int
 	CreatedAt time.Time

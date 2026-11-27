@@ -14,19 +14,15 @@ import (
 	"boku/internal/domain"
 )
 
-// The translate service is the tool's rules: which translator is used, what
-// happens when nothing is configured, which language a text goes into, and
-// what the user's own service was configured with. It is tested over fakes,
-// with no network and no window.
+// translate 服务是工具的规则：用哪个翻译器、什么都没配时如何、文本翻成哪种语言，
+// 以及用户自有服务配置了什么。它在 fake 上测试，无网络也无窗口。
 
-// fakeTranslator is a translator whose answer the test decides.
+// fakeTranslator 是答案由测试决定的翻译器。
 type fakeTranslator struct {
 	id         string
 	descriptor domain.TranslatorDescriptor
-	// baseURL is where a translator the user points at their own service
-	// reads its address from, when the descriptor says the address is a
-	// setting. The real one reads the same settings, and the use case must
-	// not be able to tell the difference.
+	// baseURL 是翻译器指向用户自有服务时读取地址的来源（当描述符说地址是设置）。
+	// 真实实现读同一份设置，用例必须分辨不出差别。
 	baseURL func() string
 
 	mu       sync.Mutex
@@ -63,8 +59,7 @@ func (f *fakeTranslator) ID() string { return f.id }
 func (f *fakeTranslator) Descriptor() domain.TranslatorDescriptor {
 	descriptor := f.descriptor
 	if descriptor.BaseURLSetting != "" && f.baseURL != nil {
-		// The address is computed from the settings the way the real
-		// translator computes it.
+		// 地址按真实翻译器的方式从设置计算得出。
 		if base := f.baseURL(); base != "" {
 			descriptor.Endpoint = base + "/chat/completions"
 		}
@@ -130,7 +125,7 @@ func (f *fakeTranslator) hold() chan struct{} {
 	return f.gate
 }
 
-// fakeTranslators is a domain.TranslatorRegistry over the fakes.
+// fakeTranslators 是基于 fake 的 domain.TranslatorRegistry。
 type fakeTranslators struct {
 	byID map[string]*fakeTranslator
 }
@@ -151,10 +146,8 @@ func (r *fakeTranslators) Translator(id string) (domain.Translator, error) {
 	return reply, nil
 }
 
-// TranslatorIDs returns the registered ids, sorted, exactly as the real
-// registry does: the settings window draws its rows in this order, and a fake
-// that handed them back in map order would let a test pass while the shipped
-// list rearranged itself between frames.
+// TranslatorIDs 返回按序排好的已注册 id，与真实注册表完全一致：设置窗口按此顺序
+// 绘制行，而按 map 顺序返回的 fake 会让测试通过，实际列表却在帧间自行重排。
 func (r *fakeTranslators) TranslatorIDs() []string {
 	ids := make([]string, 0, len(r.byID))
 	for id := range r.byID {
@@ -164,8 +157,7 @@ func (r *fakeTranslators) TranslatorIDs() []string {
 	return ids
 }
 
-// translateFixture is the service over the fakes, with the credential store
-// and the settings a test may look at.
+// translateFixture 是在 fake 上构建的服务，附带凭据存储与测试可查看的设置。
 type translateFixture struct {
 	translate *Translate
 	device    *fakeDevice
@@ -179,8 +171,7 @@ type translateFixture struct {
 	clock     *testClock
 }
 
-// fakeSelection is the platform's answer to what is selected, which a test
-// decides: the text, nothing, or a platform that cannot say.
+// fakeSelection 是平台对「选中了什么」的回答，由测试决定：文本、空、或平台无法作答。
 type fakeSelection struct {
 	mu     sync.Mutex
 	text   string
@@ -200,15 +191,14 @@ func (s *fakeSelection) SelectedText(context.Context) (string, error) {
 	return text, err
 }
 
-// asks is how many times the platform was asked what is selected.
+// asks 是平台被问及选中内容的次数。
 func (s *fakeSelection) asks() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.asked
 }
 
-// newTranslate builds the fixture with a key already stored for deepseek,
-// which is the state a user reaches after configuring the panel.
+// newTranslate 构建 fixture，其中已为 deepseek 存好 key，即用户配置完面板后到达的状态。
 func newTranslate(t *testing.T) *translateFixture {
 	t.Helper()
 	deepseek := newFakeTranslator("deepseek", "DeepSeek")
@@ -216,9 +206,8 @@ func newTranslate(t *testing.T) *translateFixture {
 	customReply.descriptor.BaseURLSetting = "custom.baseURL"
 	customReply.descriptor.Endpoint = ""
 	customReply.descriptor.AllowEmptyCredential = true
-	// The free engines: what a fresh installation starts on, and what these
-	// tests therefore have to cover the way the shipped build has it — two
-	// translators that ask for no credential at all.
+	// 免费引擎：全新安装的起始状态，因此这些测试必须像正式构建那样覆盖它们——
+	// 两个不需要任何凭据的翻译器。
 	microsoft := newFakeTranslator(contractfree.MicrosoftEdge, "微软 Edge 翻译")
 	microsoft.descriptor.AllowEmptyCredential = true
 	microsoft.descriptor.DocsURL = "https://example.com/free"
@@ -229,11 +218,10 @@ func newTranslate(t *testing.T) *translateFixture {
 	bilibili.descriptor.Endpoint = "index-translate.bilibili.com/v1/chat/completions"
 
 	device := &fakeDevice{}
-	// The settings start as a fresh installation has them: the store fills
-	// the translation defaults in when the file has no such key, so the fake
-	// stands in for a store that has already been read once.
+	// 设置从全新安装的样子开始：文件没有该键时存储会填入翻译默认值，
+	// 所以这个 fake 充当已读过一次的存储。
 	tools := newFakeTools()
-	// The user's own translator reads its address from those settings.
+	// 用户自有的翻译器从这些设置读取地址。
 	customReply.baseURL = func() string {
 		service, _ := tools.section.Current().CustomService(customReply.id)
 		return service.BaseURL
@@ -271,11 +259,9 @@ func newTranslate(t *testing.T) *translateFixture {
 	}
 }
 
-// useDeepSeek picks the paid translator, which is the state a user reaches
-// after configuring their own key. The tests that are about credentials, or
-// about a service that fails, are about that translator and say so: the
-// default is a free engine, and a test that assumed otherwise would be
-// testing the wrong thing.
+// useDeepSeek 选用付费翻译器，即用户配置了自己的 key 后到达的状态。关于凭据、
+// 或关于失败服务的测试都针对该翻译器并明说：默认是免费引擎，假设相反的测试
+// 就是在测错的东西。
 func useDeepSeek(t *testing.T, f *translateFixture) {
 	t.Helper()
 	if err := f.translate.SetProvider(context.Background(), "deepseek"); err != nil {
@@ -283,8 +269,7 @@ func useDeepSeek(t *testing.T, f *translateFixture) {
 	}
 }
 
-// source reads what the user chose, the way the window does before the card
-// takes the keyboard: the platform first, the clipboard when it cannot say.
+// source 读取用户所选的内容，方式同窗口在卡片接管键盘前：先问平台，平台答不了时问剪贴板。
 func source(t *testing.T, f *translateFixture) string {
 	t.Helper()
 	text, err := f.translate.Source(context.Background())
@@ -320,16 +305,14 @@ func TestTranslateNormal(t *testing.T) {
 	if f.deepseek.count() != 1 {
 		t.Errorf("the translator was asked %d times", f.deepseek.count())
 	}
-	// The clipboard answers once, and once only: the read that comes before
-	// the request. The request itself asks no device anything.
+	// 剪贴板只回答一次，且仅一次：请求前的那次读取。请求本身不向任何设备发问。
 	if f.device.readCount() != 1 {
 		t.Errorf("the clipboard was read %d times", f.device.readCount())
 	}
 }
 
-// What the user has selected is what the tool translates: the platform is
-// asked first, and the clipboard — which holds what was copied last, and may
-// be something else entirely — is not consulted at all when it can answer.
+// 用户选中的内容就是要翻译的内容：先问平台，而剪贴板——存着最后一次复制的内容，
+// 可能完全是别的东西——在平台能作答时完全不查。
 func TestSourcePrefersTheSelection(t *testing.T) {
 	f := newTranslate(t)
 	f.device.set(textReading("what was copied an hour ago"))
@@ -346,10 +329,8 @@ func TestSourcePrefersTheSelection(t *testing.T) {
 	}
 }
 
-// A platform that cannot say what is selected, one that says nothing is
-// selected, one whose call failed and a build with no such device at all are
-// the same thing to the user: the clipboard answers, as it did before there
-// was a selection to read.
+// 无法说明选中内容的平台、说没有选中任何东西的、调用失败的，以及根本没有该设备的
+// 构建，对用户而言都是同一件事：由剪贴板作答，如同还没有可读选中内容时那样。
 func TestSourceFallsBackToTheClipboard(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -384,9 +365,8 @@ func TestSourceFallsBackToTheClipboard(t *testing.T) {
 	}
 }
 
-// A clipboard that cannot be read at all is a fault rather than an empty
-// answer: the window shows it, rather than telling the user to copy something
-// they may already have copied.
+// 完全无法读取的剪贴板是故障而非空答案：窗口显示故障，而不是让用户去复制可能
+// 早已复制过的东西。
 func TestSourceReportsAClipboardThatCannotBeRead(t *testing.T) {
 	f := newTranslate(t)
 	f.device.fail(errors.New("the clipboard is held by another application"))
@@ -395,8 +375,7 @@ func TestSourceReportsAClipboardThatCannotBeRead(t *testing.T) {
 	}
 }
 
-// A request that carries its own text asks the platform nothing: the text the
-// caller has is the text to translate.
+// 自带文本的请求不向平台发问：调用者手上的文本就是要翻译的文本。
 func TestTranslateDoesNotAskForASelectionWithItsOwnText(t *testing.T) {
 	f := newTranslate(t)
 	useDeepSeek(t, f)
@@ -411,8 +390,7 @@ func TestTranslateDoesNotAskForASelectionWithItsOwnText(t *testing.T) {
 	}
 }
 
-// A Chinese selection is translated into English rather than being a dead
-// end, and the language is decided from the text itself.
+// 中文选中内容被翻成英语，而不是走进死胡同；语言由文本本身决定。
 func TestTranslatePicksTheTargetFromTheSource(t *testing.T) {
 	f := newTranslate(t)
 	useDeepSeek(t, f)
@@ -431,15 +409,14 @@ func TestTranslatePicksTheTargetFromTheSource(t *testing.T) {
 	}
 }
 
-// The annotation is asked for by the request that wants it, and by no other:
-// the translation goes out asking for a paragraph, and the switches decide
-// what the request for the words asks for.
+// 注释只由需要它的请求索取：翻译请求发出时只要段落，开关决定的是「要词」的请求
+// 索取什么。
 func TestTheAnnotationIsItsOwnRequest(t *testing.T) {
 	f := newTranslate(t)
 	f.tools.section.Set(Defaults())
 	useDeepSeek(t, f)
 
-	// A translation asks for no annotation, whatever the switches say.
+	// 翻译请求不索取注释，无论开关如何。
 	if err := f.translate.SetFurigana(context.Background(), true); err != nil {
 		t.Fatalf("SetFurigana failed: %v", err)
 	}
@@ -450,8 +427,7 @@ func TestTheAnnotationIsItsOwnRequest(t *testing.T) {
 		t.Errorf("the translation asked for the annotation: %+v", request.Annotation)
 	}
 
-	// The request for the words carries the switches, which is what makes
-	// them mean anything.
+	// 要词的请求携带开关，正是这让开关有了意义。
 	if err := f.translate.SetLoanwordGloss(context.Background(), false); err != nil {
 		t.Fatalf("SetLoanwordGloss failed: %v", err)
 	}
@@ -470,9 +446,8 @@ func TestTheAnnotationIsItsOwnRequest(t *testing.T) {
 	}
 }
 
-// The line breaks the user copied survive the request: Windows hands a
-// selection over with \r\n, the paragraphs the window draws are split on \n,
-// and neither a carriage return nor a lost line is something to translate.
+// 用户复制的换行在请求中保留：Windows 以 \r\n 交出选中内容，窗口绘制的段落按 \n
+// 切分，回车符和丢失的行都不是要翻译的东西。
 func TestTheCopiedLineBreaksSurvive(t *testing.T) {
 	f := newTranslate(t)
 	useDeepSeek(t, f)
@@ -486,13 +461,10 @@ func TestTheCopiedLineBreaksSurvive(t *testing.T) {
 	}
 }
 
-// A tool that is switched off says so, and does not read the clipboard or
-// ask a service.
+// 关闭的工具会说明已关闭，且不读剪贴板、不问服务。
 //
-// It is its own error rather than "translation unavailable": the two are
-// different sentences to the user, and the window draws them differently. A
-// switched-off tool is not a fault — the user asked for it — while a tool with
-// nowhere to send a text is one they have to fix.
+// 它是独立的错误而非「翻译不可用」：二者对用户是不同的话，窗口绘制方式也不同。
+// 关闭不是故障——是用户要求的；而无处发送文本的工具是需要用户修复的。
 func TestTranslateWhenTheToolIsOff(t *testing.T) {
 	f := newTranslate(t)
 	if err := f.translate.SetEnabled(context.Background(), false); err != nil {
@@ -502,8 +474,7 @@ func TestTranslateWhenTheToolIsOff(t *testing.T) {
 	if !errors.Is(err, domain.ErrTranslateDisabled) {
 		t.Fatalf("error = %v, want ErrTranslateDisabled", err)
 	}
-	// The two are distinct: a caller that only handles the configured case
-	// must not catch this one.
+	// 两者不同：只处理未配置情况的调用者不能捕获到这一个。
 	if errors.Is(err, domain.ErrTranslateUnavailable) {
 		t.Error("a switched-off tool is reported as an unconfigured one")
 	}
@@ -515,8 +486,7 @@ func TestTranslateWhenTheToolIsOff(t *testing.T) {
 	}
 }
 
-// A tool whose settings name a translator this build does not have says which
-// one, so that the user knows what to pick instead.
+// 设置指向本版本没有的翻译器的工具会说明是哪个，好让用户知道该改选什么。
 func TestTranslateWithNothingConfigured(t *testing.T) {
 	f := newTranslate(t)
 	if err := f.translate.SaveSettings(context.Background(), func(s *Settings) {
@@ -536,8 +506,7 @@ func TestTranslateWithNothingConfigured(t *testing.T) {
 	}
 }
 
-// A missing credential is its own answer: no request is worth making with a
-// key that is not there.
+// 缺少凭据是独立答案：没有 key 就不值得发请求。
 func TestTranslateWithoutACredential(t *testing.T) {
 	f := newTranslate(t)
 	useDeepSeek(t, f)
@@ -551,14 +520,14 @@ func TestTranslateWithoutACredential(t *testing.T) {
 	if f.deepseek.count() != 0 {
 		t.Error("the translator was asked without a credential")
 	}
-	// The error names the credential and never its value.
+	// 错误只命名凭据，绝不包含其值。
 	if !strings.Contains(err.Error(), "deepseek.apiKey") {
 		t.Errorf("the error does not name the credential: %v", err)
 	}
 }
 
-// Nothing selected and nothing usable on the clipboard is a user problem with
-// its own words: they have to select or copy something first.
+// 没有选中内容、剪贴板也没有可用内容，是用户需自行处理的问题，有专门的措辞：
+// 用户得先选中或复制点什么。
 func TestTranslateWithNothingToTranslate(t *testing.T) {
 	f := newTranslate(t)
 	useDeepSeek(t, f)
@@ -574,7 +543,7 @@ func TestTranslateWithNothingToTranslate(t *testing.T) {
 	}
 }
 
-// A clipboard holding a file list or an image is not a text to translate.
+// 剪贴板里是文件列表或图片时，不是可翻译的文本。
 func TestTranslateWithANonTextClipboard(t *testing.T) {
 	for _, reading := range []domain.ClipContent{
 		{Kind: domain.ClipKindFile, Files: []string{"/tmp/a.txt"}},
@@ -593,8 +562,7 @@ func TestTranslateWithANonTextClipboard(t *testing.T) {
 	}
 }
 
-// A service that fails is reported as a failure, never as an empty
-// translation.
+// 失败的服务报告为失败，绝不报告为空翻译。
 func TestTranslateReportsServiceFailures(t *testing.T) {
 	cases := []struct {
 		name string
@@ -622,8 +590,7 @@ func TestTranslateReportsServiceFailures(t *testing.T) {
 	}
 }
 
-// A cancelled context stops the request: a user who closed the window should
-// not wait out a service.
+// 取消的 context 会终止请求：关掉窗口的用户不应干等服务。
 func TestTranslateHonoursCancellation(t *testing.T) {
 	f := newTranslate(t)
 	useDeepSeek(t, f)
@@ -647,16 +614,14 @@ func TestTranslateHonoursCancellation(t *testing.T) {
 	}
 }
 
-// Every switch is written through the same path, and what is stored is what
-// the settings window read back.
+// 每个开关都走同一路径写入，存下的就是设置窗口读回的值。
 func TestSettingsRoundTrip(t *testing.T) {
 	f := newTranslate(t)
 	ctx := context.Background()
 	f.tools.section.Set(Defaults())
 
-	// The service is stored first, because it has to exist before it can be
-	// the one in use: a provider naming one of the user's own services is
-	// brought back to the default when that service is not there.
+	// 服务先存，因为它必须存在才能成为正在使用的那一个：名为用户自有服务的
+	// provider 在该服务不存在时会被拉回默认值。
 	if err := f.translate.SetCustomTranslator(ctx, "custom", CustomSettings{
 		BaseURL:     "api.example.com/v1/",
 		DisplayName: "  本地 Ollama  ",
@@ -696,10 +661,8 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if service.DisplayName != "本地 Ollama" {
 		t.Errorf("custom name = %q, want it trimmed", service.DisplayName)
 	}
-	// Reading the translation settings does not disturb them. The two tools
-	// share one file, so what keeps one from losing the other's switches is
-	// that each section owns its own keys — a translation section has no
-	// clipboard field to write, which is what this used to check by hand.
+	// 读取翻译设置不会扰动它们。两个工具共用一个文件，防止一方丢失另一方开关的，
+	// 是每个 section 只拥有自己的键——翻译 section 没有可写的剪贴板字段。
 	before := f.tools.section.Current()
 	if _, err := f.translate.Settings(); err != nil {
 		t.Fatalf("Settings failed: %v", err)
@@ -710,7 +673,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 	}
 }
 
-// A provider no translator answers to is refused rather than stored.
+// 没有翻译器响应的 provider 被拒绝，而非存储。
 func TestSetProviderRefusesAnUnknownID(t *testing.T) {
 	f := newTranslate(t)
 	err := f.translate.SetProvider(context.Background(), "nobody")
@@ -726,9 +689,7 @@ func TestSetProviderRefusesAnUnknownID(t *testing.T) {
 	}
 }
 
-// A switch that cannot be written is reported, and the value the
-// application runs on is the one on disk rather than the one that was meant
-// to be written.
+// 无法写入的开关会被报告，应用运行时的值是磁盘上的值，而非本打算写入的值。
 func TestSettingsReportAWriteFailure(t *testing.T) {
 	f := newTranslate(t)
 	f.tools.section.Set(Defaults())
@@ -746,8 +707,7 @@ func TestSettingsReportAWriteFailure(t *testing.T) {
 	}
 }
 
-// The settings window asks for the list of translators, what each is
-// configured with, and whether it can be used now.
+// 设置窗口索取翻译器列表、每个的配置情况、以及现在能否使用。
 func TestProvidersDescribeWhatIsUsable(t *testing.T) {
 	f := newTranslate(t)
 	f.tools.section.Set(Defaults())
@@ -762,8 +722,7 @@ func TestProvidersDescribeWhatIsUsable(t *testing.T) {
 	for _, view := range views {
 		byID[view.ID] = view
 	}
-	// A free engine is usable with nothing stored at all, which is the whole
-	// point of it.
+	// 免费引擎无需任何存储即可使用，这正是它的意义所在。
 	for _, id := range []string{contractfree.MicrosoftEdge, contractfree.Bilibili} {
 		view := byID[id]
 		if !view.Configured {
@@ -773,13 +732,12 @@ func TestProvidersDescribeWhatIsUsable(t *testing.T) {
 			t.Errorf("%s is reported as needing a key: %+v", id, view)
 		}
 	}
-	// A translator whose key is stored is configured, and one whose key is
-	// not is shown but cannot be picked.
+	// key 已存的翻译器算已配置，key 未存的会显示但不能选。
 	deepseek := byID["deepseek"]
 	if !deepseek.Configured || !deepseek.NeedsCredential {
 		t.Errorf("deepseek = %+v", deepseek)
 	}
-	// The user's own service is not configured until an address is there.
+	// 用户自有服务在有地址前不算已配置。
 	if custom := byID["custom"]; custom.Configured || custom.Endpoint != "" {
 		t.Errorf("custom = %+v, want it unconfigured before an address", custom)
 	}
@@ -810,9 +768,8 @@ func TestProvidersDescribeWhatIsUsable(t *testing.T) {
 	}
 }
 
-// The user may keep several services of their own, and each one is its own
-// translator: adding one does not disturb the ones already there, and each
-// answers for its own address.
+// 用户可以保留多个自有服务，每个都是独立的翻译器：添加一个不扰动已有的，
+// 每个为各自的地址作答。
 func TestSeveralOwnServicesLiveSideBySide(t *testing.T) {
 	f := newTranslate(t)
 	ctx := context.Background()
@@ -842,8 +799,7 @@ func TestSeveralOwnServicesLiveSideBySide(t *testing.T) {
 	if len(settings.Custom) != 2 {
 		t.Fatalf("services = %+v, want both", settings.Custom)
 	}
-	// Each keeps its own address and its own name: the second one did not
-	// overwrite the first.
+	// 各自保留自己的地址和名字：第二个没有覆盖第一个。
 	if service, _ := settings.CustomService(first); service.DisplayName != "本地 Ollama" {
 		t.Errorf("the first service is %+v", service)
 	}
@@ -851,7 +807,7 @@ func TestSeveralOwnServicesLiveSideBySide(t *testing.T) {
 		t.Errorf("the second service is %+v", service)
 	}
 
-	// Removing one leaves the other exactly where it was.
+	// 移除其一，另一个原封不动。
 	if err := f.translate.RemoveCustomTranslator(ctx, first); err != nil {
 		t.Fatalf("RemoveCustomTranslator failed: %v", err)
 	}
@@ -867,9 +823,8 @@ func TestSeveralOwnServicesLiveSideBySide(t *testing.T) {
 	}
 }
 
-// A service of the user's own is refused an address that is not one, and one
-// with no address at all is refused rather than stored: there would be nothing
-// to ask and nothing to show.
+// 用户自有服务会被拒绝非法地址，完全没有地址的也会被拒绝而非存储：
+// 没有可问的对象，也没有可显示的内容。
 func TestAddingAnOwnServiceChecksTheAddress(t *testing.T) {
 	f := newTranslate(t)
 	ctx := context.Background()
@@ -889,9 +844,8 @@ func TestAddingAnOwnServiceChecksTheAddress(t *testing.T) {
 	}
 }
 
-// An id that is not one of the user's own services is refused by both the
-// setter and the remover: a built-in translator's address is not the user's to
-// rewrite, and removing it would take a service the application knows away.
+// 不属于用户自有服务的 id 会被设置器和移除器同时拒绝：内置翻译器的地址不归用户
+// 改写，移除它会拿走应用已知的服务。
 func TestOwnServiceActionsRefuseABuiltInID(t *testing.T) {
 	f := newTranslate(t)
 	ctx := context.Background()
@@ -904,11 +858,9 @@ func TestOwnServiceActionsRefuseABuiltInID(t *testing.T) {
 	}
 }
 
-// Removing the service that is in use brings the tool back to the default one,
-// rather than leaving it pointing at an id that is gone.
+// 删除正在使用的服务会让工具回到默认，而不是停留在已消失的 id 上。
 //
-// It is what the user sees after deleting the service they had selected: the
-// next press has to translate, not report a service that no longer exists.
+// 这正是用户删掉曾选中的服务后看到的：下一次按键必须能翻译，而不是报告一个不存在的服务。
 func TestRemovingTheServiceInUseFallsBackToTheDefault(t *testing.T) {
 	f := newTranslate(t)
 	ctx := context.Background()
@@ -933,14 +885,14 @@ func TestRemovingTheServiceInUseFallsBackToTheDefault(t *testing.T) {
 	if got := providerOf(t, f); got != DefaultProvider {
 		t.Errorf("provider = %q after removing the one in use, want %q", got, DefaultProvider)
 	}
-	// And the tool answers rather than reporting a missing service.
+	// 工具照常作答，而不是报告缺失的服务。
 	useDeepSeek(t, f)
 	if _, err := f.translate.Translate(ctx, Request{Text: "hello"}); err != nil {
 		t.Errorf("Translate failed after the removal: %v", err)
 	}
 }
 
-// providerOf is the translator the tool is set to use, as the settings hold it.
+// providerOf 是工具被设起使用的翻译器，取设置中的值。
 func providerOf(t *testing.T, f *translateFixture) string {
 	t.Helper()
 	settings, err := f.translate.Settings()
@@ -950,16 +902,14 @@ func providerOf(t *testing.T, f *translateFixture) string {
 	return settings.ProviderOr()
 }
 
-// A provider that names a service which is not there is brought back to the
-// default, whether it went missing by hand or by a removal.
+// 指定不存在服务的 provider 会被拉回默认，无论是手工删除所致还是移除所致。
 //
-// A hand-edited file is the other way in, and the rule is the same one: the
-// tool must keep working, and the provider has to name something that answers.
+// 手工编辑的文件是另一条入口，规则相同：工具必须继续工作，provider 必须指向能作答的东西。
 func TestAProviderWithNoServiceFallsBackToTheDefault(t *testing.T) {
 	f := newTranslate(t)
 	ctx := context.Background()
 
-	// Written straight into the settings, the way a hand-edited file arrives.
+	// 直接写进设置，就像手工编辑的文件那样。
 	if err := f.translate.SaveSettings(ctx, func(s *Settings) { s.Provider = "custom-9" }); err != nil {
 		t.Fatalf("SaveSettings failed: %v", err)
 	}
@@ -967,8 +917,7 @@ func TestAProviderWithNoServiceFallsBackToTheDefault(t *testing.T) {
 		t.Errorf("provider = %q, want the default %q", got, DefaultProvider)
 	}
 
-	// A built-in id is left alone: whether this build knows it is the
-	// registry's question, and the window says so when it does not.
+	// 内置 id 不动：本版本是否认识它是注册表的问题，不认识时窗口会说明。
 	if err := f.translate.SaveSettings(ctx, func(s *Settings) { s.Provider = "nobody" }); err != nil {
 		t.Fatalf("SaveSettings failed: %v", err)
 	}
@@ -977,12 +926,9 @@ func TestAProviderWithNoServiceFallsBackToTheDefault(t *testing.T) {
 	}
 }
 
-// The list of translators never rearranges itself: the same ids come back in
-// the same order no matter which one is in use.
+// 翻译器列表绝不自行重排：相同的 id 无论哪个在用都按相同顺序返回。
 //
-// It is what the settings window draws its rows from, and a row that moves
-// when the user picks one is a row the user cannot aim at — the press they made
-// lands on whatever took its place.
+// 设置窗口用它绘制行，选中一个就移动的行是用户瞄不准的行——按下的位置落在了顶替它的行上。
 func TestProviderOrderDoesNotDependOnWhatIsInUse(t *testing.T) {
 	f := newTranslate(t)
 	ctx := context.Background()
@@ -1003,7 +949,7 @@ func TestProviderOrderDoesNotDependOnWhatIsInUse(t *testing.T) {
 	if len(before) != 4 {
 		t.Fatalf("the list is %v, want every translator", before)
 	}
-	// Pick each one in turn, and the order is the same every time.
+	// 依次选中每一个，顺序每次都相同。
 	for _, pick := range append(append([]string{}, before...), DefaultProvider) {
 		if err := f.translate.SetProvider(ctx, pick); err != nil {
 			t.Fatalf("SetProvider(%s) failed: %v", pick, err)
@@ -1015,7 +961,7 @@ func TestProviderOrderDoesNotDependOnWhatIsInUse(t *testing.T) {
 	}
 }
 
-// sameOrder reports whether two lists hold the same ids in the same places.
+// sameOrder 报告两个列表是否在相同位置持有相同 id。
 func sameOrder(left, right []string) bool {
 	if len(left) != len(right) {
 		return false
@@ -1028,8 +974,7 @@ func sameOrder(left, right []string) bool {
 	return true
 }
 
-// A credential that is not stored makes the translator unusable, which is
-// what the window shows.
+// 未存储的凭据使翻译器不可用，正是窗口所显示的。
 func TestProvidersFollowTheCredential(t *testing.T) {
 	f := newTranslate(t)
 	if err := f.secrets.Delete(context.Background(), domain.CredentialKey("deepseek", "apiKey")); err != nil {
@@ -1046,13 +991,12 @@ func TestProvidersFollowTheCredential(t *testing.T) {
 	}
 }
 
-// Testing a configuration translates a short text: what the user typed is
-// used, and nothing is stored.
+// 测试配置会翻译一段短文本：用户输入的会被使用，且不存储任何东西。
 func TestTestTranslator(t *testing.T) {
 	f := newTranslate(t)
 	ctx := context.Background()
 
-	// What is stored is tested when the user typed nothing.
+	// 用户什么都没输入时，测试存储中的配置。
 	if err := f.translate.TestTranslator(ctx, "deepseek", nil); err != nil {
 		t.Fatalf("TestTranslator failed: %v", err)
 	}
@@ -1064,7 +1008,7 @@ func TestTestTranslator(t *testing.T) {
 		t.Errorf("the test asked for an annotation: %+v", request.Annotation)
 	}
 
-	// What the user typed is tested when they did type something.
+	// 用户确实输入了内容时，测试其输入。
 	before := f.deepseek.count()
 	if err := f.translate.TestTranslator(ctx, "deepseek", map[string]string{"apiKey": "sk-typed-0002"}); err != nil {
 		t.Fatalf("TestTranslator failed: %v", err)
@@ -1073,26 +1017,24 @@ func TestTestTranslator(t *testing.T) {
 		t.Errorf("the translator was asked %d times, want one more", f.deepseek.count())
 	}
 
-	// A service with no address has nothing to test: the caller is told to
-	// configure it rather than waiting for a request that cannot happen.
+	// 没有地址的服务无从测试：调用者被告知去配置，而不是等待一个不可能的请求。
 	if err := f.translate.TestTranslator(ctx, "custom", nil); err == nil {
 		t.Error("testing a service with no address succeeded")
 	}
 
-	// A translator nobody registered is not something to test.
+	// 没人注册的翻译器无从测试。
 	if err := f.translate.TestTranslator(ctx, "nobody", nil); !errors.Is(err, domain.ErrProviderNotFound) {
 		t.Errorf("error = %v, want ErrProviderNotFound", err)
 	}
 
-	// A service that refuses the key says so.
+	// 拒绝该 key 的服务会说明这一点。
 	f.deepseek.fail(fmt.Errorf("%w: deepseek.apiKey was refused", domain.ErrProviderUnauthorized))
 	if err := f.translate.TestTranslator(ctx, "deepseek", nil); !errors.Is(err, domain.ErrProviderUnauthorized) {
 		t.Errorf("error = %v, want ErrProviderUnauthorized", err)
 	}
 }
 
-// A translator that needs a key which is neither stored nor typed is a
-// missing credential, and it is never asked.
+// 需要 key、但既未存储也未输入的翻译器是缺少凭据，且绝不会被问。
 func TestTestTranslatorWithoutAKey(t *testing.T) {
 	f := newTranslate(t)
 	if err := f.secrets.Delete(context.Background(), domain.CredentialKey("deepseek", "apiKey")); err != nil {
@@ -1107,7 +1049,7 @@ func TestTestTranslatorWithoutAKey(t *testing.T) {
 	}
 }
 
-// The test never stores what it was given: testing a key is not saving it.
+// 测试从不存储给它的内容：测试 key 不等于保存它。
 func TestTestTranslatorDoesNotStore(t *testing.T) {
 	f := newTranslate(t)
 	if err := f.translate.TestTranslator(context.Background(), "deepseek", map[string]string{"apiKey": "sk-typed-0002"}); err != nil {
@@ -1122,8 +1064,7 @@ func TestTestTranslatorDoesNotStore(t *testing.T) {
 	}
 }
 
-// A registry with nothing in it is a tool that says "go and configure one",
-// which is what a fresh installation with no translator reaches.
+// 空注册表是一个说「去配置一个」的工具，正是没有任何翻译器的全新安装所到达的状态。
 func TestTranslateWithoutAnyTranslator(t *testing.T) {
 	tools := newFakeTools()
 	service, err := NewTranslate(TranslateOptions{
@@ -1134,9 +1075,8 @@ func TestTranslateWithoutAnyTranslator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTranslate failed: %v", err)
 	}
-	// The default provider is one this registry does not have, which is the
-	// same answer as a registry that is empty: the tool says where to
-	// configure a service rather than reaching for a network.
+	// 默认 provider 是该注册表没有的，与空注册表是同样的答复：工具说明去哪里配置
+	// 服务，而不是去伸手要网络。
 	tools.section.Set(Defaults())
 	if _, err := service.Translate(context.Background(), Request{Text: "hello"}); !errors.Is(err, domain.ErrTranslateUnavailable) {
 		t.Errorf("error = %v, want ErrTranslateUnavailable", err)

@@ -28,8 +28,7 @@ func TestUpdateStatusNames(t *testing.T) {
 			t.Errorf("%s.Valid() = false", c.name)
 		}
 	}
-	// The zero value is the one a view sees before anything has happened,
-	// and it must be Idle rather than the first of the interesting states.
+	// 零值是视图在任何事件前的初始状态，必须是 Idle 而非首个有意义状态。
 	var zero UpdateState
 	if zero.Status != UpdateIdle {
 		t.Errorf("the zero state is %s, want idle", zero.Status)
@@ -95,8 +94,7 @@ func TestUpdateReasonIsTrimmedToSnippet(t *testing.T) {
 	if len(got) > MaxSnippetBytes {
 		t.Errorf("UpdateReason returned %d bytes, want at most %d", len(got), MaxSnippetBytes)
 	}
-	// A cut through a multi-byte character must not leave half of it: the
-	// reason goes to a log, and half a character is not text.
+	// 截断多字节字符不能留下半个：原因会写入日志，半个字符不是文本。
 	wide := strings.Repeat("é", MaxSnippetBytes)
 	trimmed := UpdateReason(wide)
 	if len(trimmed) > MaxSnippetBytes {
@@ -118,8 +116,7 @@ func TestUpdateErrorsAreDistinct(t *testing.T) {
 	if ErrUpdateUnsupported.Error() == "" || ErrUpdateUnavailable.Error() == "" {
 		t.Error("an update error says nothing")
 	}
-	// A release that could not be read is a bad response, not a machine
-	// that cannot update: the caller can tell them apart.
+	// 无法读取的发布属于坏响应，而非机器无法更新：调用方可区分二者。
 	bad := &BadResponseError{ProviderID: "mygo", Reason: "the manifest is empty"}
 	if !errors.Is(bad, ErrProviderBadResponse) {
 		t.Error("BadResponseError does not unwrap to ErrProviderBadResponse")

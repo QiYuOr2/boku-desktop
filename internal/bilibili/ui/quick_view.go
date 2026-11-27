@@ -8,9 +8,7 @@ import (
 	"time"
 )
 
-// bilibiliUpdates is absent until at least one explicit UP is configured, and
-// the block is drawn even when no answer is on screen yet: a creator list is
-// something the user configured, so it has a shape before the first reply.
+// 未配置任何 UP 时不绘制该块；已配置但尚无数据时仍绘制占位行。
 func (s *ViewModel) QuickView(c *ui.Context, design presentation.ReadingDesign) {
 	s.design = design
 	if s.service == nil || !s.service.Enabled() {
@@ -24,8 +22,6 @@ func (s *ViewModel) QuickView(c *ui.Context, design presentation.ReadingDesign) 
 	s.design.QuickBlock(c, func() {
 		ui.Column(c).FillWidth().Gap(float32(7)).Children(func() {
 			ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-				// The count belongs to the title, so it sits beside it rather
-				// than being pushed to the right edge by the actions.
 				ui.Row(c).AlignItems(ui.Center).Gap(float32(8)).Children(func() {
 					s.design.QuickTile(c, s.design.Mark, presentation.BilibiliAccent.Tile, presentation.BilibiliAccent.TileInk)
 					ui.Text(c, "关注的 UP").FontSize(s.design.SizeQuickName).FontWeight(600).TextColor(s.design.PanelInk).SingleLine()
@@ -34,9 +30,6 @@ func (s *ViewModel) QuickView(c *ui.Context, design presentation.ReadingDesign) 
 					})
 				})
 				ui.Spacer(c)
-				// The refresh mark is the only loading indicator: it already
-				// turns while a request is in flight, as it does on the
-				// animation block.
 				if button := s.design.RefreshButton(c, loading, err != nil && len(items) > 0); button.Clicked() && !loading {
 					s.RefreshAsync(true)
 				}
@@ -48,11 +41,6 @@ func (s *ViewModel) QuickView(c *ui.Context, design presentation.ReadingDesign) 
 				s.bilibiliRow(c, item)
 			}
 			if len(items) == 0 {
-				// Nothing is on screen. The configured creators are still
-				// shown as placeholders, so the block keeps its shape and
-				// names what it is waiting for — whether the request failed,
-				// is still in flight, or settled with nothing to show. The
-				// reason for an empty answer is what the notice above says.
 				for _, uid := range uids {
 					s.bilibiliPlaceholderRow(c, uid)
 				}
@@ -61,9 +49,6 @@ func (s *ViewModel) QuickView(c *ui.Context, design presentation.ReadingDesign) 
 	})
 }
 
-// bilibiliPlaceholderRow is what a configured creator looks like before there
-// is anything to say about them: a portrait if one was fetched, the UID as the
-// name, and a placeholder line where the post will go.
 func (s *ViewModel) bilibiliPlaceholderRow(c *ui.Context, uid int64) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Radius(s.design.RadiusTile).Padding(float32(6), float32(8)).Background(s.design.PanelField).Border(1, presentation.PanelBorder).Children(func() {
 		s.bilibiliPortrait(c, s.bilibiliAvatar(uid))
@@ -74,8 +59,7 @@ func (s *ViewModel) bilibiliPlaceholderRow(c *ui.Context, uid int64) {
 	})
 }
 
-// bilibiliPortrait is one creator's round avatar, falling back to the block's
-// own mark when the image is missing or could not be decoded.
+// 头像缺失或解码失败时回退到该块的图标。
 func (s *ViewModel) bilibiliPortrait(c *ui.Context, avatar *ui.Bitmap) {
 	ui.Box(c).Size(float32(32), float32(32)).Shrink(0).Radius(float32(16)).Background(presentation.BilibiliAccent.Tint).Border(1, presentation.BilibiliAccent.Border).Center().Children(func() {
 		if avatar != nil {
@@ -129,13 +113,7 @@ func (s *ViewModel) bilibiliRow(c *ui.Context, item domain.FollowedUpdate) {
 	}
 }
 
-// cacheBilibiliAvatars turns the avatars the feature has fetched into UI
-// bitmaps on the presentation thread. It runs after a refresh, never from the
-// view, so drawing stays free of I/O and decoding.
-//
-// A creator whose avatar cannot be decoded keeps the row's mark: the name and
-// the post are what the user came for, and a missing portrait is not a failed
-// refresh.
+// 在刷新后于展示线程把已抓取的头像解码为位图，不在视图里做，绘制阶段不做 I/O。
 func (s *ViewModel) CacheAvatars() {
 	if s.service == nil {
 		return

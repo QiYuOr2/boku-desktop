@@ -19,10 +19,8 @@ const (
 	schemaVersion = 2
 )
 
-// Store is playtime.sqlite. It is the session list and nothing else.
-//
-// A playtime.json left from the previous format is imported once, then
-// renamed to playtime.json.imported. The bytes stay on disk.
+// 旧格式遗留的 playtime.json 只导入一次，随后改名为 playtime.json.imported，
+// 其字节仍留在磁盘上。
 type Store struct {
 	db       *sqlite.DB
 	jsonPath string
@@ -69,11 +67,7 @@ type fileDocument struct {
 	Sessions []fileSession `json:"sessions"`
 }
 
-// Load reads the session list. A missing database is created.
-//
-// A database newer than this build, or a legacy JSON file that cannot be
-// understood while the database is still empty, is left in place and is
-// not written over.
+// 比本版本更新的数据库，或在数据库仍为空时无法解析的遗留 JSON，都原样保留、不被覆写。
 func (s *Store) Load() ([]Session, error) {
 	if s == nil || s.openErr != nil {
 		if s != nil {
@@ -91,7 +85,6 @@ func (s *Store) Load() ([]Session, error) {
 	return s.load()
 }
 
-// Save replaces the session list in one transaction.
 func (s *Store) Save(sessions []Session) error {
 	if s == nil {
 		return nil

@@ -1,4 +1,4 @@
-// Package ui contains the presentation owned by application preferences.
+// Package ui 包含应用偏好设置所拥有的展示层。
 package ui
 
 import (
@@ -8,8 +8,6 @@ import (
 	"boku/internal/presentation"
 )
 
-// AppearancePicker draws the preference-owned theme selector. The Shell owns
-// persistence and applying the native theme; this view only reports a choice.
 func AppearancePicker(c *ui.Context, current preferences.AppearanceMode, changed func(preferences.AppearanceMode)) {
 	choices := []struct {
 		label string

@@ -116,8 +116,7 @@ func TestUpdateKeepsTheCreationTime(t *testing.T) {
 	}
 }
 
-// A plain-text file has nothing to unlock, and the store says so instead of
-// pretending to be protected.
+// 明文文件没有可解锁的东西，存储如实呈现而不是假装受保护。
 func TestNothingToUnlock(t *testing.T) {
 	store, err := Open(newStorePath(t))
 	if err != nil {
@@ -140,9 +139,7 @@ func TestNothingToUnlock(t *testing.T) {
 	}
 }
 
-// The file is readable because it is plain text. That is the design, and the
-// test says so rather than leaving it to be discovered: §5 of the security
-// design requires the window to tell the user the same thing.
+// 文件是明文所以可读，这是设计决定；测试显式断言，避免被"意外发现"。
 func TestTheFileIsPlainTextAndRestricted(t *testing.T) {
 	path := newStorePath(t)
 	store, err := Open(path)
@@ -156,8 +153,7 @@ func TestTheFileIsPlainTextAndRestricted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the file back: %v", err)
 	}
-	// The value is in the clear. If this ever stops being true, the setting
-	// window's notice has to change with it.
+	// 值以明文在文件中。一旦这一点改变，设置窗口的告知必须同步修改。
 	if !strings.Contains(string(data), "sk-test-0001") {
 		t.Error("the value is not in the file in the clear, which the notice claims it is")
 	}
@@ -172,8 +168,7 @@ func TestTheFileIsPlainTextAndRestricted(t *testing.T) {
 		t.Errorf("the file does not hold the value: %+v", doc.Secrets)
 	}
 
-	// Permission bits are a real boundary only where the file system has
-	// them: on Windows an ACL decides access and this bit means nothing.
+	// 权限位只在有该位的文件系统上是真实边界：Windows 由 ACL 决定访问，此位无意义。
 	if runtime.GOOS != "windows" {
 		info, err := os.Stat(path)
 		if err != nil {
@@ -184,7 +179,7 @@ func TestTheFileIsPlainTextAndRestricted(t *testing.T) {
 		}
 	}
 
-	// A reopen sees the same secrets: the file is the source of truth.
+	// 重新打开后看到相同的凭据：文件是事实来源。
 	reopened, err := Open(path)
 	if err != nil {
 		t.Fatalf("reopen failed: %v", err)
@@ -243,8 +238,7 @@ func TestEmptyNamesAndValuesAreRefused(t *testing.T) {
 	}
 }
 
-// A write that cannot reach the disk must not leave the store claiming it
-// stored something.
+// 写不到磁盘时，存储不能声称写成功。
 func TestAFailedWriteKeepsTheStoreAsItWas(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, FileName)
@@ -255,7 +249,7 @@ func TestAFailedWriteKeepsTheStoreAsItWas(t *testing.T) {
 	ctx := context.Background()
 	put(t, store, "deepseek.apiKey", "first", domain.SecretMeta{})
 
-	// Make the destination un-writable by turning it into a directory.
+	// 把目标变成目录，使其不可写。
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("remove: %v", err)
 	}

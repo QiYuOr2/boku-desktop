@@ -10,24 +10,20 @@ import (
 	"time"
 )
 
-// macOS keeps its proxy setting in SystemConfiguration, where the Network
-// pane writes it. A GUI app is not started from a shell, so HTTPS_PROXY and
-// HTTP_PROXY are usually empty even when the user has a system proxy on —
-// which is the normal way Clash, Surge and the corporate proxies are set up.
+// macOS 把代理设置存在 SystemConfiguration 里（网络面板写入的位置）。GUI 应用
+// 不是从 shell 启动的，所以即使系统代理开着（Clash、Surge 及企业代理的常见
+// 配置），HTTPS_PROXY/HTTP_PROXY 通常也是空的。
 //
-// scutil prints that setting as a dictionary. Its keys are the same ones the
-// Network pane writes: HTTPEnable/HTTPProxy/HTTPPort, HTTPS..., SOCKS..., and
-// ExceptionsList. The environment is still asked first by proxy.go; this is
-// only the fallback.
+// scutil 把该设置打印成 dictionary，键与网络面板写入的相同：HTTPEnable/
+// HTTPProxy/HTTPPort、HTTPS…、SOCKS… 及 ExceptionsList。proxy.go 仍会先问
+// 环境，这里只是兜底。
 //
-// PAC (ProxyAutoConfigEnable) is not evaluated: a configuration that only has
-// a PAC URL is left to the environment, and a direct request is made. PAC is
-// a JavaScript engine and belongs to a proxy library, not to this file.
+// 不解析 PAC（ProxyAutoConfigEnable）：仅有 PAC URL 的配置交给环境处理，走
+// 直连。PAC 是 JavaScript 引擎，属于代理库，不属于本文件。
 func platformProxy() (proxySettings, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	// The absolute path is deliberate: a GUI process does not always have
-	// /usr/sbin on PATH, and scutil is part of the system.
+	// 刻意用绝对路径：GUI 进程的 PATH 未必含 /usr/sbin，而 scutil 是系统组件。
 	out, err := exec.CommandContext(ctx, "/usr/sbin/scutil", "--proxy").Output()
 	if err != nil {
 		return proxySettings{}, err
@@ -35,7 +31,7 @@ func platformProxy() (proxySettings, error) {
 	return parseSCUtilProxy(string(out))
 }
 
-// parseSCUtilProxy reads the dictionary scutil prints.
+// parseSCUtilProxy 解析 scutil 打印的 dictionary。
 func parseSCUtilProxy(output string) (proxySettings, error) {
 	values := make(map[string]string)
 	var bypass []string
@@ -69,7 +65,7 @@ func parseSCUtilProxy(output string) (proxySettings, error) {
 			inExceptions = true
 			continue
 		}
-		// Array and dictionary openers are not values.
+		// 数组和字典的开括号不是值。
 		if strings.HasPrefix(value, "<") {
 			continue
 		}

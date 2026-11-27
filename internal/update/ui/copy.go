@@ -1,4 +1,4 @@
-// Package ui owns user-facing copy derived from updater state.
+// Package ui 持有由 updater 状态派生的面向用户的文案。
 package ui
 
 import (

@@ -1,27 +1,17 @@
-// Package deepseek holds the identity of the DeepSeek service: the name it is
-// registered under, the credential key it is stored with, and where a user
-// gets that credential.
+// Package deepseek 定义 DeepSeek 服务的身份：注册名、凭据 key 名和凭据申请页。
 //
-// It exists because two features talk to the same service: the balance panel
-// (internal/panel/deepseek) and the translator (internal/translate/deepseek).
-// They are separate features with separate lifetimes, but they must agree on
-// the provider id and on the credential key — "deepseek.apiKey" is one entry
-// in the credential store and one name in the cross-end contract
-// (§7 of the provider contract), and two copies of a string that must match is two
-// chances to get it wrong.
-//
-// Nothing here does anything: it is the service's name and address, and the
-// features that use them keep their own code.
+// 余额面板（internal/panel/deepseek）和翻译器（internal/translate/deepseek）都访问
+// 同一个服务，各自独立，但必须在 provider id 和凭据 key 上保持一致——"deepseek.apiKey"
+// 同时是凭据存储里的一条规定和跨端契约（provider 契约 §7）里的一个名字。字符串写两份
+// 就有两次写错的机会，因此只放在这里。
 package deepseek
 
-// ProviderID is the service's id: the provider id the balance panel is
-// registered under, and the translator id the translation tool offers.
+// ProviderID 是服务 id：余额面板注册的 provider id，也是翻译工具提供的翻译器 id。
 const ProviderID = "deepseek"
 
-// APIKeyCredential is the credential both of them need, without the provider
-// prefix: the store keeps it as CredentialKey(ProviderID, APIKeyCredential).
+// APIKeyCredential 是两端共用的凭据 key（不含 provider 前缀）：存储里保存为
+// CredentialKey(ProviderID, APIKeyCredential)。
 const APIKeyCredential = "apiKey"
 
-// DocsURL is where the user creates the key. Both features show it, because
-// both of them use the one credential.
+// DocsURL 是用户创建 key 的页面，两个功能都会展示。
 const DocsURL = "https://platform.deepseek.com/api_keys"

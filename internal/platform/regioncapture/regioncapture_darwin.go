@@ -16,9 +16,8 @@ import (
 	"boku/internal/platform/screenrecording"
 )
 
-// CoreGraphics is used directly instead of the screencapture command.  That
-// keeps the captured pixels transient and leaves region selection under Boku's
-// control. Screen Recording permission is still enforced by macOS.
+// 直接调用 CoreGraphics 而非 screencapture 命令，可让截取的像素只存在于内存，
+// 并让区域选择完全由 Boku 控制。屏幕录制权限仍由 macOS 强制。
 var (
 	libCG                   = openFramework("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
 	libCF                   = openFramework("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
@@ -62,15 +61,13 @@ func (*Device) Capture(ctx context.Context, rect image.Rectangle) ([]byte, error
 	if rect.Dx() <= 0 || rect.Dy() <= 0 {
 		return nil, fmt.Errorf("region capture: empty rectangle")
 	}
-	// An unauthorized CGWindowListCreateImage does not fail: it returns black
-	// pixels, which would be sent to the translator as if they were the
-	// selection. Refuse before reading anything.
+	// 未获授权时 CGWindowListCreateImage 不会报错，而是返回全黑像素，会被当作
+	// 选区内容送给翻译器。因此在读取前先拒绝。
 	if !screenrecording.Granted() {
 		return nil, fmt.Errorf("%w: macOS has not allowed Boku to record the screen", domain.ErrScreenRecordingDenied)
 	}
-	// kCGWindowListOptionOnScreenOnly, kCGNullWindowID,
-	// kCGWindowImageDefault. CoreGraphics returns nil when Screen Recording
-	// was denied or the requested display region cannot be read.
+	// 参数依次为 kCGWindowListOptionOnScreenOnly、kCGNullWindowID、
+	// kCGWindowImageDefault。屏幕录制被拒或显示区域不可读时，CoreGraphics 返回 nil。
 	cgImage := cgWindowListCreateImage(cgRect{X: float64(rect.Min.X), Y: float64(rect.Min.Y), Width: float64(rect.Dx()), Height: float64(rect.Dy())}, 1, 0, 0)
 	if cgImage == 0 {
 		return nil, fmt.Errorf("region capture: macOS denied Screen Recording permission or could not read the display")
@@ -95,7 +92,7 @@ func (*Device) Capture(ctx context.Context, rect image.Rectangle) ([]byte, error
 	for y := 0; y < height; y++ {
 		for x := 0; x < width; x++ {
 			src, dst := y*stride+x*4, y*img.Stride+x*4
-			// Quartz's normal desktop image is little-endian premultiplied BGRA.
+			// Quartz 桌面图像为小端预乘 BGRA。
 			img.Pix[dst], img.Pix[dst+1], img.Pix[dst+2], img.Pix[dst+3] = raw[src+2], raw[src+1], raw[src], raw[src+3]
 		}
 	}

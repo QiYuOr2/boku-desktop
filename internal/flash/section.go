@@ -11,23 +11,21 @@ const (
 	sectionName    = "flash"
 )
 
-// Settings is the shortcut that opens the capture line. Empty means the
-// shortcut is not registered. There is no default combination on any platform.
+// Settings 保存打开闪念输入行的快捷键。为空表示未注册；各平台都没有默认组合。
 type Settings struct {
 	Accelerator string
 }
 
-// AcceleratorOr is the stored shortcut. Blank means do not register one.
+// AcceleratorOr 返回已存快捷键，空白表示不注册。
 func (s Settings) AcceleratorOr() string {
 	return strings.TrimSpace(s.Accelerator)
 }
 
-// Section is this feature's keys in settings.json.
+// Section 是本功能在 settings.json 中的键。
 type Section struct {
 	current Settings
 }
 
-// NewSection returns no shortcut.
 func NewSection() *Section { return &Section{} }
 
 func (s *Section) Name() string { return sectionName }
@@ -53,8 +51,7 @@ func (s *Section) Encode() (map[string]any, error) {
 	return map[string]any{keyAccelerator: s.current.AcceleratorOr()}, nil
 }
 
-// ValidAccelerator reports whether value is a modifier plus a key, in the
-// same spelling the translation shortcut uses.
+// ValidAccelerator 校验 value 是否为「修饰键 + 按键」，拼写与翻译快捷键一致。
 func ValidAccelerator(value string) bool {
 	parts := strings.Split(strings.TrimSpace(value), "+")
 	if len(parts) < 2 {
@@ -70,7 +67,6 @@ func ValidAccelerator(value string) bool {
 	return key != "" && !modifiers[strings.ToLower(key)]
 }
 
-// SameAccelerator reports whether two shortcuts are the same combination.
 func SameAccelerator(a, b string) bool {
 	left := strings.ToLower(strings.TrimSpace(a))
 	right := strings.ToLower(strings.TrimSpace(b))

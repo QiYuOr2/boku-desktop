@@ -8,8 +8,7 @@ import (
 	"boku/internal/domain"
 )
 
-// slowStore is a history store whose write takes a while, so that a test can
-// see whether the caller waited for it.
+// slowStore 是写入要花些时间的存储，使测试能看出调用方是否等了它。
 type slowStore struct {
 	delay  time.Duration
 	saves  chan []domain.ClipboardEntry
@@ -28,8 +27,7 @@ func (s *slowStore) LoadEntries(context.Context) ([]domain.ClipboardEntry, error
 	return nil, nil
 }
 
-// What this fake is about is the history write; the pictures beside it are not
-// stored, which is what a store with nowhere to put one does.
+// 这个替身关心的是历史写入；其旁的图片并不存储，这是无处可放的存储的做法。
 func (s *slowStore) SaveImage(context.Context, string, []byte) error { return nil }
 
 func (s *slowStore) LoadImage(context.Context, string) ([]byte, error) {
@@ -47,9 +45,8 @@ func (s *slowStore) SaveEntries(_ context.Context, entries []domain.ClipboardEnt
 	return nil
 }
 
-// A click must not wait for the history file. The write happens behind the
-// click, so the frame that shows the click landed is not held up by a file
-// the size of the whole history.
+// 点击不能等历史文件。写入发生在点击背后，使显示点击已生效的帧
+// 不被一份历史大小的文件拖住。
 func TestCopyDoesNotWaitForTheHistoryFile(t *testing.T) {
 	device := &fakeDevice{}
 	store := newSlowStore(300 * time.Millisecond)
@@ -75,7 +72,7 @@ func TestCopyDoesNotWaitForTheHistoryFile(t *testing.T) {
 		t.Errorf("Copy waited %s for the history file", elapsed)
 	}
 
-	// The write does happen, behind the call.
+	// 写入确实在调用背后发生了。
 	select {
 	case entries := <-store.saves:
 		if len(entries) == 0 {
@@ -84,8 +81,7 @@ func TestCopyDoesNotWaitForTheHistoryFile(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("the history was never written")
 	}
-	// And a second copy while the first write is still running does not
-	// queue a second write of its own: the newest history is written once.
+	// 而在第一次写入仍在进行时的第二次复制不会另排一次写入：最新历史只写一次。
 	if err := clipboard.Copy(context.Background(), textEntry("written back again")); err != nil {
 		t.Fatalf("the second Copy failed: %v", err)
 	}
@@ -105,8 +101,7 @@ func TestCopyDoesNotWaitForTheHistoryFile(t *testing.T) {
 	}
 }
 
-// Reading the same content over and over does not rewrite the history file:
-// a poll that changed nothing is not a change.
+// 反复读取相同内容不会重写历史文件：未带来改变的轮询不是改变。
 func TestAnUnchangedHistoryIsNotRewritten(t *testing.T) {
 	device := &fakeDevice{}
 	store := &countingStore{}
@@ -129,8 +124,7 @@ func TestAnUnchangedHistoryIsNotRewritten(t *testing.T) {
 	waitFor(t, "the first write", func() bool { return clipboard.settled() && store.count() >= 1 })
 	before := store.count()
 
-	// The same copy, read five times again: the history did not change, so
-	// the file is not written again.
+	// 同一份复制再读五次：历史未改变，因此文件不会再次写入。
 	for i := 0; i < 5; i++ {
 		clipboard.Read(ctx)
 	}
@@ -140,7 +134,7 @@ func TestAnUnchangedHistoryIsNotRewritten(t *testing.T) {
 	}
 }
 
-// countingStore counts writes.
+// countingStore 统计写入次数。
 type countingStore struct {
 	mu    chan struct{}
 	saves int
@@ -150,8 +144,7 @@ func (s *countingStore) LoadEntries(context.Context) ([]domain.ClipboardEntry, e
 	return nil, nil
 }
 
-// This fake counts history writes; the pictures beside the history are not what
-// it is about.
+// 这个替身统计历史写入；其旁的图片不是它关心的。
 func (s *countingStore) SaveImage(context.Context, string, []byte) error { return nil }
 
 func (s *countingStore) LoadImage(context.Context, string) ([]byte, error) {

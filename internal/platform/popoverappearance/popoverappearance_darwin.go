@@ -18,9 +18,8 @@ var (
 	responds   objc.SEL
 )
 
-// bridge resolves the vibrant dark appearance once. It is the appearance the
-// popover's material already reports in a dark desktop; using it rather than
-// a plain window appearance keeps the material's own variant.
+// bridge 只解析一次 vibrant dark 外观。这是弹窗材质在深色桌面下本就报告的外观，
+// 用它而非普通窗口外观，可保留材质自身的变体。
 func bridge() {
 	if _, err := purego.Dlopen(
 		"/System/Library/Frameworks/AppKit.framework/AppKit",
@@ -42,9 +41,8 @@ func bridge() {
 	bridgeOK = dark != 0 && setAppear != 0 && responds != 0
 }
 
-// namedAppearance asks NSAppearance for one of its named appearances. The
-// name is made with alloc/init and released again, so this does not depend on
-// an autorelease pool being in place at the call site.
+// namedAppearance 向 NSAppearance 请求指定命名的外观。名称用 alloc/init 创建后再
+// release，因此调用点不依赖 autorelease pool。
 func namedAppearance(class objc.ID, named objc.SEL, name string) objc.ID {
 	bytes := append([]byte(name), 0)
 	nsstringClass := objc.GetClass("NSString")
@@ -59,7 +57,7 @@ func namedAppearance(class objc.ID, named objc.SEL, name string) objc.ID {
 	appearance := objc.Send[objc.ID](class, named, str)
 	objc.Send[objc.ID](str, objc.RegisterName("release"))
 	if appearance != 0 {
-		// The cache holds it for as long as the process runs.
+		// 缓存会持有它直到进程结束。
 		objc.Send[objc.ID](appearance, objc.RegisterName("retain"))
 	}
 	return appearance
@@ -70,9 +68,8 @@ func available() bool {
 	return bridgeOK
 }
 
-// SetDark gives the native window handle the vibrant dark appearance. It
-// reports whether it was set: a zero handle, an object that does not answer
-// setAppearance:, and a platform without AppKit are all false.
+// SetDark 给原生窗口句柄设置 vibrant dark 外观。返回值表示是否设置成功：
+// 句柄为零、对象不响应 setAppearance:、平台无 AppKit 时均返回 false。
 func (Controller) SetDark(window uintptr) bool {
 	if window == 0 {
 		return false

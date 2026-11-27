@@ -17,8 +17,7 @@ import (
 	"boku/internal/translate/openai"
 )
 
-// The translator reuses the balance panel's credential: one account, one
-// key, configured once.
+// 翻译器复用余额面板的凭据：同一账号、同一把 key，只配置一次。
 func TestDescriptorReusesThePanelCredential(t *testing.T) {
 	reply := New(httpc.New(httpc.Options{}))
 	if reply.ID() != contract.ProviderID {
@@ -42,8 +41,7 @@ func TestDescriptorReusesThePanelCredential(t *testing.T) {
 	}
 }
 
-// Without a key nothing is asked: an unauthenticated request would only
-// teach the endpoint that the key is wrong.
+// 没有 key 时不应发请求：未认证请求只会让接口判定 key 有误。
 func TestTranslateWithoutAKeyDoesNotAsk(t *testing.T) {
 	asked := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,8 +86,7 @@ func TestTranslateAsksAndReadsTheAnswer(t *testing.T) {
 		TargetLang: domain.LangChinese,
 	}
 
-	// A plain translation: the prompt asks for nothing but the text, and the
-	// answer is one line.
+	// 普通翻译：prompt 只要求译文，回答只有一行。
 	reply = "编译器把源代码转换成机器语言。"
 	result, err := translated.Translate(context.Background(), creds, request)
 	if err != nil {
@@ -125,8 +122,7 @@ func TestTranslateAsksAndReadsTheAnswer(t *testing.T) {
 		t.Errorf("a plain translation asked for annotations:\n%s", prompt)
 	}
 
-	// An annotated answer: the segments are read, and the source the result
-	// carries is the source the segments add up to.
+	// 带标注的回答：读取 segments，结果的源文由 segments 拼接而成。
 	reply = `{"s":"コンパイラ","r":"コンパイラ","g":"compiler","t":"编译器"}` + "\n" +
 		`{"s":"は","r":"ハ","t":"是"}`
 	annotated := request
@@ -207,9 +203,8 @@ func TestTranslateImageUsesTheMultimodalModel(t *testing.T) {
 	}
 }
 
-// Thinking-mode streams set content to null until the answer starts. That
-// is the shape DeepSeek actually sends for a screenshot, and it has to become
-// the translation rather than an unreadable response.
+// 思考模式的流在回答开始前把 content 置为 null，这是 DeepSeek 实际发送的截图响应形态，
+// 必须解析为翻译结果而非不可读响应。
 func TestTranslateImageAcceptsThinkingChunks(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -230,8 +225,7 @@ func TestTranslateImageAcceptsThinkingChunks(t *testing.T) {
 	}
 }
 
-// A model that answers nothing is a failure at the boundary, never an empty
-// window.
+// 模型空回答属于边界失败，绝不能变成空窗口。
 func TestTranslateRefusesAnEmptyAnswer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":""}}]}`))
@@ -247,8 +241,7 @@ func TestTranslateRefusesAnEmptyAnswer(t *testing.T) {
 	}
 }
 
-// A text longer than one request should carry is cut, and the result says
-// so rather than pretending the whole thing was translated.
+// 超出单次请求承载长度的文本会被截断，结果须如实说明，而非假装全文已翻译。
 func TestTranslateReportsATruncatedText(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"译文"}}]}`))
@@ -288,7 +281,7 @@ func credentials() domain.Credentials {
 	}
 }
 
-// mustJSON encodes a string as a JSON literal for a test server's answer.
+// mustJSON 把字符串编码成 JSON 字面量，供测试服务器作为回答。
 func mustJSON(value string) string {
 	data, err := json.Marshal(value)
 	if err != nil {

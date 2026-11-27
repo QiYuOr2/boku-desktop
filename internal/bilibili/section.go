@@ -81,7 +81,7 @@ func (s *Section) Encode() (map[string]any, error) {
 	return map[string]any{keyEnabled: v.Enabled, keyUIDs: v.UIDs, keyRefresh: v.RefreshMinutes, keyDynamics: v.DynamicCount, keyLiveNotice: v.LiveNotifications, keyDynamicNotice: v.DynamicNotifications}, nil
 }
 
-// ParseUID accepts the UID itself or the profile URL copied from Bilibili.
+// ParseUID 接受 UID 本身，也接受从 B 站复制的个人主页 URL。
 func ParseUID(raw string) (int64, error) {
 	v := strings.TrimSpace(raw)
 	for _, prefix := range []string{"https://", "http://"} {

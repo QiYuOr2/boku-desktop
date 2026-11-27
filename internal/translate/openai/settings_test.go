@@ -2,9 +2,8 @@ package openai
 
 import "testing"
 
-// The address a user typed is turned into one the application will ask, and
-// anything that is not plain HTTP becomes nothing rather than being passed on:
-// a credential is about to be sent there.
+// 用户输入的地址被整理成应用将请求的地址；任何非纯 HTTP 的输入都变成空而非放行：即将
+// 把凭据发往此处。
 func TestNormalizeBaseURL(t *testing.T) {
 	cases := map[string]string{
 		"":                                  "",
@@ -32,18 +31,15 @@ func TestNormalizeBaseURL(t *testing.T) {
 	}
 }
 
-// An address without a scheme is https for a service somewhere else, and http
-// for one on this machine.
+// 无 scheme 的地址，外部服务用 https，本机服务用 http。
 //
-// It is the address a user copies out of a local service's own documentation —
-// "127.0.0.1:11434/v1" — and reading it as https is a request to a port that
-// speaks no TLS: the service is running, the card says the connection failed,
-// and nothing on either side says why.
+// 它是用户从本地服务文档里复制的地址——"127.0.0.1:11434/v1"——读成 https 就是向不讲 TLS 的
+// 端口发请求：服务明明在跑，卡片却报连接失败，两边都说不出原因。
 func TestNormalizeBaseURLPicksTheSchemeForTheHost(t *testing.T) {
 	https := []string{
 		"api.example.com/v1",
 		"example.com:8080/v1",
-		// A hostname that merely contains the word is not the machine.
+		// 仅包含该词的主机名不算本机。
 		"localhost.example.com/v1",
 		"notlocalhost/v1",
 	}
@@ -69,8 +65,7 @@ func TestNormalizeBaseURLPicksTheSchemeForTheHost(t *testing.T) {
 			t.Errorf("NormalizeBaseURL(%q) = %q, want %q", in, got, want)
 		}
 	}
-	// A scheme the user did write is kept, whichever host it names: an
-	// explicit https to a local port is a deliberate thing to ask for.
+	// 用户确实写了的 scheme 予以保留，无论指向哪台主机：显式 https 到本地端口是有意为之。
 	if got := NormalizeBaseURL("https://localhost:11434/v1"); got != "https://localhost:11434/v1" {
 		t.Errorf("an explicit scheme was overridden: %q", got)
 	}

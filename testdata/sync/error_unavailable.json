@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "unavailable",
+    "message": "database unavailable",
+    "retryable": true
+  }
+}
