@@ -1,6 +1,5 @@
-// Package loopback captures the default playback or microphone device and
-// hands the recognizer 16 kHz mono s16le. The conversion is separate from the
-// device so it can be tested without one.
+// Package loopback 采集默认的播放或麦克风设备，并把 16 kHz 单声道 s16le 交给识别器。
+// 转换逻辑与设备分离，便于在没有设备的条件下测试。
 package loopback
 
 import (
@@ -11,15 +10,15 @@ import (
 )
 
 const (
-	// TargetRate is what CrispASR reads from stdin.
+	// CrispASR 从 stdin 读取的采样率。
 	TargetRate = 16000
-	// FormatFloat32 is interleaved little-endian IEEE float samples.
+	// 交错的小端 IEEE float 采样。
 	FormatFloat32 = "f32"
-	// FormatS16 is interleaved little-endian signed 16-bit samples.
+	// 交错的小端有符号 16 位采样。
 	FormatS16 = "s16"
 )
 
-// PCM is interleaved audio in one of the two formats a device actually gives.
+// PCM 是设备实际输出的两种格式之一的交错音频。
 type PCM struct {
 	Format     string
 	SampleRate int
@@ -27,7 +26,7 @@ type PCM struct {
 	Data       []byte
 }
 
-// ToS16Mono16k mixes channels and resamples to 16 kHz mono s16le.
+// 混合声道并重采样为 16 kHz 单声道 s16le。
 func ToS16Mono16k(in PCM) ([]byte, error) {
 	if in.SampleRate <= 0 || in.Channels <= 0 {
 		return nil, fmt.Errorf("loopback: sample rate %d channels %d", in.SampleRate, in.Channels)
@@ -115,13 +114,13 @@ func floatToS16(sample float64) uint16 {
 	return uint16(int16(scaled))
 }
 
-// ErrUnsupported is a platform this build does not capture on.
+// 本构建平台不支持采集。
 var ErrUnsupported = errors.New("loopback: this platform has no capture")
 
-// ErrPermission is a capture the user has not allowed.
+// 用户未授权的采集。
 var ErrPermission = errors.New("loopback: permission denied")
 
-// DeniedError says which permission is missing and where it is turned on.
+// 说明缺少哪个权限以及在哪里开启。
 type DeniedError struct {
 	Kind        string
 	SettingsURL string

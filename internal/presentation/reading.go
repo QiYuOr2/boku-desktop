@@ -2,8 +2,8 @@ package presentation
 
 import "github.com/egoist/mygo/ui"
 
-// ReadingDesign supplies shared components and current theme tokens to compact
-// reading features. Components build immediately; no Element is retained.
+// ReadingDesign 向紧凑阅读功能提供共享组件与当前主题 token。
+// 组件即时构建，不持有任何 Element。
 type ReadingDesign struct {
 	QuickDivider                                                                            func(*ui.Context)
 	QuickBlock                                                                              func(*ui.Context, func())

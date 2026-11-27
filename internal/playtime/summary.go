@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-// Run is one session's share of a local day. The times are clipped to that
-// day, and Seconds is the whole seconds of the overlap. UntilMidnight means
-// the session continued into the next day, so the day's end is not a stop.
+// Run 是一局在某个本地日内的份额。时间被裁剪到该日，Seconds 为重叠的整秒数。
+// UntilMidnight 表示该局延续到次日，因此该日末尾并非结束。
 type Run struct {
 	StartedAt     time.Time
 	EndedAt       time.Time
@@ -17,7 +16,7 @@ type Run struct {
 	Seconds       int64
 }
 
-// GameDay is one game's play on one local day, longest first when listed.
+// GameDay 是一个游戏在一个本地日的游玩，列出时按秒数从长到短。
 type GameDay struct {
 	AppID   string
 	Name    string
@@ -25,25 +24,23 @@ type GameDay struct {
 	Runs    []Run
 }
 
-// DayTotal is the play on one local midnight.
 type DayTotal struct {
 	Day     time.Time
 	Seconds int64
 }
 
-// CalendarDay is one cell of a month. Blank is the empty cell before the
-// first of the month, so the columns stay Sunday through Saturday.
+// CalendarDay 是月历的一格。Blank 是当月第一天之前的空单元格，
+// 以保持周日到周六的列序。
 type CalendarDay struct {
 	Day     time.Time
 	Seconds int64
 	Blank   bool
 }
 
-// GamesOn lists each game that overlaps the local day of day. now ends a
-// session that is still running. A session that crosses midnight contributes
-// only its share of this day.
-// LatestPlayedDay is the newest local day, up to now, that has any play.
-// A session that stops exactly at midnight belongs to the day before.
+// GamesOn 列出与 day 所在本地日重叠的每个游戏。now 用于结束仍在进行的一局；
+// 跨午夜的一局只计入本日份额。
+// LatestPlayedDay 返回截至 now 最近一个有任何游玩的本地日。
+// 恰好停在午夜的一局归入前一天。
 func LatestPlayedDay(sessions []Session, now time.Time) (time.Time, bool) {
 	if now.IsZero() {
 		return time.Time{}, false
@@ -78,7 +75,7 @@ func LatestPlayedDay(sessions []Session, now time.Time) (time.Time, bool) {
 	return latest, found
 }
 
-// DayHeading names a local day relative to now: 今天, 昨日, or a date.
+// DayHeading 以相对 now 的方式命名本地日：今天、昨日，或日期。
 func DayHeading(day, now time.Time) string {
 	loc := now.Location()
 	shown := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, loc)
@@ -117,9 +114,8 @@ func GamesOn(sessions []Session, day, now time.Time) []GameDay {
 	return GamesDuring(sessions, start, start.AddDate(0, 0, 1), now)
 }
 
-// GamesDuring lists each game that overlaps [from, to), longest first.
-// now ends a session that is still running. A session contributes only the
-// seconds inside the range.
+// GamesDuring 列出与 [from, to) 重叠的每个游戏，从长到短。
+// now 用于结束仍在进行的一局；一局只计入区间内的秒数。
 func GamesDuring(sessions []Session, from, to, now time.Time) []GameDay {
 	if !from.Before(to) {
 		return nil
@@ -170,13 +166,12 @@ func GamesDuring(sessions []Session, from, to, now time.Time) []GameDay {
 	return games
 }
 
-// WeekOf is the Sunday-to-Saturday week that contains now, in now's location.
 func WeekOf(sessions []Session, now time.Time) []DayTotal {
 	return WeekContaining(sessions, now, now)
 }
 
-// WeekContaining is the Sunday-to-Saturday week that contains day.
-// now ends a session that is still running, including when day is an earlier week.
+// WeekContaining 是包含 day 的周日至周六的一周。
+// now 用于结束仍在进行的一局，即使 day 属于更早的一周。
 func WeekContaining(sessions []Session, day, now time.Time) []DayTotal {
 	if day.IsZero() || now.IsZero() {
 		return nil
@@ -192,8 +187,8 @@ func WeekContaining(sessions []Session, day, now time.Time) []DayTotal {
 	return days
 }
 
-// MonthOf is the calendar of month, Sunday in the first column, with a blank
-// cell for each weekday before the first. now ends a session still running.
+// MonthOf 是 month 的月历，周日排在第一列，第一天之前每个工作日前留一个空格。
+// now 用于结束仍在进行的一局。
 func MonthOf(sessions []Session, month, now time.Time) []CalendarDay {
 	if month.IsZero() || now.IsZero() {
 		return nil
@@ -213,8 +208,7 @@ func MonthOf(sessions []Session, month, now time.Time) []CalendarDay {
 	return cells
 }
 
-// PlayedBaseline is the month's play divided by the days that have any.
-// A month with no play has no baseline.
+// PlayedBaseline 是本月总游玩除以有游玩的天数。没有游玩的月份没有基准。
 func PlayedBaseline(cells []CalendarDay) int64 {
 	var total int64
 	var days int
@@ -231,10 +225,8 @@ func PlayedBaseline(cells []CalendarDay) int64 {
 	return total / int64(days)
 }
 
-// Heat ranks a day against baseline. 0 is no play, the blank color.
-// Baseline is the average of days that were played: half of it is 1,
-// just under it is 2, the baseline itself is 3, and one and a half
-// times it is 4.
+// Heat 按 baseline 给某天排名。0 为无游玩，即空白色。
+// Baseline 是有游玩日的平均值：其一半为 1，略低于它为 2，等于它为 3，一倍半为 4。
 func Heat(seconds, baseline int64) int {
 	if seconds <= 0 {
 		return 0
@@ -254,8 +246,8 @@ func Heat(seconds, baseline int64) int {
 	}
 }
 
-// FormatSeconds writes a duration the panel can show. Hours drop the
-// leftover seconds; a span under a minute keeps them.
+// FormatSeconds 写出一段可展示的时长。超过一小时则略去剩余秒数；
+// 不足一分钟的时长则保留秒数。
 func FormatSeconds(seconds int64) string {
 	if seconds < 0 {
 		seconds = 0

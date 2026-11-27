@@ -2,10 +2,8 @@
 
 package httpc
 
-// platformProxy answers with nothing: this build reads no proxy setting of its
-// own. The environment is what a program on these platforms is expected to look
-// at, and ProxyFunc asks it first on every platform.
+// platformProxy 返回空：本构建不读取自身的代理设置。这些平台上的程序预期
+// 查看环境变量，ProxyFunc 在任何平台都先问环境。
 //
-// Linux has a setting of its own — gsettings — that could be read here, and it
-// is not read yet. macOS reads scutil in proxy_darwin.go.
+// Linux 有自身的设置 gsettings，尚未读取。macOS 在 proxy_darwin.go 里读 scutil。
 func platformProxy() (proxySettings, error) { return proxySettings{}, nil }

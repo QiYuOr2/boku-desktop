@@ -42,7 +42,7 @@ func (r *registry) Adapter(id string) (domain.Adapter, error) {
 	return adapter, nil
 }
 
-// fakeProvider is a provider whose answer the test decides.
+// fakeProvider 的回答由测试决定。
 type fakeProvider struct {
 	id         string
 	descriptor domain.ProviderDescriptor
@@ -52,8 +52,7 @@ type fakeProvider struct {
 	last   domain.Credentials
 	result domain.FetchResult
 	err    error
-	// gate, when set, holds every fetch until the test lets it go, so
-	// concurrent callers really do overlap.
+	// gate 设置后，每次 fetch 都会阻塞直到测试放行，以保证并发调用确实重叠。
 	gate chan struct{}
 }
 
@@ -133,8 +132,7 @@ func (f *fakeProvider) hold() chan struct{} {
 	return f.gate
 }
 
-// fakeAdapter maps a fetch result to a snapshot of whatever the panel asks
-// for, without inventing a vendor shape.
+// fakeAdapter 把取数结果映射成面板所需指标的快照，不虚构厂商结构。
 type fakeAdapter struct{ id string }
 
 func (a fakeAdapter) ProviderID() string { return a.id }
@@ -158,7 +156,7 @@ func (a fakeAdapter) Normalize(result domain.FetchResult, panel domain.Panel) (d
 	}, nil
 }
 
-// brokenAdapter answers with whatever it was given on purpose.
+// brokenAdapter 故意原样返回给它的内容。
 type brokenAdapter struct {
 	id       string
 	snapshot domain.Snapshot
@@ -196,8 +194,7 @@ func testDef() PanelDef {
 	}
 }
 
-// newTestPanels builds the service over a fake provider; store may be nil,
-// in which case one key is stored under "fake.apiKey".
+// newTestPanels 在 fake provider 之上构建服务；store 可为 nil，此时将在 "fake.apiKey" 下存一个密钥。
 func newTestPanels(t *testing.T, provider *fakeProvider, store domain.SecretStore, defs ...PanelDef) *Panels {
 	t.Helper()
 	reg := newRegistry()
@@ -219,9 +216,6 @@ func newTestPanels(t *testing.T, provider *fakeProvider, store domain.SecretStor
 	return panels
 }
 
-// An optional panel can be turned off. It leaves the list — so nothing draws
-// it and nothing fetches it — and the choice is written where the other
-// switches live, in the file every part of the application writes.
 func TestAnOptionalPanelCanBeTurnedOff(t *testing.T) {
 	provider := newFakeProvider()
 	reg := newRegistry()
@@ -234,8 +228,7 @@ func TestAnOptionalPanelCanBeTurnedOff(t *testing.T) {
 	always.Panel.Title = "一直显示"
 	always.Panel.SortOrder = 20
 
-	// A credential, so that a refresh of a panel that is on has something to
-	// fetch with.
+	// 存入凭据，使开启状态的面板刷新时能取到数。
 	store := newMemoryStore()
 	if err := store.Put(context.Background(), domain.CredentialKey("fake", "apiKey"), []byte("sk-test"), domain.SecretMeta{ProviderID: "fake"}); err != nil {
 		t.Fatalf("Put failed: %v", err)
@@ -249,7 +242,7 @@ func TestAnOptionalPanelCanBeTurnedOff(t *testing.T) {
 		t.Fatalf("LoadChoices failed: %v", err)
 	}
 
-	// Nothing has been chosen: both are listed.
+	// 尚未做出选择：两个都列出。
 	if listed := panels.List(); len(listed) != 2 {
 		t.Fatalf("List returned %d panels, want both before any choice: %+v", len(listed), listed)
 	}
@@ -270,7 +263,7 @@ func TestAnOptionalPanelCanBeTurnedOff(t *testing.T) {
 	if choices := panels.OptionalPanels(); len(choices) != 1 || choices[0].On {
 		t.Errorf("the switches are %+v, want the optional panel off", choices)
 	}
-	// The choice is in the section, not only in memory.
+	// 选择写入了 section，而不只在内存中。
 	if on, chosen := tools.section.Choices()[optional.Panel.ID]; !chosen || on {
 		t.Errorf("the stored choices are %v, want the panel off", tools.section.Choices())
 	}
@@ -278,7 +271,7 @@ func TestAnOptionalPanelCanBeTurnedOff(t *testing.T) {
 		t.Errorf("the settings were saved %d times, want once", tools.saves)
 	}
 
-	// A panel that is off is not asked at all, even by a caller that insists.
+	// 已关闭的面板完全不会被询问，即使调用方坚持要刷新。
 	if _, err := panels.Refresh(context.Background(), optional.Panel.ID); !errors.Is(err, domain.ErrNotFound) {
 		t.Errorf("Refresh of a panel that is off = %v, want ErrNotFound", err)
 	}
@@ -289,7 +282,7 @@ func TestAnOptionalPanelCanBeTurnedOff(t *testing.T) {
 		t.Errorf("the provider was called %d times, want none while the panel is off", provider.count())
 	}
 
-	// And back on: it is listed again, and it is asked.
+	// 重新打开：它再次被列出，也会被询问。
 	if err := panels.SetPanelOn(context.Background(), optional.Panel.ID, true); err != nil {
 		t.Fatalf("SetPanelOn failed: %v", err)
 	}
@@ -304,8 +297,6 @@ func TestAnOptionalPanelCanBeTurnedOff(t *testing.T) {
 	}
 }
 
-// A panel that is not optional has no switch, and one that is not defined has
-// nothing to switch: both are refused rather than stored.
 func TestOnlyOptionalPanelsCanBeTurnedOff(t *testing.T) {
 	provider := newFakeProvider()
 	reg := newRegistry()
@@ -325,8 +316,6 @@ func TestOnlyOptionalPanelsCanBeTurnedOff(t *testing.T) {
 	}
 }
 
-// The choices are read from the file at assembly: a panel the user turned off
-// is off from the first frame, without anything having to ask.
 func TestTheStoredChoicesAreReadAtAssembly(t *testing.T) {
 	provider := newFakeProvider()
 	reg := newRegistry()
@@ -340,8 +329,7 @@ func TestTheStoredChoicesAreReadAtAssembly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPanels failed: %v", err)
 	}
-	// Before the choices are read, nothing is off: a service that has not
-	// read the file lists what it was built with.
+	// 读取选择之前，没有任何面板被关闭：尚未读取文件的服务列出它构建时所带的面板。
 	if listed := panels.List(); len(listed) != 1 {
 		t.Fatalf("List returned %+v, want the panel before the choices are read", listed)
 	}
@@ -353,8 +341,6 @@ func TestTheStoredChoicesAreReadAtAssembly(t *testing.T) {
 	}
 }
 
-// A store that cannot be written still flips the switch for this run: the
-// user's click is not refused because a file is read-only.
 func TestASwitchThatCannotBeStoredStillWorks(t *testing.T) {
 	provider := newFakeProvider()
 	reg := newRegistry()
@@ -376,7 +362,6 @@ func TestASwitchThatCannotBeStoredStillWorks(t *testing.T) {
 	}
 }
 
-// With no settings store at all the switches still work, for this run.
 func TestSwitchesWithoutAStore(t *testing.T) {
 	provider := newFakeProvider()
 	reg := newRegistry()
@@ -621,7 +606,7 @@ func TestRefreshIfNeededOnlyAsksWhenItHasTo(t *testing.T) {
 		t.Errorf("the provider was called %d times, want 1", provider.count())
 	}
 
-	// Ten minutes later the snapshot is stale by the panel's own interval.
+	// 十分钟后，快照按面板自身的间隔已过期。
 	panels.now = func() time.Time { return now.Add(11 * time.Minute) }
 	view := panels.View("panel-1")
 	if !view.Stale {
@@ -674,7 +659,7 @@ func TestConcurrentRefreshesBecomeOneRequest(t *testing.T) {
 		}(i)
 	}
 
-	// Wait until exactly one fetch is running, then let it answer.
+	// 等到恰好有一个 fetch 在运行，再让它返回。
 	deadline := time.Now().Add(2 * time.Second)
 	for provider.count() == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
@@ -739,8 +724,7 @@ func TestListOrdersEnabledPanels(t *testing.T) {
 	}
 }
 
-// A refresh interval of zero means "only when asked", so a snapshot never
-// goes stale by itself.
+// 刷新间隔为零意味着"仅在需要时"，因此快照自身永不过期。
 func TestAZeroIntervalNeverGoesStale(t *testing.T) {
 	def := testDef()
 	def.Panel.RefreshEvery = 0

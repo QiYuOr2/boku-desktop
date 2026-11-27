@@ -129,7 +129,7 @@ func NewLayout(layout *preferences.QuickWindowLayout, store preferences.LayoutSt
 	return &LayoutState{layout: layout, store: store, host: host, layoutMark: layoutMark, eyeMark: eye, eyeOffMark: eyeOff, gripMark: grip, marks: marks}
 }
 
-// SetOffer drops a block this system cannot show. Nil offers every block.
+// 过滤掉本系统无法展示的区块；offer 为 nil 时展示全部。
 func (s *LayoutState) SetOffer(offer func(string) bool) {
 	if s != nil {
 		s.offer = offer

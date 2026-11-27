@@ -1,23 +1,10 @@
-// Package settings stores the application's own configuration as one file,
-// under the user data directory:
+// Package settings 把应用配置存成用户数据目录下的单个文件 settings.json。
 //
-//	settings.json    what the user chose about Boku
+// 存储本身不知道里面有什么：每个有设置的功能注册一个 Section，声明自己的名字
+// 以及如何读写自己的键。功能只能拿到自己那份，无法经此触及其他功能的设置。
 //
-// It knows nothing about what is in it. Each feature that has settings
-// registers a Section: a name, and how that feature's own configuration is
-// written down. This package reads the file, hands each section its own part
-// of it, and writes back only the parts that changed.
-//
-// That ignorance is the point. A settings store that knew the fields would
-// have to be edited whenever any feature gained one, and every feature would
-// be able to reach every other feature's settings through it. Here a feature
-// can only ever be handed its own section — the type it decodes into lives in
-// that feature's package, and no other package has a reason to name it.
-//
-// The file is written through internal/platform/atomicfile, so a crash
-// mid-write leaves the previous file rather than half of a new one. A file
-// that cannot be read is an error: the window would otherwise show defaults
-// the user never chose and then write them back.
+// 经 atomicfile 写入，写到一半崩溃会保留旧文件。读不出的文件按错误处理，
+// 否则界面会显示用户从未选过的默认值再写回磁盘。
 package settings
 
 import (
@@ -32,69 +19,47 @@ import (
 	"boku/internal/platform/atomicfile"
 )
 
-// FileVersion is the shape this build reads and writes. A file from another
-// version is refused rather than partly understood.
+// FileVersion 是当前构建读写的文件版本；版本不符的文件会被拒绝，而非被部分解读。
 const FileVersion = 1
 
-// Section is one feature's configuration, as that feature knows it.
+// Section 是一个功能的配置，以该功能自己的方式表示。
 //
-// The store never looks inside. Decode is handed the file's tool settings and
-// takes the ones it owns; Encode hands back the ones it owns. The two are the
-// only place the storage format and a feature's own type meet, which is why a
-// feature can gain a setting without this package being touched.
-//
-// Decode is given every feature's keys rather than only its own — the file is
-// one flat object, and that is what keeps a user's existing settings readable
-// without a migration. Taking only its own keys is therefore each section's
-// own discipline, and Encode's job is the other half of it: the map it returns
-// is merged into the file, so a section that returned another feature's key
-// would be writing settings it does not own.
+// 存储从不查看其内部：二者是文件格式与功能类型唯一的交界，新增设置无需改动本包。
+// 文件是扁平对象，各个 Decode 拿到的是全部功能的键，只取自己的键是各 Section 的纪律；
+// Encode 交回的键会合并进文件，交回别人的键就等于写了不归自己管的设置。
 type Section interface {
-	// Name is the section's name, for errors. It is not a key in the file:
-	// the settings of every feature share one flat object there, which is
-	// the shape §8 of the storage design documents and a person reads.
+	// Name 仅用于错误信息，不是文件里的键。
 	Name() string
-	// Decode reads this feature's settings out of values, which holds the
-	// keys of every feature. A key that is absent leaves the setting as it
-	// is, so a file written before a key existed gives that key's default
-	// rather than a zero.
+	// Decode 缺失的键保持原样，使早期写入的文件给出默认值而非零值。
 	Decode(values map[string]json.RawMessage) error
-	// Encode returns this feature's settings as the keys it owns.
+	// Encode 返回本功能拥有的键。
 	Encode() (map[string]any, error)
 }
 
-// Store is settings.json. It is safe to use from several goroutines.
+// Store 对应 settings.json，可在多个 goroutine 中安全使用。
 type Store struct {
 	Path string
 
-	// mu guards the file, the sections and every read-modify-write: a change
-	// made while another one is in flight must not be lost, and the only way
-	// to promise that is to hold one lock across the read and the write.
+	// mu 保护文件、sections 及每次读-改-写：并发改动不丢失的前提是读与写之间持同一把锁。
 	mu       sync.Mutex
 	sections []Section
 	byName   map[string]Section
-	// unclaimed holds the keys the file had and no section owns, as they were
-	// read: a hand-written key, or one a section dropped since. They are
-	// written back unchanged, so that changing one setting does not shrink a
-	// file the user is editing. The store still does not know what they mean.
+	// unclaimed 保存文件里无人认领的键（手写的或某 Section 后来放弃的），按原样写回，
+	// 避免改一个设置就缩小用户正在编辑的文件。
 	unclaimed map[string]json.RawMessage
 }
 
-// document is what settings.json holds: the version, and the flat object the
-// features' settings share.
+// document 是 settings.json 的结构：版本号，以及各功能共享的扁平对象。
 //
-// The settings of every feature sit in one "tools" object rather than in one
-// entry each. That is the shape every file already in the wild has, and the
-// shape §8 of the storage design describes to a user; keeping it is what lets this
-// package stop knowing the fields without any file needing a migration.
+// 所有功能的键都平铺在同一个 "tools" 对象里。这是现有文件的形状，保持它即可
+// 无需认识字段、也无需任何迁移。
 type document struct {
 	Version int                        `json:"version"`
 	Tools   map[string]json.RawMessage `json:"tools"`
 }
 
-// New returns the store over a path, with the sections it should read and
-// write. A missing file is not an error: every section keeps its own defaults
-// and writes on the first change.
+// New 在给定路径上创建 Store，并注册要读写的 sections。
+// 文件不存在不算错误：各 Section 保留默认值，首次改动时再写入。
 func New(path string, sections ...Section) (*Store, error) {
 	if path == "" {
 		return nil, fmt.Errorf("settings: the store has no path")
@@ -117,12 +82,10 @@ func New(path string, sections ...Section) (*Store, error) {
 	return store, nil
 }
 
-// Load reads the file into every registered section.
+// Load 把文件读入所有已注册的 Section。
 //
-// A key the file does not hold is left as it is: the feature's default, which
-// is what a user who has never saved anything should get. That is also what
-// makes a new setting work without a migration — a file written before the key
-// existed simply has no entry for it.
+// 文件里没有的键保持原样（即功能默认值）：这是从未保存过设置的用户应有的结果，
+// 也是新增设置无需迁移的原因。
 func (s *Store) Load(ctx context.Context) error {
 	if err := kit.ContextErr(ctx); err != nil {
 		return err
@@ -132,14 +95,11 @@ func (s *Store) Load(ctx context.Context) error {
 	return s.read()
 }
 
-// read loads the file into every section.
+// read 把文件读入每个 Section。
 //
-// A decode that fails part-way is the one case where the sections and the file
-// disagree: the sections before the failing one have already taken what the
-// file said, and those after it have not. Telling the caller is all that can be
-// done here — the file itself is not wrong, and the failure is the section's —
-// but a section must be able to make Decode all-or-nothing if it cares, and
-// this is the note that says so.
+// Decode 中途失败时，失败前的 Section 已按文件取值、其后的还没有，两者会不一致。
+// 文件本身没错、错在 Section，这里只能把错误告诉调用方；Section 若在意，
+// 应自己保证 Decode 的原子性。
 func (s *Store) read() error {
 	data, err := os.ReadFile(s.Path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -165,9 +125,8 @@ func (s *Store) read() error {
 	return nil
 }
 
-// rememberUnclaimed keeps the keys of the file that no section claims, so that
-// a save puts them back. It has to run after every Decode: what a section owns
-// is only known once every section has read the file.
+// rememberUnclaimed 保留文件里无人认领的键，以便保存时放回。必须在所有 Decode
+// 之后运行：一个 Section 拥有哪些键，要等所有 Section 都读过文件才知道。
 func (s *Store) rememberUnclaimed(tools map[string]json.RawMessage) {
 	if len(tools) == 0 {
 		return
@@ -176,8 +135,7 @@ func (s *Store) rememberUnclaimed(tools map[string]json.RawMessage) {
 	for _, section := range s.sections {
 		values, err := section.Encode()
 		if err != nil {
-			// A section that cannot say what it owns leaves the question
-			// open; the write it is about to be part of reports the error.
+			// 说不清自己拥有哪些键的 Section 会把问题留到即将进行的写入处报错。
 			continue
 		}
 		for key := range values {
@@ -197,20 +155,13 @@ func (s *Store) rememberUnclaimed(tools map[string]json.RawMessage) {
 	s.unclaimed = unclaimed
 }
 
-// Update reads the file, hands one section to change, and writes the whole
-// document back.
+// Update 读取文件，交给一个 Section 修改，再把整份文档写回。
 //
-// This is the only way a setting is changed. A caller that reads with Load,
-// changes what it read and writes with Save is doing the same thing in three
-// steps, and two such callers overwrite each other: both read the file as it
-// was, both write back what they read plus their own change, and the second
-// write undoes the first. Keeping the three steps in one critical section is
-// what makes that impossible.
+// 这是改动设置的唯一入口。若用 Load 读、改、再 Save 写，两个调用方会互相覆盖：
+// 双方都读到旧文件、各写回「读到的 + 自己的改动」，后写的撤销先写的。放进同一临界区即可避免。
 //
-// The section named is the one whose change is run. The others are re-read and
-// written back from the store's own copy of the file rather than from anything
-// the caller holds, so a change to one feature's settings cannot put back
-// another feature's stale values.
+// change 只作用于指定 Section；其余 Section 从文件重读并写回，因此一个功能的改动
+// 不会带回另一个功能的旧值。
 func (s *Store) Update(ctx context.Context, name string, change func() error) error {
 	if err := kit.ContextErr(ctx); err != nil {
 		return err
@@ -229,7 +180,7 @@ func (s *Store) Update(ctx context.Context, name string, change func() error) er
 	return s.write()
 }
 
-// Save writes every section as it stands.
+// Save 按当前状态写出所有 Section。
 func (s *Store) Save(ctx context.Context) error {
 	if err := kit.ContextErr(ctx); err != nil {
 		return err
@@ -251,17 +202,14 @@ func (s *Store) write() error {
 			if err != nil {
 				return fmt.Errorf("settings: encode %s: %s: %w", section.Name(), key, err)
 			}
-			// Two features writing one key is a mistake in the assembly,
-			// not something to resolve silently: whichever won would be
-			// decided by the order the sections were registered in.
+			// 两个功能写同一个键属于装配错误，不能静默取舍：谁赢只会取决于注册顺序。
 			if _, taken := tools[key]; taken {
 				return fmt.Errorf("settings: %s and another section both write %q", section.Name(), key)
 			}
 			tools[key] = raw
 		}
 	}
-	// Keys nobody claims go back as they came. A key a section did claim is
-	// the section's to write, so it is not put back from here.
+	// 无人认领的键按原样放回；已被 Section 认领的键归该 Section 写，不从这里放回。
 	for key, raw := range s.unclaimed {
 		if _, claimed := tools[key]; claimed {
 			continue
@@ -279,16 +227,11 @@ func (s *Store) write() error {
 	return nil
 }
 
-// Into decodes one key of a section's settings into out.
+// Into 把 Section 设置中的某个键解码进 out。
 //
-// It is the answer to "the file does not have this key": out is left exactly
-// as it was, which is how a feature keeps the default it started with. Passing
-// the zero value would read as a choice the user made — every switch off,
-// every interval zero — and a file written before a key existed would turn
-// that feature off for everybody.
-//
-// It is here, next to the file format, so that every section answers that
-// question the same way instead of each deciding for itself.
+// 文件里没有这个键时 out 保持原样，功能便保留初始默认值。若传入零值，就会被当成
+// 用户的选择（开关全关、时长全零），从而把该功能对所有人关掉。
+// 放在文件格式旁边，让各 Section 用同一方式处理缺失键。
 func Into(values map[string]json.RawMessage, key string, out any) error {
 	raw, present := values[key]
 	if !present {

@@ -10,33 +10,23 @@ import (
 	"boku/internal/platform/autostart"
 )
 
-// This file is start-at-login: the switch in Settings → 通用, and the state
-// that section is drawn from.
+// 本文件实现开机自启：设置 → 通用里的开关及其状态来源。
 //
-// The switch is not a setting of Boku's own, and it has no key in
-// settings.json. Whether the system starts the application at login is a fact
-// the system keeps; a copy of it in Boku's own file would be a second truth,
-// and it would drift the first time the user turned the start off in Task
-// Manager, in System Settings, or in any tool that lists their login items.
-// What the section shows is the platform's own answer, read when it is drawn.
-//
-// The read and the write are both local — one registry value, or one system
-// login item — so the switch answers in the frame it was pressed in rather
-// than through a background goroutine the way the network-written settings do.
+// 它不属于 Boku 自己的设置，settings.json 里没有对应键：是否开机启动由系统掌握，
+// 在 Boku 文件里再存一份会变成第二份真相并漂移。开关显示的始终是平台的回答，每帧读取。
+// 读写都是本地的（一个注册表值或一个系统登录项），因此开关在按下的那一帧就地作答，
+// 不经过网络设置那样的后台 goroutine。
 
-// autostartStatus is what the settings page says under the switch: what the
-// last press did, or why there is nothing to press.
+// autostartStatus 是设置页在开关下方显示的内容：上次操作的结果，或没有开关可操作的原因。
 type autostartStatus struct {
 	text string
 	kind presentation.NoteKind
 }
 
-// autostartLauncher builds the login start the switch would write.
+// autostartLauncher 构造开关要写入的开机启动项。
 //
-// Windows names the program and the framework's own "started by the system"
-// marker; macOS registers the running application bundle and ignores both.
-// The label is still passed because it is how the macOS manager finds the
-// launch agent written by the previous mechanism.
+// Windows 记下程序和「由系统启动」标记；macOS 登记应用包并忽略这两项。
+// 仍传 Label，是为了让 macOS 管理器找到旧机制写下的 launch agent。
 func (s *State) autostartLauncher() (autostart.Launcher, error) {
 	exe, err := autostart.BinaryPath()
 	if err != nil {
@@ -50,12 +40,9 @@ func (s *State) autostartLauncher() (autostart.Launcher, error) {
 	}, nil
 }
 
-// autostartState is what the general section draws: whether the switch is on,
-// whether it can be drawn at all, and what to say under it.
+// autostartState 是通用区绘制的内容：开关是否打开、能否绘制、下方提示。
 //
-// It is read once per frame rather than remembered: the answer is local, and
-// a page still showing the state from when it was opened would be exactly the
-// second truth this design does not keep.
+// 每帧读取而非缓存：答案是本地的，若显示打开时的旧状态，就会成为这套设计刻意不保留的第二份真相。
 func (s *State) autostartState() (on, enabled bool, status autostartStatus) {
 	if s.autostart == nil {
 		return false, false, autostartStatus{}
@@ -77,10 +64,8 @@ func (s *State) autostartState() (on, enabled bool, status autostartStatus) {
 	return on, true, s.autostartStatus
 }
 
-// setAutostart turns the login start on or off and says what the system
-// answered. The switch is drawn from the same source on the next frame, so a
-// write the system refused shows as the old state with a line saying why —
-// rather than as a switch that moved and a start that did not happen.
+// setAutostart 打开或关闭开机自启，并给出系统的回答。下一帧开关仍从同一来源绘制，
+// 因此系统拒绝的写入会显示为旧状态加一行原因，而不是开关动了、启动却没发生。
 func (s *State) setAutostart(on bool) {
 	if s.autostart == nil {
 		return
@@ -111,38 +96,29 @@ func (s *State) setAutostart(on bool) {
 	s.host.Refresh()
 }
 
-// autostartUnsupportedNote is what the section says on a desktop with no
-// login start Boku can register. It is a fact about the platform, not a
-// failure of the user's, so it is drawn quietly.
+// 平台没有 Boku 能登记的开机启动方式时显示。这是平台事实而非用户失败，故以普通样式呈现。
 const autostartUnsupportedNote = "这个平台没有 Boku 能登记的开机启动方式。"
 
-// autostartApprovalNote is what the section says when the system has the
-// login item but the user has it switched off there. The switch stays off —
-// that is the system's answer — and the line says where to turn it back on.
+// 系统里存在登录项但用户在其中关闭了它时显示。开关保持关闭（这是系统的回答），
+// 提示行说明去哪里重新允许。
 const autostartApprovalNote = "系统里的登录项已被关闭；请在「系统设置 > 通用 > 登录项与扩展」中允许 Boku。"
 
-// autostartNotInstalledNote is what the section says when the application is
-// not in an Applications folder: a login item would name a program that is
-// not there at the next login, so it is refused.
+// 应用不在「应用程序」文件夹时显示：登录项会指向下一次登录时不存在的程序，故拒绝。
 const autostartNotInstalledNote = "请先把 Boku 放进「应用程序」文件夹，再打开开机启动。"
 
-// autostartLabel is what the switch says.
+// autostartLabel 是开关的文案。
 const autostartLabel = "开机自动启动"
 
-// autostartIdentifier is the application's identifier: the label the previous
-// macOS mechanism wrote its launch agent under. The current manager keeps it
-// only to find and remove that file on the first read, so an upgrade does not
-// leave two login starts behind.
+// autostartIdentifier 是应用标识，也是旧 macOS 机制写 launch agent 时用的 label。
+// 现在的管理器只用它来在首次读取时找到并删除那个旧文件，避免升级后残留两个登录项。
 //
-// Windows does not use it: a Run value is named after the program, which is
-// already Boku or Boku Dev.
+// Windows 不用它：Run 值以程序命名，已经是 Boku 或 Boku Dev。
 const autostartIdentifier = "com.boku.app"
 
-// autostartSwitch draws the switch and the lines under it.
+// autostartSwitch 绘制开关及其下方提示行。
 //
-// There is no disabled state to draw: where the platform has no login start,
-// the line says so and there is no checkbox at all. A checkbox that cannot be
-// clicked is a claim that there is something to click, and there is not.
+// 平台没有开机启动方式时不画禁用开关：提示行说明情况，且完全没有复选框。
+// 一个点不动的复选框等于声称有东西可点，而实际上没有。
 func (s *State) autostartSwitch(c *ui.Context) {
 	on, enabled, status := s.autostartState()
 	if enabled {

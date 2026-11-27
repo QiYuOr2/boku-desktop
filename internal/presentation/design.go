@@ -8,70 +8,57 @@ import (
 	"boku/internal/domain"
 )
 
-// This file is Boku's design system: the one place the application's look is
-// decided, and the one place a color or a metric is written down. Every
-// window is assembled from the pieces here, so that the quick window, the
-// settings window and the clipboard history read as one application.
+// 本文件是 Boku 的设计系统：应用外观唯一的决定处，也是颜色与度量唯一书写的地方。
+// 每个窗口都由这里的构件组装，因此快捷窗口、设置窗口与剪贴板历史读起来像同一个应用。
 //
-// The values are the ones the design gives, not the framework's defaults:
-// shadcn's slate border (#E2E8F0), its stone page (#FAFAF9), the brand green
-// #3B693D, and the same radius, control height and section rhythm in all
-// three windows. A screen says what a thing is — "this is a section's head",
-// "this is the main action" — and takes what that looks like from here.
+// 取值来自设计稿而非框架默认：shadcn 的 slate 边框（#E2E8F0）、stone 页面（#FAFAF9）、
+// 品牌绿 #3B693D，三个窗口共用相同的圆角、控件高度与节间距。界面只说“这是什么”，
+// 它长什么样由这里决定。
 //
-// Correctness: a view is built several times per frame, and MyGo builds it
-// again for every pointer or keyboard state, so a control can ask whether it
-// is hovered, pressed or focused while it is built. That is how the states
-// below are expressed — a background chosen from what the frame already
-// knows, never a value kept between frames. Nothing here keeps state, so
-// building a piece twice costs nothing.
+// 正确性：一帧内视图会被构建多次，MyGo 还会为每种指针或键盘状态重建一次，因此控件
+// 在构建时可以询问自己是否悬停、按下或聚焦。下面这些状态就是这样表达的——背景取自
+// 当前帧已知的信息，绝不在帧间保存值。这里不保存任何状态，构建两次没有代价。
 
-// palette is one appearance of the design system: every color the
-// application draws with, chosen together.
+// Palette 是设计系统的一个外观：应用绘制的每一种颜色，一起选定。
 //
-// There are two, and they are the same design rather than two designs. A
-// name means the same thing in both — colorSurface is the window's face in
-// either appearance — and only its value changes. The light palette is the
-// one the design's class names spell; the dark one is that design on a dark
-// page: the same slate/stone relationships, the same brand green, with the
-// surfaces inverted and the inks raised until they read.
+// 有两个，它们是同一套设计而非两套设计。名字在两者中含义相同——colorSurface
+// 在任一外观里都是窗口的底面——只有值不同。浅色调色板是设计稿类名拼写的那个；
+// 深色是它在深色页面上的版本：同样的 slate/stone 关系、同样的品牌绿，表面反转、
+// 墨色提亮直到可读。
 //
-// A third appearance would be a third palette. Nothing in the views knows
-// which one is installed; they ask for a name, and design.go decides what
-// that name is worth in the appearance the user chose.
+// 第三种外观就是第三套调色板。视图不知道装的是哪一套；它们请求一个名字，
+// 由 design.go 决定这个名字在用户选择的外观里值多少。
 type Palette struct {
 	Anime, Bilibili     ReadingAccent
 	CodexTile, CodexInk ui.Color
 	SteamTile, SteamInk ui.Color
-	// Faces.
+	// 表面。
 	surface, sidebar, field, muted, hover, active, rowAlt ui.Color
 	border, Hairline                                      ui.Color
 
-	// Text.
+	// 文本。
 	text, textSoft, textBody, textMuted, textFaint, inputValue ui.Color
 
-	// Brand and status. onBrand is the ink on a brand fill; onMark is the
-	// white a provider's drawing is made of inside its own colored tile.
+	// 品牌与状态。onBrand 是品牌实色上的墨色；onMark 是 provider 图形在其自带
+	// 彩色磁贴内所用的白色。
 	brand, brandHover, brandPressed, onBrand, onMark ui.Color
-	// brandTint and brandTintStrong are the brand at the two strengths a
-	// selected row is washed in.
+	// brandTint 与 brandTintStrong 是选中行所铺的两个强度的品牌色。
 	brandTint, brandTintStrong ui.Color
 
 	success, warning, danger                                 ui.Color
 	warningFill, warningBorder, warningHover, warningPressed ui.Color
 
-	// The colors a recorded copy is drawn in: a tile and its ink.
+	// 记录副本所用的颜色：磁贴及其墨色。
 	skyTile, skyInk, blueTile, blueInk           ui.Color
 	violetTile, violetInk, amberTile, amberInk   ui.Color
 	emeraldTile, emeraldInk, stoneTile, stoneInk ui.Color
 
 	readingInk, skeleton ui.Color
-	// tileEdge outlines a provider's own tile when its brand color would
-	// otherwise sit against a surface of the same darkness. It is nothing
-	// in the light appearance.
+	// tileEdge 在 provider 自带颜色本会与同深浅表面融在一起时给它描边。
+	// 浅色外观里它是无。
 	tileEdge ui.Color
 
-	// The translation card's own palette.
+	// 翻译卡片自己的调色板。
 	sourceInk, particle, Eyebrow, bodyInk, footerInk ui.Color
 	BadgeStoneFill, BadgeStoneInk                    ui.Color
 	BadgeBlueFill, BadgeBlueInk                      ui.Color
@@ -79,17 +66,16 @@ type Palette struct {
 	BadgeEmeraldFill, BadgeEmeraldInk                ui.Color
 	cardFoot, cardLine, chip, chipInk                ui.Color
 
-	// The quick window's own scale.
+	// 快捷窗口自己的色阶。
 	PanelInk, PanelNumber, PanelFaint, PanelBody ui.Color
 	PanelLine, PanelField, PanelBorder           ui.Color
 	PanelHover, PanelPress                       ui.Color
-	// The calendar's four steps above an empty day, from a short session
-	// to two hours or more.
+	// 游戏时长日历：空白天之上的四档，从短时段到两小时以上。
 	playHeat1, playHeat2, playHeat3, playHeat4 ui.Color
 }
 
-// lightPalette is the design as its own classes write it: white pages, slate
-// borders, stone inks and the brand green on top.
+// LightPalette 是设计稿类名所写的浅色版本：白页面、slate 边框、stone 墨色，
+// 品牌绿置顶。
 var LightPalette = Palette{
 	CodexTile: ui.Hex("#111111"), CodexInk: ui.Hex("#FFFFFF"),
 	SteamTile: ui.Hex("#171A21"), SteamInk: ui.Hex("#FFFFFF"),
@@ -189,16 +175,13 @@ var LightPalette = Palette{
 	playHeat4:   ui.Hex("#3B693D"),
 }
 
-// darkPalette is the same design at night. The page is the darkest surface
-// and every other face is a step above it — a field, a tile, a hover — so
-// that the light design's "one surface, lines drawn on it" still reads: the
-// lines are one step lighter than the page, and nothing is a bright band.
+// DarkPalette 是同一套设计的夜间版本。页面是最深的表面，其它每个面都高出一档
+// ——输入框、磁贴、悬停——从而保留浅色设计中“一个表面、在上面画线”的读法：线比
+// 页面浅一档，没有刺眼的亮带。
 //
-// The brand green is the lighter one the framework's dark accent already
-// used (#6FA776), because #3B693D would sink into a #18181B page; the ink on
-// it turns dark for the same reason. The kind tiles are the light families
-// at their 950 end, and their inks at the 300 end, so a recorded copy keeps
-// the color that says what it is without lighting up the list.
+// 品牌绿用框架深色强调色已经用的较亮那个（#6FA776），因为 #3B693D 会沉进
+// #18181B 的页面；上面的墨色因此转深。类型磁贴取浅色家族 950 端、其墨色取 300 端，
+// 使记录副本保留表明种类的颜色又不点亮整列。
 var DarkPalette = Palette{
 	CodexTile: ui.Hex("#E7E5E4"), CodexInk: ui.Hex("#18181B"),
 	SteamTile: ui.Hex("#171A21"), SteamInk: ui.Hex("#66C0F4"),
@@ -298,42 +281,33 @@ var DarkPalette = Palette{
 	playHeat4:   ui.Hex("#84BA8A"),
 }
 
-// The colors every view asks for, as the current appearance spells them.
+// 各视图请求的颜色，以当前外观的值书写。
 //
-// They are package values rather than parameters because the design system
-// is one namespace that every window draws from, and MyGo builds a window's
-// view as one synchronous pass on the main thread: applyDesign installs the
-// appearance at the top of that pass, and every name below is read after it.
-// A window therefore cannot be half light and half dark, and a background
-// goroutine never reads these — views are the only readers.
+// 它们是包级值而非参数，因为设计系统是所有窗口共用的一个命名空间，而 MyGo 在主线程
+// 上以一次同步流程构建窗口视图：applyDesign 在该流程开头安装外观，下面每个名字都在
+// 其后读取。因此一个窗口不会半浅半深，后台 goroutine 也从不读这些值——只有视图读。
 var (
-	// --- Faces -----------------------------------------------------------
+	// --- 表面 -----------------------------------------------------------
 
-	// colorSurface is the window's own face. Every window is drawn on it —
-	// content, header lines and footer alike — so a window reads as one
-	// surface with lines drawn on it rather than as a stack of bands.
+	// ColorSurface 是窗口自己的底面。每个窗口都画在它上面——内容、页眉线、
+	// 页脚——因此窗口读起来是一个带线条的表面，而不是一叠色带。
 	ColorSurface = LightPalette.surface
-	// colorField is the face of an input, and colorMuted the face of a tile
-	// that is not colored by what it stands for.
+	// ColorField 是输入框的底面，ColorMuted 是不代表任何具体事物磁贴的底面。
 	ColorField = LightPalette.field
 	ColorMuted = LightPalette.muted
-	// colorHover and colorActive are what a row or a button takes under the
-	// pointer and while it is pressed.
+	// ColorHover 与 ColorActive 是行或按钮在指针下、按下时所取的颜色。
 	ColorHover  = LightPalette.hover
 	ColorActive = LightPalette.active
 	ColorRowAlt = LightPalette.rowAlt
-	// colorSidebar is the face of the settings window's sidebar, the one
-	// region of a window that is not the window's own white: the design gives
-	// the navigation a face of its own, so that the page beside it reads as
-	// the content and the column as the way around it.
+	// ColorSidebar 是设置窗口侧栏的底面，是窗口里唯一不是自身白色的区域：
+	// 设计给导航一个独立底面，使旁边的页面读作内容、这一列读作导航。
 	ColorSidebar = LightPalette.sidebar
 
 	ColorBorder = LightPalette.border
-	// colorHairline is the line between two entries of a list: fainter than
-	// a border, because a list is one thing rather than a row of them.
+	// ColorHairline 是列表两项之间的线：比边框更淡，因为列表是一件事而非一排。
 	ColorHairline = LightPalette.Hairline
 
-	// --- Text ------------------------------------------------------------
+	// --- 文本 ------------------------------------------------------------
 
 	ColorText       = LightPalette.text
 	ColorTextSoft   = LightPalette.textSoft
@@ -342,18 +316,16 @@ var (
 	ColorTextFaint  = LightPalette.textFaint
 	ColorInputValue = LightPalette.inputValue
 
-	// --- Brand and status ------------------------------------------------
+	// --- 品牌与状态 ------------------------------------------------------
 
-	// colorBrand is the green of the one action a form is for, and of every
-	// other place the application asks for attention. It is the theme's
-	// accent too, so a checked box and a picked segment come along with it.
+	// ColorBrand 是表单唯一动作的绿，以及应用其它需要引起注意之处的绿。
+	// 它也是主题的强调色，因此勾选框和选中的分段控件随之而来。
 	ColorBrand        = LightPalette.brand
 	ColorBrandHover   = LightPalette.brandHover
 	ColorBrandPressed = LightPalette.brandPressed
 	ColorOnBrand      = LightPalette.onBrand
-	// colorOnMark is the white of a provider's own mark inside its tile. It
-	// stays white in both appearances: the tile is the brand's color, and
-	// the drawing on it is not text on the application's green.
+	// ColorOnMark 是 provider 图形在其磁贴内的白。两个外观里都保持白色：
+	// 磁贴是品牌色，上面的图形不是应用绿底上的文字。
 	ColorOnMark          = LightPalette.onMark
 	ColorBrandTint       = LightPalette.brandTint
 	ColorBrandTintStrong = LightPalette.brandTintStrong
@@ -362,17 +334,15 @@ var (
 	ColorWarning = LightPalette.warning
 	ColorDanger  = LightPalette.danger
 
-	// The warning panel: the one note on a page the user should not be able
-	// to miss.
+	// 警告面板：页面上唯一一条用户不应错过的提示。
 	ColorWarningFill    = LightPalette.warningFill
 	ColorWarningBorder  = LightPalette.warningBorder
 	ColorWarningHover   = LightPalette.warningHover
 	ColorWarningPressed = LightPalette.warningPressed
 
-	// --- The colors a recorded copy is drawn in --------------------------
+	// --- 记录副本所用的颜色 ----------------------------------------------
 
-	// Each is a pair: the face of the tile at the head of the row, and the
-	// color the mark and the kind's badge are drawn in.
+	// 每一对都是：行首磁贴的底面，以及图形和种类徽标所用的颜色。
 	ColorSkyTile, ColorSkyInk         = LightPalette.skyTile, LightPalette.skyInk
 	ColorBlueTile, ColorBlueInk       = LightPalette.blueTile, LightPalette.blueInk
 	ColorVioletTile, ColorVioletInk   = LightPalette.violetTile, LightPalette.violetInk
@@ -380,68 +350,59 @@ var (
 	ColorEmeraldTile, ColorEmeraldInk = LightPalette.emeraldTile, LightPalette.emeraldInk
 	ColorStoneTile, ColorStoneInk     = LightPalette.stoneTile, LightPalette.stoneInk
 
-	// colorReadingInk is how a reading above a word is written in the
-	// translation window: the design's stone-500.
+	// ColorReadingInk 是翻译窗口中词上方读音的墨色：设计的 stone-500。
 	ColorReadingInk = LightPalette.readingInk
-	// colorSkeleton is the face of a line that has not arrived yet.
+	// ColorSkeleton 是尚未到达的那行文本的底面。
 	ColorSkeleton = LightPalette.skeleton
-	// colorTileEdge outlines a provider's tile where its own color would
-	// otherwise disappear into the page. The light appearance has none.
+	// ColorTileEdge 在 provider 磁贴自身颜色会融进页面时给它描边。浅色外观没有。
 	ColorTileEdge = LightPalette.tileEdge
 
-	// --- The translation card's own palette ------------------------------
+	// --- 翻译卡片自己的调色板 --------------------------------------------
 
-	// The design is a stone scale rather than the slate one the rest of the
-	// application uses, because the card is a piece of the page's own text
-	// rather than a form: every color below is the one its class names.
-	ColorSourceInk = LightPalette.sourceInk // stone-900, the source text
-	ColorParticle  = LightPalette.particle  // stone-400, a particle between words
-	ColorEyebrow   = LightPalette.Eyebrow   // stone-400, the "原文" label
-	ColorBodyInk   = LightPalette.bodyInk   // stone-800, the translation
-	ColorFooterInk = LightPalette.footerInk // stone-400, the line at the foot
-	ColorLoanword  = LightPalette.brand     // the brand green, for a loanword
+	// 设计用 stone 色阶而非应用其它处所用的 slate，因为卡片是页面正文的一部分
+	// 而非表单：下面每个颜色都是其类名所指。
+	ColorSourceInk = LightPalette.sourceInk // stone-900，原文
+	ColorParticle  = LightPalette.particle  // stone-400，词间助词
+	ColorEyebrow   = LightPalette.Eyebrow   // stone-400，“原文”标签
+	ColorBodyInk   = LightPalette.bodyInk   // stone-800，译文
+	ColorFooterInk = LightPalette.footerInk // stone-400，页脚那一行
+	ColorLoanword  = LightPalette.brand     // 品牌绿，用于外来词
 
-	// Each language's badge: the face and the ink the design gives it.
+	// 各语言的徽标：设计赋予它的底面与墨色。
 	BadgeStoneFill, BadgeStoneInk     = LightPalette.BadgeStoneFill, LightPalette.BadgeStoneInk     // 日本語
 	BadgeBlueFill, BadgeBlueInk       = LightPalette.BadgeBlueFill, LightPalette.BadgeBlueInk       // English
 	BadgeVioletFill, BadgeVioletInk   = LightPalette.BadgeVioletFill, LightPalette.BadgeVioletInk   // 한국어
 	BadgeEmeraldFill, BadgeEmeraldInk = LightPalette.BadgeEmeraldFill, LightPalette.BadgeEmeraldInk // 中文
 
-	// The foot of the card is the design's stone-50 at half strength over
-	// the card's white, which is what the eye is shown: #FAFAF9 at 50%
-	// over #FFFFFF.
+	// ColorCardFoot 是设计 stone-50 覆盖在卡片白底上一半强度，即肉眼所见：
+	// #FAFAF9 以 50% 覆盖在 #FFFFFF 上。
 	ColorCardFoot = LightPalette.cardFoot
-	// colorCardLine is the hairline the design draws inside the card:
-	// stone-100 between the two blocks, stone-200/80 around it.
+	// ColorCardLine 是设计在卡片内画的细线：两块之间 stone-100，四周 stone-200/80。
 	ColorCardLine = LightPalette.cardLine
-	// The annotation chips: stone-50 on a stone-100 edge, with the word in
-	// stone-700 and its reading — or the loanword's own word — above it.
+	// 注释 chip：stone-100 描边的 stone-50，词为 stone-700，其上方读音或外来词原词。
 	ColorChip    = LightPalette.chip    // stone-50
 	ColorChipInk = LightPalette.chipInk // stone-700
 
-	// --- The quick window's own scale ------------------------------------
+	// --- 快捷窗口自己的色阶 ----------------------------------------------
 	//
-	// The flyout hangs over the desktop rather than sitting on a page, and
-	// the design draws it in stone: its chrome is not the slate the settings
-	// window uses. Each name below is the design's own class, and the piece
-	// that reads it is the one the design gives that value to.
-	PanelInk    = LightPalette.PanelInk    // stone-800, a block's name
-	PanelNumber = LightPalette.PanelNumber // stone-900, the number a block is about
-	PanelFaint  = LightPalette.PanelFaint  // stone-400, times, labels, quiet actions
-	PanelBody   = LightPalette.PanelBody   // stone-500, the clipboard line
-	PanelLine   = LightPalette.PanelLine   // stone-100, dividers and the footer's edge
-	PanelField  = LightPalette.PanelField  // stone-50, the clipboard row's face
-	PanelBorder = LightPalette.PanelBorder // stone-200, its hairline
-	PanelHover  = LightPalette.PanelHover  // stone-100, what a quiet action takes
-	PanelPress  = LightPalette.PanelPress  // stone-200, and what it takes pressed
+	// 浮窗悬于桌面而非页面之上，设计以 stone 绘制：其框架不是设置窗口用的 slate。
+	// 下面每个名字都是设计自己的类，读取它的构件就是设计赋予该值的那个。
+	PanelInk    = LightPalette.PanelInk    // stone-800，区块名
+	PanelNumber = LightPalette.PanelNumber // stone-900，区块所讲数字
+	PanelFaint  = LightPalette.PanelFaint  // stone-400，时间、标签、安静操作
+	PanelBody   = LightPalette.PanelBody   // stone-500，剪贴板那一行
+	PanelLine   = LightPalette.PanelLine   // stone-100，分隔线与页脚边
+	PanelField  = LightPalette.PanelField  // stone-50，剪贴板行的底面
+	PanelBorder = LightPalette.PanelBorder // stone-200，其细线
+	PanelHover  = LightPalette.PanelHover  // stone-100，安静操作悬停所取
+	PanelPress  = LightPalette.PanelPress  // stone-200，按下所取
 	PlayHeat1   = LightPalette.playHeat1
 	PlayHeat2   = LightPalette.playHeat2
 	PlayHeat3   = LightPalette.playHeat3
 	PlayHeat4   = LightPalette.playHeat4
 )
 
-// applyDesign installs one appearance for the pass that is about to build a
-// window. It is the only writer of the colors above.
+// ApplyDesign 为即将构建窗口的那一趟安装一个外观。它是上面颜色的唯一写入者。
 func ApplyDesign(dark bool) {
 	p := LightPalette
 	if dark {
@@ -522,7 +483,7 @@ func ApplyDesign(dark bool) {
 	PlayHeat4 = p.playHeat4
 }
 
-// HeatColor is one step of the playtime calendar. Zero is an empty day.
+// HeatColor 是游戏时长日历的一档。零是空白日。
 func HeatColor(level int) ui.Color {
 	switch level {
 	case 1:
@@ -539,64 +500,54 @@ func HeatColor(level int) ui.Color {
 	}
 }
 
-// The application's metrics, in points, taken from the design: every window
-// keeps a 20-point page edge, a section keeps 16 points between its head and
-// its groups, 12 points between rows, and 8 points between a label and the
-// control it names. Every control on a line is 36 points high.
+// 应用的点数度量，取自设计：每个窗口保持 20 点页边距，一节在标题与各组之间留
+// 16 点，行间 12 点，标签与其控件之间 8 点。同一行上的每个控件高 36 点。
 const (
-	// pageEdge is the window's own margin: the room the page keeps on every
-	// side, and the room the footer's version keeps inside it.
+	// PageEdge 是窗口自身的边距：页面四周留的空，以及页脚版本号在其内留的空。
 	PageEdge = 20.0
-	// sectionGap is the room a section keeps above and below itself, which is
-	// what keeps the line dividing two of them from touching either.
+	// SectionGap 是一节上下留的空，使分隔两节的线与两者都不相贴。
 	SectionGap = 16.0
-	// GroupGap separates a section head from its body, and one group of
-	// controls from the next.
+	// GroupGap 分隔节标题与其主体，以及一组控件与下一组。
 	GroupGap = 16.0
-	// RowGap is the room between peer rows inside one group.
+	// RowGap 是一组内相邻行之间的空。
 	RowGap = 12.0
-	// FieldGap is the room between a label and the control it names.
+	// FieldGap 是标签与其所指控件之间的空。
 	FieldGap = 8.0
 
 	RadiusCard = 12.0
-	// radiusTile rounds the small square at the head of a list row.
+	// RadiusTile 圆角处理列表行首的小方块。
 	RadiusTile  = 6.0
 	RadiusField = 6.0
 
-	// heightControl is the height every control shares: an input, a button
-	// and a segmented control sit on one line as one row of things.
+	// HeightControl 是每个控件共用的高度：输入框、按钮与分段控件在同一行排成一行。
 	HeightControl = 36.0
-	// sizeTile is the mark at the head of a section: 32 points, rounded.
+	// SizeTile 是节标题的图形：32 点，圆角。
 	SizeTile = 32.0
 
-	// The quick window's block, as the design draws it: 16 beside the block,
-	// 14 above it and 12 below, with a 20-point mark at its head.
+	// 快捷窗口的区块按设计绘制：两侧 16，上 14 下 12，头部 20 点图形。
 	QuickEdge     = 16.0
 	QuickTop      = 14.0
 	QuickBottom   = 12.0
 	QuickTileSize = 20.0
 	QuickMarkSize = 12.0
-	// And its own type: a 13-point name, 11-point times and labels, a
-	// 22-point number, and the 10-point line over a bar.
+	// 及其字号：13 点名、11 点时间与标签、22 点数字、进度条上方 10 点一行。
 	SizeQuickName   = 13.0
 	SizeQuickFine   = 11.0
 	SizeQuickNumber = 22.0
 	SizeQuickTiny   = 10.0
 
-	// The API key section is the page's dense one: the design packs a service
-	// into two lines, so its head and the row inside each card are a size
-	// down from the rest of the page. Every number below is that design's.
-	SizeTileCompact     = 28.0 // its mark: w-7
-	SizeTitleCompact    = 14.0 // the head's name
-	SizeSubtitleCompact = 11.0 // the head's one line of explanation
-	SizeCardName        = 13.0 // the name at the head of a card
-	SizeFine            = 11.0 // a card's actions and the warning above them
-	HeightCardControl   = 32.0 // h-8: a card's field and the actions beside it
-	CardActionPad       = 10.0 // px-2.5: the room beside an action's label
+	// API key 节是页面的密集区：设计把一项服务压进两行，因此其标题和每张卡片内的
+	// 行都比页面其余部分小一号。下面每个数字都是该设计的。
+	SizeTileCompact     = 28.0 // 其图形：w-7
+	SizeTitleCompact    = 14.0 // 标题名
+	SizeSubtitleCompact = 11.0 // 标题那一行说明
+	SizeCardName        = 13.0 // 卡片头部的名字
+	SizeFine            = 11.0 // 卡片操作及其上方的警告
+	HeightCardControl   = 32.0 // h-8：卡片字段及其旁的操作
+	CardActionPad       = 10.0 // px-2.5：操作标签旁的空
 
-	// Typography: a section's name, its one line of explanation, and the
-	// body text under them. They are the design's own sizes rather than
-	// multiples of the theme's, because the two windows are dense.
+	// 排版：节的名称、一行说明及其下正文。它们取设计自己的字号而非主题的倍数，
+	// 因为两个窗口都很密集。
 	SizeTitle    = 15.0
 	SizeSection  = 14.0
 	SizeSubtitle = 12.0
@@ -604,53 +555,44 @@ const (
 	SizeSmall    = 12.0
 	SizeTiny     = 10.0
 
-	// The translation card's own scale, read off the design's classes: the
-	// source and the translation are 13px, and the labels and badges 10px.
-	// Its actions are 14px marks in 4px of padding, which is what makes a
-	// 22-point target out of a 14-point glyph.
+	// 翻译卡片自己的色阶，读自设计的类：原文与译文 13px，标签与徽标 10px。
+	// 其操作是 14px 图形加 4px 内边距，使 14 点字形成为 22 点目标区。
 	SizeCardLabel  = 10.0
 	SizeCardSource = 13.0
 	SizeCardTarget = 13.0
 	SizeCardFoot   = 11.0
 	SizeCardMark   = 14.0
-	// The annotation chips: the word is 12px, the reading or the loanword's
-	// own word above it 10px. The chip is stone-50 with a stone-100 edge,
-	// cornered at 8, and 10 by 6 of its own padding.
+	// 注释 chip：词 12px，其上方读音或外来词原词 10px。chip 为 stone-50 配
+	// stone-100 边，圆角 8，内边距 10×6。
 	SizeChipWord = 12.0
 	SizeChipNote = 10.0
 	ChipRadius   = 8.0
 	ChipPadX     = 10.0
 	ChipPadY     = 6.0
-	// cardEdge is the design's px-3.5 and the vertical room of its blocks:
-	// 14 on each side, 12 above the source block and 10 under it.
+	// CardEdge 是设计的 px-3.5 及其区块的纵向空：两侧 14，源块上 12 下 10。
 	CardEdge    = 14.0
 	CardHeadTop = 12.0
 	CardHeadEnd = 10.0
 	CardBodyTop = 10.0
 	CardBodyEnd = 10.0
-	// cardFootTop and cardFootEnd are the room above and below the foot's own
-	// line: the design's px-3 py-1.5 is 6, raised to 10 so that the line does
-	// not sit on the card's bottom edge (the user asked for more room there,
-	// and it is the settings window's own footer padding).
+	// CardFootTop 与 CardFootEnd 是页脚线上下留的空：设计的 px-3 py-1.5 是 6，
+	// 这里提到 10，使那条线不贴在卡片底边上（用户要求那里更宽些）。
 	CardFootTop = 10.0
 	CardFootEnd = 10.0
-	// cardMarkPad is the design's p-1 around an action's mark: 4 points.
-	// With the 14-point glyph it makes the design's own 22-point target.
+	// CardMarkPad 是设计操作图形周围的 p-1：4 点。配合 14 点字形构成设计
+	// 自己的 22 点目标区。
 	CardMarkPad = 4.0
 
-	// sizeIcon is the glyph of an action a card carries.
+	// SizeIcon 是卡片携带的操作图形。
 	SizeIcon = 20.0
 )
 
-// theme colours MyGo's own widgets: its check boxes, inputs, focus rings,
-// scrollbars and dividers take these, so that a widget the framework draws
-// and a piece this file composes read as the same design.
+// Theme 为 MyGo 自有控件配色：其勾选框、输入框、焦点环、滚动条与分隔线取这些值，
+// 使框架绘制的控件与本文件组装的构件读起来是同一套设计。
 //
-// It is built from the same palette as the views rather than from the
-// framework's own dark theme: a checked box is drawn by MyGo, and it has to
-// be the brand green on the same surface as the button beside it. The
-// framework's palette is the starting point for the properties Boku does not
-// name (scrollbar, inverse, spacing), not for a second set of colors.
+// 它取自与视图相同的调色板，而非框架自己的深色主题：勾选框由 MyGo 绘制，
+// 它必须是按钮旁同一表面上的品牌绿。框架调色板只是 Boku 未命名属性
+// （滚动条、反色、间距）的起点，不是第二套颜色。
 func Theme(dark bool) *ui.Theme {
 	p := LightPalette
 	base := ui.LightTheme()
@@ -672,59 +614,48 @@ func Theme(dark bool) *ui.Theme {
 	base.Danger = p.danger
 	base.Warning = p.warning
 	base.Success = p.success
-	// The light appearance's selection and focus are the ones it always had.
+	// 浅色外观的选中与焦点是它一直有的值。
 	base.Selection = p.brand.Alpha(0.22)
 	base.Focus = p.brand.Alpha(0.55)
 	if dark {
-		// A dark page needs the accent's wash a little stronger to be seen.
+		// 深色页面需要稍强的强调色铺底才看得见。
 		base.Selection = p.brand.Alpha(0.35)
 		base.Focus = p.brand.Alpha(0.60)
 	}
 	base.Radius = RadiusField
-	// The family every window's text is drawn in. It names the CJK faces
-	// after the Latin ones on every desktop, so that a Chinese glyph is the
-	// same shape whatever language the system is in: without it the text
-	// system falls back per script, and an English or Japanese Windows picks
-	// a different face than a Chinese one does.
+	// 每个窗口文本所用的字体族。它在所有桌面上把 CJK 字体排在拉丁字体之后，
+	// 使中文字形无论系统语言是什么都形状一致：没有它，文本系统会按脚本回退，
+	// 英文或日文 Windows 选到的字体与中文的不同。
 	base.Font = UiFontFamily
 	return base
 }
 
-// uiFontFamily is the family the application's text is drawn in: the design's
-// own stack, which asks for the Latin faces of the system the way it always
-// did and then names the CJK face before giving up. MyGo takes a
-// comma-separated list and draws each character in the first family that has
-// it, so the reading order below is also the fallback order.
+// UiFontFamily 是应用文本所用的字体族：设计自己的字体栈，按一贯方式请求系统
+// 拉丁字体，然后在放弃之前命名 CJK 字体。MyGo 接受逗号分隔的列表，并用第一个
+// 拥有该字符的字体族绘制每个字符，因此下面的顺序也是回退顺序。
 //
-// The design's stack is the source of this list (docs/ui.md §7); changing it
-// there changes it here.
+// 该栈的来源是 docs/ui.md §7；那里改了这里就要改。
 const UiFontFamily = "-apple-system, BlinkMacSystemFont, \"Segoe UI\", " +
 	"\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", " +
 	"\"Noto Sans CJK JP\", \"Noto Sans CJK SC\", \"Yu Gothic\", sans-serif"
 
-// useDesign points the frame being built at one appearance of Boku's design:
-// it installs the palette the helpers below read, and the matching theme for
-// the widgets MyGo draws instead of this file.
+// useDesign 把正在构建的帧指向 Boku 设计的一个外观：安装下面辅助函数读取的调色板，
+// 以及 MyGo 自绘控件所用的匹配主题。
 //
-// A view calls it once, before it builds anything: the theme is read while an
-// element is constructed, so a control built before this call keeps the
-// framework's colors. The state owns the appearance because it is a choice
-// the user made in the settings window; a view only says "draw the
-// application as it stands".
+// 视图在构建任何东西之前调用它一次：主题在元素构造时就被读取，因此在此调用之前
+// 构建的控件会保留框架的颜色。外观由状态持有，因为它是用户在设置窗口里做的选择；
+// 视图只负责说“按应用当前的样子绘制”。
 
-// windowFrame is the column every window is built in: the content area's face
-// from edge to edge, which the regions inside it divide.
+// WindowFrame 是每个窗口构建所在的列：内容区从边到边的底面，其内的区域划分它。
 func WindowFrame(c *ui.Context) ui.Element {
 	return ui.Column(c).Fill().Background(ColorSurface)
 }
 
-// footer is the quiet line at the bottom of a window: the version, on the
-// window's own face, under one hairline. It is the last line of the window
-// rather than another region of it, so it wears no band of its own.
+// Footer 是窗口底部安静的一行：版本号，在窗口自身底面上、一条细线之下。
+// 它是窗口的最后一行而非另一个区域，因此不带自己的色带。
 //
-// The hairline is the window's own line rather than one between two sections:
-// it runs from edge to edge, and what it says is where the window ends. The
-// version sits inside it, in the room a footer action keeps.
+// 这条细线是窗口自己的线而非两节之间的线：它从边到边，说明的是窗口结束之处。
+// 版本号在其内，占据页脚操作所留的空间。
 func Footer(c *ui.Context, version string) {
 	Hairline(c)
 	ui.Row(c).FillWidth().Shrink(0).Font("monospace").
@@ -734,14 +665,13 @@ func Footer(c *ui.Context, version string) {
 		Children(func() { VersionLine(c, version) })
 }
 
-// versionLine is the quiet version at the bottom of a window.
+// VersionLine 是窗口底部安静的版本号行。
 func VersionLine(c *ui.Context, version string) {
 	ui.Text(c, version).FontSize(SizeSmall).TextColor(ColorTextMuted).SingleLine()
 }
 
-// headSize is how large a section introduces itself: the tile its mark sits
-// in, the room that mark keeps inside the tile, the room between the tile and
-// the name beside it, and the two sizes of type.
+// HeadSize 是节如何介绍自己：图形所在的磁贴、图形在磁贴内留的空、磁贴与旁边名字
+// 之间的空，以及两种字号。
 type HeadSize struct {
 	Tile     float32
 	padX     float32
@@ -751,40 +681,32 @@ type HeadSize struct {
 	subtitle float32
 }
 
-// The two heads the settings page draws: the design's own, which every
-// section but one wears, and the smaller one the API key section wears
-// because the design packed each of its cards into two lines.
+// 设置页绘制的两种标题：设计自己的、除一节外所有节都用的，以及 API key 节用的
+// 较小那种——因为设计把它的每张卡片压进两行。
 //
-// The small head's mark is 28 where the design's is 32, and the room after it
-// is 14 where that one's is 10: a smaller mark must not move the name, since
-// the names of the sections are one column down the page (the property
-// TestDesignSectionsArePeers keeps).
+// 小标题的图形是 28 而设计的是 32，其后留的空是 14 而那种是 10：较小的图形不能
+// 移动名字，因为各节的名字排成页面上一列（由 TestDesignSectionsArePeers 保证）。
 var (
 	HeadRegular = HeadSize{Tile: SizeTile, padX: 6, padY: 4, gap: 10, title: SizeTitle, subtitle: SizeSubtitle}
 	HeadSmall   = HeadSize{Tile: SizeTileCompact, padX: 5, padY: 3.5, gap: 14, title: SizeTitleCompact, subtitle: SizeSubtitleCompact}
 )
 
-// sectionHead is how a section of the settings window introduces itself: the
-// mark of what it is about, its name, and one line saying what the section is
-// for. It binds head to the box it drew, which is what tells the sidebar
-// where the section's heading is.
+// SectionHead 是设置窗口一节如何介绍自己：它关于之物的图形、名称，以及一行说明
+// 这节是做什么的。它把 head 绑定到它所画的盒子上，从而告诉侧栏这节的标题在哪里。
 //
-// A section's mark is drawn in the color its own thing is drawn in and is not
-// dressed up: it keeps its own shape and proportions wherever it appears. A
-// section with nothing of its own — the clipboard, a group still to come —
-// carries the application's mark in the muted stone instead.
+// 一节的图形用其所属事物自己的颜色绘制、不做装饰：它无论出现在哪里都保持自己的
+// 形状和比例。没有自己事物的节——剪贴板、尚未到来的组——用淡 stone 绘制的应用图形。
 func SectionHead(c *ui.Context, head *ui.Handle, mark *ui.SVG, Ink ui.Color, title, subtitle string) {
 	SectionHeadSized(c, head, mark, Ink, title, subtitle, HeadRegular)
 }
 
-// sectionHeadSmall is the same head a size down: a 28-point tile and the
-// design's own 14/11 pair. The API key section wears it because its cards are
-// dense, and a head a size above them would be the largest thing on the page.
+// SectionHeadSmall 是同样的标题小一号：28 点磁贴与设计的 14/11 字号对。API key
+// 节用它，因为其卡片密集，比它们大一号的标题会成为页面上最大的东西。
 func SectionHeadSmall(c *ui.Context, head *ui.Handle, mark *ui.SVG, Ink ui.Color, title, subtitle string) {
 	SectionHeadSized(c, head, mark, Ink, title, subtitle, HeadSmall)
 }
 
-// sectionHeadSized draws the head itself, at one of the two sizes.
+// SectionHeadSized 以两种尺寸之一绘制标题本身。
 func SectionHeadSized(c *ui.Context, head *ui.Handle, mark *ui.SVG, Ink ui.Color, title, subtitle string, size HeadSize) {
 	row := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(size.gap)
 	if head != nil {
@@ -810,14 +732,13 @@ func SectionHeadSized(c *ui.Context, head *ui.Handle, mark *ui.SVG, Ink ui.Color
 	})
 }
 
-// sectionLabel is the label above a control: what the value under it is.
+// SectionLabel 是控件上方的标签：它下面的值是什么。
 func SectionLabel(c *ui.Context, label string) {
 	ui.Text(c, label).FontSize(SizeSection).FontWeight(500).TextColor(ColorTextBody).SingleLine()
 }
 
-// inputFrame gives a text input the look of a field: the field's own face, a
-// hairline, the height every control shares, and the monospace type the
-// design gives a value that is read rather than written here.
+// InputFrame 给文本输入框以字段的外观：字段自身底面、一条细线、每个控件共用的
+// 高度，以及设计赋予“被读取而非在此书写”的值所用的等宽字体。
 func InputFrame(c *ui.Context, input ui.Element) ui.Element {
 	return input.
 		FillWidth().
@@ -831,21 +752,17 @@ func InputFrame(c *ui.Context, input ui.Element) ui.Element {
 		TextColor(ColorInputValue)
 }
 
-// InputLineHeight is the line box of a single-line input at fontSize.
-// MyGo centers the empty string, and that line is the Latin face of the UI
-// stack. A CJK placeholder comes from a later face and is taller, but it is
-// drawn from the top of the shorter line, so it sits low. This height fits
-// those faces, and the empty line and the placeholder then share one box.
+// InputLineHeight 是 fontSize 下单行输入框的行盒。MyGo 居中空字符串，那一行是
+// UI 字体栈的拉丁字体。CJK 占位符来自更靠后的字体、更高，但它从较矮那一行的顶部
+// 绘制，因而偏下。此高度适配那些字体，使空行与占位符共用同一个盒子。
 func InputLineHeight(fontSize float32) float32 {
 	return fontSize * 1.5
 }
 
-// fieldFrame is inputFrame at the size a card's own row has room for: 32
-// points high with 10 beside the text, which is what leaves the rest of the
-// line to the actions that act on the value in it.
+// FieldFrame 是卡片自身行有空间容纳的尺寸下的 InputFrame：32 点高、文字旁 10 点，
+// 把行的其余部分留给作用于该值的操作。
 //
-// The field is the thing a dense card is about, so it takes the room that is
-// left rather than a width of its own: the caller grows it.
+// 字段是密集卡片所讲的核心，因此它取剩下的空间而非自己的宽度：由调用方增长它。
 func FieldFrame(c *ui.Context, input ui.Element) ui.Element {
 	return input.
 		Height(HeightCardControl).
@@ -858,60 +775,50 @@ func FieldFrame(c *ui.Context, input ui.Element) ui.Element {
 		TextColor(ColorInputValue)
 }
 
-// stacked is a plain column of the pieces inside a section, so that a section
-// body does not repeat the same gap in every call.
+// Stacked 是一节内各构件的普通列，使节主体不必在每次调用里重复同样的间距。
 func Stacked(c *ui.Context, gap float32, body func()) {
 	ui.Column(c).FillWidth().Gap(gap).Children(body)
 }
 
-// buttonTone is what a button is for, which is all a caller has to say about
-// how it looks.
+// ButtonTone 是按钮的用途，也就是调用方唯一需要说明的外观信息。
 type ButtonTone int
 
 const (
-	// buttonPrimary is the one action a form is for: filled, in the brand
-	// green, with the light text on it.
+	// ButtonPrimary 是表单唯一的动作：实色填充、品牌绿、上面浅色文字。
 	ButtonPrimary ButtonTone = iota
-	// buttonSecondary is every other action: the content's own face, a
-	// hairline, and a hover that tints it.
+	// ButtonSecondary 是其它每个动作：内容自身底面、一条细线、悬停时上色。
 	ButtonSecondary
-	// buttonWarning is an action that changes something back: the warning
-	// face and border, with the warning ink, rather than the ordinary
-	// secondary face.
+	// ButtonWarning 是回退性动作：警告底面与边框、警告墨色，而非普通次要外观。
 	ButtonWarning
 )
 
-// buttonSize is how much room a button takes: the height every control on a
-// form row shares, the room beside its label, and the size of that label.
+// ButtonSize 是按钮占的空间：表单行上每个控件共用的高度、标签旁的空，以及标签字号。
 type ButtonSize struct {
 	height float32
 	pad    float32
 	font   float32
 }
 
-// The two sizes the page draws: the design's own, and the one the API key
-// cards use, where a field and two actions share one 32-point line.
+// 页面绘制的两种尺寸：设计自己的，以及 API key 卡片用的那种——那里一个字段和两个
+// 操作共用一条 32 点的行。
 var (
 	ButtonRegular = ButtonSize{height: HeightControl, pad: 16, font: SizeBody}
 	ButtonDense   = ButtonSize{height: HeightCardControl, pad: CardActionPad, font: SizeFine}
 )
 
-// designButton builds an action in one of the tones. Every tone keeps the
-// whole behavior of a button — the pointer, the keyboard, the focus ring and
-// what assistive technology reads — since both are the framework's ButtonBase
-// underneath.
+// DesignButton 以某一种色调构建一个动作。每种色调都保留按钮的完整行为——指针、
+// 键盘、焦点环以及辅助技术读取的内容——因为两者底下都是框架的 ButtonBase。
 func DesignButton(c *ui.Context, label string, tone ButtonTone) ui.Element {
 	return ButtonSized(c, label, tone, ButtonRegular)
 }
 
-// cardButton is designButton in the size a dense card's row has room for: the
-// design's h-8 with 10 points beside the label. It is what stands next to a
-// card's field, where the three things on the line have to be one row.
+// CardButton 是密集卡片行有空间容纳尺寸下的 DesignButton：设计的 h-8 加标签旁 10 点。
+// 它站在卡片字段旁，那里行上的三样东西必须成一排。
 func CardButton(c *ui.Context, label string, tone ButtonTone) ui.Element {
 	return ButtonSized(c, label, tone, ButtonDense)
 }
 
-// buttonSized draws the button itself, at one of the two sizes.
+// ButtonSized 以两种尺寸之一绘制按钮本身。
 func ButtonSized(c *ui.Context, label string, tone ButtonTone, size ButtonSize) ui.Element {
 	b := ui.ButtonBase(c).Label(label)
 	switch tone {
@@ -973,11 +880,9 @@ func ButtonSized(c *ui.Context, label string, tone ButtonTone, size ButtonSize) 
 	return b
 }
 
-// textAction is an action written as a word rather than drawn as a button: the
-// quiet "删除" at the end of a card's head. It wears no face of its own,
-// because the two buttons under it are what the card is for, and a third one
-// beside the name would read as another thing the card does; its ink says what
-// it does. It answers the pointer over its own room, as every action here does.
+// TextAction 是写成文字而非画成按钮的动作：卡片头部末尾安静的“删除”。它不带自己的
+// 底面，因为其下两个按钮才是卡片的用途，名字旁再多一个会读成卡片的另一个动作；
+// 它的墨色说明它做什么。它像这里每个动作一样响应自己范围内的指针。
 func TextAction(c *ui.Context, label string, Ink ui.Color) ui.Element {
 	b := ui.ButtonBase(c).Label(label).
 		Radius(float32(4)).
@@ -995,14 +900,11 @@ func TextAction(c *ui.Context, label string, Ink ui.Color) ui.Element {
 	return b
 }
 
-// quietIconButton is an action drawn as a mark: one glyph with a square of the
-// content's own room around it, drawn in the faint ink the design gives a
-// secondary action and in the body ink under the pointer. The room is what
-// makes it a target rather than a picture; its label is what it means, for the
-// pointer that rests on it and for assistive technology.
+// QuietIconButton 是画成图形的动作：一个字形外加一圈内容自身底色的方形空间，用设计
+// 赋予次要动作的淡墨绘制，指针下转为正文墨色。那圈空间使它成为目标区而非一张图；
+// 它的标签说明它的含义，供停留的指针与辅助技术读取。
 //
-// It is the quick window's footer action: the design's p-1 around a 14-point
-// mark, on the stone face the rest of that window is drawn on.
+// 它是快捷窗口的页脚动作：设计在 14 点图形周围留 p-1，位于该窗口其余部分的 stone 底面上。
 func QuietIconButton(c *ui.Context, mark *ui.SVG, label string) ui.Element {
 	b := ui.ButtonBase(c).Label(label).Tooltip(label).
 		Radius(CardMarkPad).
@@ -1025,23 +927,19 @@ func QuietIconButton(c *ui.Context, mark *ui.SVG, label string) ui.Element {
 	return b
 }
 
-// declinesInput takes no input at all, and is what a card's actions are given.
+// DeclinesInput 不接受任何输入，是卡片动作所获得的处理函数。
 //
-// The foot around them takes every pointer event as it comes, to be the handle
-// the card is dragged by, and the framework gives a press to the innermost
-// element that handles input as it comes — so an action without this would
-// have its clicks swallowed by the row it sits on, and the button would never
-// press. Saying nothing and letting the event go on is the framework's own
-// "shield", and it is what makes an action inside a drag handle work.
+// 它们周围的页脚会接收所有落下的指针事件，以充当拖动卡片的把手，而框架把一次按下
+// 交给最内层的运行时输入处理器——因此没有它的动作，点击会被所在的整行吞掉，按钮永远
+// 按不下去。什么都不做、让事件继续传下去，是框架自己的“护盾”，也是拖拽把手内动作
+// 能工作的原因。
 func DeclinesInput(ui.InputEvent) bool { return false }
 
-// cardIconButton is the action a translation card carries: a 14-point mark in
-// 4 points of padding, which is what makes a 22-point target of it — the
-// design's p-1 and w-3.5 h-3.5.
+// CardIconButton 是翻译卡片携带的动作：14 点图形加 4 点内边距，使 14 点字形成为
+// 22 点目标区——设计的 p-1 与 w-3.5 h-3.5。
 //
-// Its two states are the design's: under the pointer it takes a faint stone
-// face and the ink deepens. The glyph keeps the muted ink of a secondary
-// action otherwise.
+// 它的两种状态属于设计：指针下取淡 stone 底面且墨色加深。其余情况下字形保持次要
+// 动作的淡墨。
 func CardIconButton(c *ui.Context, mark *ui.SVG, label string) ui.Element {
 	b := ui.ButtonBase(c).Label(label).Tooltip(label).
 		Radius(float32(4)).
@@ -1065,13 +963,11 @@ func CardIconButton(c *ui.Context, mark *ui.SVG, label string) ui.Element {
 	return b
 }
 
-// cardIconToggle is cardIconButton with an on state: the mark keeps the
-// theme's green while what it stands for is on, which is the whole of what it
-// has to say. A pin that is pressed looks different from one that is not.
+// CardIconToggle 是带开启状态的 CardIconButton：当它代表的事物开启时，图形保持
+// 主题的绿，这就是它要表达的全部。按下的图钉看起来与没按下的不同。
 //
-// The green is read from the theme rather than named here, because that is
-// what it is: the theme's accent, which the design happens to spell as the
-// same #3B693D the rest of the application calls the brand green.
+// 绿色取自主题而非在此命名，因为它本来就是：主题的强调色，设计恰好把它写成与
+// 应用其它处的品牌绿相同的 #3B693D。
 func CardIconToggle(c *ui.Context, mark *ui.SVG, label string, on bool) ui.Element {
 	b := ui.ButtonBase(c).Label(label).Tooltip(label).
 		Radius(float32(4)).
@@ -1099,15 +995,12 @@ func CardIconToggle(c *ui.Context, mark *ui.SVG, label string, on bool) ui.Eleme
 	return b
 }
 
-// annotationChips is the annotation under the translation: one chip per word
-// that carries something, in the order the words appear, packed from the left
-// and wrapping.
+// AnnotationChips 是译文下方的注释：每个有内容的词一个 chip，按词序从左到右排列
+// 并换行。
 //
-// A chip is the word with the reading over it — or, for a loanword, the word
-// it came from, in the brand green. It is a chip rather than a line of ruby
-// over the whole sentence because what is drawn is not the sentence: the
-// sentence is above, and these are the words a reader cannot read. The face
-// and the corner are the design's stone-50 on stone-100 at 8.
+// 一个 chip 是词及其上方读音——外来词则是其原词，用品牌绿。用 chip 而非整句上方的
+// 注音，是因为画出的不是整句：整句在上方，这些是读者读不出的词。底面与圆角是设计的
+// stone-50 配 stone-100、圆角 8。
 func AnnotationChips(c *ui.Context, words []domain.Segment, showReading, showGloss bool) {
 	ui.Row(c).FillWidth().Wrap().Justify(ui.Start).Gap(float32(6)).Children(func() {
 		for _, segment := range words {
@@ -1120,9 +1013,8 @@ func AnnotationChips(c *ui.Context, words []domain.Segment, showReading, showGlo
 	})
 }
 
-// annotationChip is one of those chips: the word, and above it what there is
-// to say about it — a reading in stone-500, or a loanword's own word in the
-// brand green.
+// AnnotationChip 是其中一个 chip：词，以及其上关于它的内容——stone-500 的读音，
+// 或品牌绿的外来词原词。
 func AnnotationChip(c *ui.Context, word, note string, loanword bool) {
 	ui.Column(c).Shrink(0).AlignItems(ui.Center).
 		Background(ColorChip).
@@ -1149,17 +1041,13 @@ func AnnotationChip(c *ui.Context, word, note string, loanword bool) {
 		})
 }
 
-// annotationBlock is the card's third block, under the translation: the row
-// that opens the annotation, and the chips it holds once it is open.
+// AnnotationBlock 是卡片第三块，位于译文下方：打开注释的那一行，以及打开后它持有的 chip。
 //
-// It is its own block — its own hairline above it — because it is its own
-// thing: something the user asks for, that costs a request, and that is not
-// part of the translation above it.
+// 它是独立的一块——上方有自己的细线——因为它是独立的事物：用户主动请求、会消耗一次
+// 请求、且不属于上方译文的一部分。
 //
-// The row runs the card's own width, edge to edge, so that the face it takes
-// under the pointer covers the row rather than the label in the middle of it.
-// The label and the chevron keep the card's 14 points of edge inside it, which
-// is what the design's own closed row does with `w-full … px-3.5`.
+// 该行贯穿卡片自身宽度、从边到边，使指针下它取的底面覆盖整行而非中间标签。标签与
+// 箭头在其中保留卡片 14 点的边距，这正是设计闭合行用 `w-full … px-3.5` 的做法。
 func AnnotationBlock(c *ui.Context, open bool, label string, toggle func()) {
 	button := ui.ButtonBase(c).Focusable().Cursor(ui.CursorPointer).
 		Role(ui.RoleDisclosure).Expanded(open).
@@ -1182,8 +1070,7 @@ func AnnotationBlock(c *ui.Context, open bool, label string, toggle func()) {
 	}
 }
 
-// arrowTurn is how far the annotation row's chevron is turned: pointing down
-// while closed, up while open, which is the design's own pair.
+// ArrowTurn 是注释行箭头的旋转角度：闭合时朝下，打开时朝上，即设计自己的一对。
 func ArrowTurn(open bool) float32 {
 	if open {
 		return -90
@@ -1191,11 +1078,9 @@ func ArrowTurn(open bool) float32 {
 	return 90
 }
 
-// langBadge is the small label that names a language: the one piece of the
-// translation window that says what is being read. It wears the design's own
-// pair for the language — 日本語 stone, English blue, 한국어 violet, 中文
-// emerald — in 10-point type with 1 point of vertical and 6 of horizontal
-// room.
+// LangBadge 是命名语言的小标签：翻译窗口里说明正在读什么的那一件。它戴设计为各语言
+// 定的一对颜色——日本語 stone、English blue、한국어 violet、中文 emerald——10 点字，
+// 纵向 1 点、横向 6 点的空。
 func LangBadge(c *ui.Context, name string, code domain.Language) {
 	if strings.TrimSpace(name) == "" {
 		return
@@ -1210,8 +1095,7 @@ func LangBadge(c *ui.Context, name string, code domain.Language) {
 		})
 }
 
-// langBadgeColors is the pair a language's badge is drawn with, as the design
-// writes it.
+// LangBadgeColors 是某语言徽标所用的那一对颜色，按设计的写法。
 func LangBadgeColors(code domain.Language) (fill, Ink ui.Color) {
 	switch code {
 	case domain.LangChinese:
@@ -1227,10 +1111,8 @@ func LangBadgeColors(code domain.Language) (fill, Ink ui.Color) {
 	}
 }
 
-// eyebrow is the small label above a block of text: "原文" or "译文". It is
-// written the way the design writes it — 10 points, medium, uppercase and
-// letter-spaced, in stone-400 — so that it names the block without competing
-// with it.
+// Eyebrow 是文本块上方的小标签：“原文”或“译文”。按设计的写法书写——10 点、中等字重、
+// 大写并加字距、stone-400——使它命名该块而不与之争夺注意力。
 func Eyebrow(c *ui.Context, label string) {
 	ui.Text(c, strings.ToUpper(label)).
 		FontSize(SizeCardLabel).
@@ -1240,10 +1122,8 @@ func Eyebrow(c *ui.Context, label string) {
 		Shrink(0)
 }
 
-// skeletonBar is a placeholder line: the shape of the text that is on its
-// way, so that a window waiting for an answer looks like a window rather than
-// like a mistake. It is measured in the card's own width, which the card
-// passes in.
+// SkeletonBar 是占位行：即将到来的文本的形状，使等待答案的窗口看起来像窗口而非
+// 出了错。它以卡片自身宽度度量，由卡片传入。
 func SkeletonBar(c *ui.Context, width, fraction float32) {
 	ui.Box(c).
 		Height(float32(12)).
@@ -1252,12 +1132,10 @@ func SkeletonBar(c *ui.Context, width, fraction float32) {
 		Background(ColorSkeleton)
 }
 
-// segmented is the choice among a few short options: a bordered track, and
-// the chosen segment filled in the brand green.
+// Segmented 是在几个短选项中的选择：一条带边框的轨道，选中的分段用品牌绿填充。
 //
-// Only the look is this file's: the choice itself, the arrows that move it
-// and what assistive technology reads come from the framework's
-// SegmentedBase, whose Track reports a new choice with Changed.
+// 只有外观是本文件的：选择本身、移动它的箭头以及辅助技术读取的内容来自框架的
+// SegmentedBase，其 Track 通过 Changed 报告新选择。
 func Segmented(c *ui.Context, selected *int, labels ...string) ui.Element {
 	parts := ui.SegmentedBase(c, selected, len(labels))
 	parts.Track.
@@ -1286,8 +1164,7 @@ func Segmented(c *ui.Context, selected *int, labels ...string) ui.Element {
 	return parts.Track
 }
 
-// noteKind is what a note is telling the user: something that went wrong,
-// something that went right, or nothing in particular.
+// NoteKind 是提示在告诉用户什么：出了错、做对了，或没什么特别。
 type NoteKind int
 
 const (
@@ -1297,8 +1174,7 @@ const (
 	NoteSuccess
 )
 
-// noteColor is the color a kind of note is written in, and of the mark that
-// stands for it.
+// NoteColor 是某类提示的书写颜色，以及代表它的图形的颜色。
 func NoteColor(kind NoteKind) ui.Color {
 	switch kind {
 	case NoteWarning:
@@ -1312,9 +1188,8 @@ func NoteColor(kind NoteKind) ui.Color {
 	}
 }
 
-// notice draws one quiet line: a note under a control ("已保存。"), or the
-// explanation a section keeps under its switches. It is text rather than a
-// panel, because a sentence is not furniture.
+// Notice 绘制一行安静的提示：控件下方的注记（“已保存。”），或一节在其开关下方的
+// 说明。它是文字而非面板，因为一句话不是家具。
 func Notice(c *ui.Context, kind NoteKind, text string) {
 	if text == "" {
 		return
@@ -1326,10 +1201,8 @@ func Notice(c *ui.Context, kind NoteKind, text string) {
 		LineHeight(1.5)
 }
 
-// noticePanel is the one note on a page that must not be missed: a tinted,
-// bordered strip in the warning colors, with a single small line in it. It is
-// a panel rather than another line of body text, and the design draws it tight
-// — 6 above and below — because the rows under it are what the page is for.
+// NoticePanel 是页面上唯一一条不可错过的提示：用警告色着色的带边框色条，内含一行小字。
+// 它是面板而非又一行正文，设计画得很紧——上下各 6——因为其下的行才是页面的用途。
 func NoticePanel(c *ui.Context, text string) {
 	ui.Box(c).FillWidth().
 		Background(ColorWarningFill).
@@ -1345,44 +1218,36 @@ func NoticePanel(c *ui.Context, text string) {
 		})
 }
 
-// cardHint is the smallest line a card carries: where the value above it comes
-// from. It is quieter than a notice, which is about what just happened.
+// CardHint 是卡片携带的最小一行：上面那个值的来源。它比 Notice 更安静，
+// 后者说的是刚刚发生了什么。
 func CardHint(c *ui.Context, text string) {
 	ui.Text(c, text).FontSize(SizeTiny).TextColor(ColorTextMuted).SingleLine()
 }
 
-// cardNote is the line a block's own head carries when one more line is needed
-// there: what an account is, when its window resets. The design gives that line
-// 11 points of faint ink, and the quick window's own stone.
+// CardNote 是块自身头部在需要再多一行时所携带的行：账户是什么、窗口何时重置。
+// 设计给那一行 11 点淡墨，以及快捷窗口自己的 stone。
 func CardNote(c *ui.Context, text string) {
 	ui.Text(c, text).FontSize(SizeQuickFine).TextColor(PanelFaint).SingleLine()
 }
 
-// barHeight is how tall a proportion bar is: the design's h-1.5, which is a
-// line rather than a block.
+// BarHeight 是比例条的高度：设计的 h-1.5，是一根线而非一个块。
 const BarHeight = 6.0
 
-// progressBar draws a proportion: the whole of the room it is given as a
-// track, the part of it that is filled, and the number it stands for over the
-// track at its right end.
+// ProgressBar 绘制一个比例：给定的整个空间作为轨道，其中已填充的部分，以及它所代表的
+// 数字在轨道右端上方。
 //
-// The fill is painted rather than laid out: it is a fraction of whatever room
-// the track ends up with, and only the paint knows that width — a fill laid
-// out from the frame before would show the previous answer's share. What it
-// is, for assistive technology, is its name, its range and its value.
+// 填充是直接绘制的而非布局的：它是轨道最终宽度的比例，只有绘制时才知道那个宽度——
+// 若用之前一帧的宽度布局填充，会显示上一帧答案的份额。对辅助技术而言，它由名称、
+// 范围与值构成。
 //
-// The color is the block's own, for the fill and for the number alike: a bar
-// belongs to the block it is in, and the number over it is that same color —
-// which is why it is one color and not two. It is drawn on the content's own
-// face, so the color has to read there: a bar whose color is the tile's own
-// white would be a bar with no number at all.
+// 颜色是块自己的，填充与数字相同：一条 bar 属于它所在的块，其上方的数字也是同一个
+// 颜色——因此是一种颜色而非两种。它画在内容自身底面上，所以颜色必须在那里可读：
+// 颜色是磁贴自身白色的 bar 会变成没有数字的 bar。
 //
-// A share it does not have — nothing left, nothing read yet — draws the track
-// empty. An empty track is not "0%": the caller says which of the two it is in
-// words.
+// 它没有的份额——没有剩余、尚未读取——画出空轨道。空轨道不是“0%”：由调用方
+// 用文字说明是哪一种。
 func ProgressBar(c *ui.Context, percent int64, fill ui.Color, label, name string) {
 	ui.Column(c).FillWidth().Gap(float32(4)).AlignItems(ui.End).Children(func() {
-		// ui.Text(c, label).FontSize(sizeQuickTiny).FontWeight(500).TextColor(fill).SingleLine()
 		ui.Box(c).FillWidth().
 			Height(float32(BarHeight)).
 			Radius(999).
@@ -1403,53 +1268,45 @@ func ProgressBar(c *ui.Context, percent int64, fill ui.Color, label, name string
 	})
 }
 
-// panelMark is how a block's mark is drawn: the provider's own drawing, the
-// face of the tile it sits on, the color the drawing is made in, and the color
-// of a proportion bar in that block.
+// PanelMark 是块图形如何绘制：provider 自己的图形、其所在磁贴的底面、图形所用颜色，
+// 以及该块内比例条的颜色。
 //
-// The tile's ink and the bar's color are two different things and are kept
-// apart: the drawing on a tile is white (the tile is the provider's own color,
-// and white is what reads on it), and a bar is drawn on the content's face,
-// where white reads as nothing at all.
+// 磁贴的墨色与 bar 的颜色是两回事，且分开保存：磁贴上的图形是白色（磁贴是 provider
+// 自身颜色，白色在其上可读），而 bar 画在内容底面上，白色在那里读作什么都看不见。
 type PanelMark struct {
 	SVG  *ui.SVG
 	Tile ui.Color
 	Ink  ui.Color
 	Bar  ui.Color
-	// Scale enlarges detailed product marks without changing the tile size.
-	// Zero uses the standard size.
+	// Scale 在不改变磁贴尺寸的情况下放大细节丰富的产品图形。
+	// 零表示使用标准尺寸。
 	Scale float32
 }
 
-// quickBlock is one block of the quick window: the design's own room around
-// it, which is what makes a block read as one thing rather than as rows that
-// happen to follow each other.
+// QuickBlock 是快捷窗口的一个块：设计在其周围留的空，使块读成一件东西，而不是碰巧
+// 前后相接的几行。
 func QuickBlock(c *ui.Context, body func()) {
 	ui.Column(c).FillWidth().
 		Padding(QuickTop, QuickEdge, QuickBottom, QuickEdge).
 		Children(body)
 }
 
-// quickDivider is the line between two blocks of the quick window: one point
-// of stone-100, inside the same edge the blocks keep.
+// QuickDivider 是快捷窗口两块之间的线：1 点 stone-100，位于块内同样的边距里。
 func QuickDivider(c *ui.Context) {
 	ui.Column(c).FillWidth().PaddingX(QuickEdge).Children(func() {
 		ui.Row(c).FillWidth().Height(1).Shrink(0).Background(PanelLine)
 	})
 }
 
-// quickTile is the mark at the head of a block: the provider's drawing in a
-// tile of its own, so that a block is recognised before its name is read. A
-// block whose provider has no drawing gets the tile alone, so that two blocks'
-// names still start at the same place.
+// QuickTile 是块头部的图形：provider 的图形置于自带磁贴内，使块在读到名字前就被认出。
+// 没有图形的 provider 的块只得到磁贴，使两个块的名称仍从同一处开始。
 func QuickTile(c *ui.Context, mark PanelMark) {
 	box := ui.Box(c).Size(QuickTileSize, QuickTileSize).Shrink(0).
 		Radius(RadiusTile).
 		Background(mark.Tile).
 		Center()
-	// A brand whose tile is as dark as the page keeps an edge, so that the
-	// block still starts with a mark rather than with the name beside a hole.
-	// The light appearance has no edge to add.
+	// 磁贴与页面同样深的品牌保留描边，使块仍从一个图形开始，而不是从一个洞旁的名字
+	// 开始。浅色外观没有描边可加。
 	if ColorTileEdge.A > 0 {
 		box.Border(1, ColorTileEdge)
 	}
@@ -1466,8 +1323,7 @@ func QuickTile(c *ui.Context, mark PanelMark) {
 	})
 }
 
-// statusNote is the line that says whether a credential is already stored: a
-// dot in the success color and what is stored, in the same color.
+// StatusNote 是说明凭据是否已存储的那一行：成功色的圆点，以及同样颜色的已存内容。
 func StatusNote(c *ui.Context, text string) {
 	ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(6)).Children(func() {
 		ui.Box(c).Size(float32(6), float32(6)).Radius(999).Shrink(0).Background(ColorSuccess)
@@ -1475,8 +1331,7 @@ func StatusNote(c *ui.Context, text string) {
 	})
 }
 
-// kindBadge is the small label a list row carries: what the copy is, in the
-// color its own mark is drawn in.
+// KindBadge 是列表行携带的小标签：这份拷贝是什么，用其自身图形所用的颜色。
 func KindBadge(c *ui.Context, Tile, Ink ui.Color, label string) {
 	ui.Box(c).Shrink(0).
 		Padding(float32(1), float32(6)).
@@ -1487,8 +1342,7 @@ func KindBadge(c *ui.Context, Tile, Ink ui.Color, label string) {
 		})
 }
 
-// kindTile is the rounded square at the head of a list row: the mark of what
-// the copy is, on the tint of its kind.
+// KindTile 是列表行首的圆角方块：这份拷贝是什么的图形，置于其种类的着色上。
 func KindTile(c *ui.Context, mark *ui.SVG, Tile, Ink ui.Color) {
 	ui.Box(c).Size(float32(28), float32(28)).Shrink(0).
 		Radius(RadiusTile).
@@ -1499,17 +1353,15 @@ func KindTile(c *ui.Context, mark *ui.SVG, Tile, Ink ui.Color) {
 		})
 }
 
-// hairline is the line a window draws between two of its regions, and between
-// two sections of one: a single point of the border color.
+// Hairline 是窗口在两个区域之间、以及一节的两部分之间画的线：1 点边框色。
 //
-// It stays inside the region it is drawn in, the way every other thing on the
-// page does: a line that ran to the window's edge would step outside the
-// margin the rest of the page keeps, and the page would have two edges.
+// 它留在所画的区域内，如同页面上其它东西：一条跑到窗口边缘的线会越出页面其余部分
+// 保持的边距，页面就会有两条边。
 func Hairline(c *ui.Context) ui.Element {
 	return ui.Row(c).FillWidth().Height(1).Shrink(0).Background(ColorBorder)
 }
 
-// rowDivider is the fainter line between two entries of a list.
+// RowDivider 是列表两项之间更淡的线。
 func RowDivider(c *ui.Context) ui.Element {
 	return ui.Row(c).FillWidth().Height(1).Shrink(0).Background(ColorHairline)
 }

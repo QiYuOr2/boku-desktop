@@ -15,8 +15,7 @@ import (
 	"boku/internal/domain"
 )
 
-// The history store is the clipboard feature's own file. A test works on its
-// own directory, never on a real user's data.
+// 历史存储是剪贴板功能自己的文件。测试在自己的目录上工作，绝不触碰真实用户数据。
 
 func newHistory(t *testing.T) (*History, string) {
 	t.Helper()
@@ -106,9 +105,8 @@ func TestEntriesRoundTrip(t *testing.T) {
 	}
 }
 
-// A file list, and what a reading noticed about itself, survive the round
-// trip: the paths are what the entry writes back to the clipboard, and the
-// note is what the interface shows about it.
+// 文件列表，以及读取时注意到的关于自身的信息，能历经往返而留存：
+// 路径是条目写回剪贴板的内容，说明是界面展示的信息。
 func TestEntriesKeepWhatTheyWriteBack(t *testing.T) {
 	store, path := newHistory(t)
 	copied := time.Date(2026, 2, 3, 9, 0, 0, 0, time.UTC)
@@ -164,8 +162,7 @@ func TestEntriesKeepWhatTheyWriteBack(t *testing.T) {
 	}
 }
 
-// A history written before these fields existed still loads: what is missing
-// is simply missing.
+// 在这些字段存在之前写成的历史仍能加载：缺失的就只是缺失。
 func TestAnOlderHistoryLoads(t *testing.T) {
 	store, path := newHistory(t)
 	old := `{"version":1,"entries":[{"id":"old","content":"hello","contentHash":"sha256:x",` +
@@ -185,8 +182,7 @@ func TestAnOlderHistoryLoads(t *testing.T) {
 	}
 }
 
-// A history that cannot be read is an error here; the use case decides that
-// it is survivable, which is the layer that knows the difference.
+// 读不出的历史在这里是错误；由用例层决定它可被容忍，那一层才懂得区分。
 func TestUnreadableHistoryIsAnError(t *testing.T) {
 	store, path := newHistory(t)
 	if err := os.WriteFile(path, []byte(`{"version":1,"entries":[`), 0o600); err != nil {
@@ -203,8 +199,7 @@ func TestUnreadableHistoryIsAnError(t *testing.T) {
 	}
 }
 
-// A canceled context is answered with the context's error, like every other
-// store in the application.
+// 被取消的 context 以 context 的错误回应，与应用中其它存储一致。
 func TestContextIsHonoured(t *testing.T) {
 	store, _ := newHistory(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -217,9 +212,8 @@ func TestContextIsHonoured(t *testing.T) {
 	}
 }
 
-// Concurrent writes must not interleave into one file: the rename is what
-// makes the file whole, and the lock is what keeps two writers from racing
-// over the temporary file's name.
+// 并发写入不得交织进同一个文件：重命名使文件完整，锁使两个写入者不会在同一
+// 临时文件名上竞争。
 func TestConcurrentEntryWrites(t *testing.T) {
 	store, path := newHistory(t)
 	var wg sync.WaitGroup
@@ -241,7 +235,7 @@ func TestConcurrentEntryWrites(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Whatever landed last, the file is a readable document.
+	// 无论最后落地的是哪个，文件都是可读的文档。
 	if _, err := store.LoadEntries(context.Background()); err != nil {
 		t.Fatalf("LoadEntries failed after concurrent writes: %v", err)
 	}
@@ -250,8 +244,7 @@ func TestConcurrentEntryWrites(t *testing.T) {
 	}
 }
 
-// The file is written through a temporary file, so a directory left behind
-// holds no half-written document.
+// 文件经临时文件写入，因此留下的目录里不会有半写的文档。
 func TestHistoryWriteLeavesNoTemporaryFile(t *testing.T) {
 	store, path := newHistory(t)
 	if err := store.SaveEntries(context.Background(), []domain.ClipboardEntry{{
@@ -271,9 +264,8 @@ func TestHistoryWriteLeavesNoTemporaryFile(t *testing.T) {
 	}
 }
 
-// A copied picture is kept beside the history, under the hash of its bytes, and
-// comes back byte for byte: it is the only copy left once the clipboard moves
-// on, and a click on the entry is what asks for it.
+// 复制的图片保存在历史旁、以其字节哈希为名，并逐字节返回：剪贴板移开后它是
+// 唯一的副本，点击条目就是索取它。
 func TestAPictureIsKeptBesideTheHistory(t *testing.T) {
 	store, path := newHistory(t)
 	ctx := context.Background()
@@ -290,8 +282,7 @@ func TestAPictureIsKeptBesideTheHistory(t *testing.T) {
 		t.Errorf("the picture came back as %q, want what was kept", kept)
 	}
 
-	// It is a file of its own, named after the reference: a colon is the one
-	// character a Windows file name cannot hold.
+	// 它是一个独立文件，以引用命名：冒号是 Windows 文件名唯一不能包含的字符。
 	dir := filepath.Join(filepath.Dir(path), imageDirName)
 	files, err := os.ReadDir(dir)
 	if err != nil {
@@ -301,7 +292,7 @@ func TestAPictureIsKeptBesideTheHistory(t *testing.T) {
 		t.Errorf("the image directory holds %v", fileNames(files))
 	}
 
-	// Saving the same picture twice is not a second file.
+	// 保存同一张图片两次不是第二个文件。
 	if err := store.SaveImage(ctx, "sha256:abc123", png); err != nil {
 		t.Fatalf("SaveImage failed the second time: %v", err)
 	}
@@ -319,14 +310,13 @@ func TestAPictureIsKeptBesideTheHistory(t *testing.T) {
 	if _, err := store.LoadImage(ctx, "sha256:abc123"); err == nil {
 		t.Error("a deleted picture was read back")
 	}
-	// Deleting it twice is not a failure: an entry can be dropped once.
+	// 删除两次不算失败：条目可能只被丢弃一次。
 	if err := store.DeleteImage(ctx, "sha256:abc123"); err != nil {
 		t.Errorf("deleting a picture that is already gone: %v", err)
 	}
 }
 
-// A reference is a file name, and a file can be edited: one that would name a
-// file outside the image directory is refused rather than joined.
+// 引用会成为文件名，而文件是可被编辑的：会指向图片目录之外的引用会被拒绝，而非拼接。
 func TestAPictureReferenceCannotLeaveItsDirectory(t *testing.T) {
 	store, _ := newHistory(t)
 	ctx := context.Background()
@@ -343,9 +333,8 @@ func TestAPictureReferenceCannotLeaveItsDirectory(t *testing.T) {
 	}
 }
 
-// A picture is dropped with its entry, which is also how the store stops
-// growing: an image directory that only grows is a directory of screenshots
-// nobody will see again.
+// 图片随其条目一起丢弃，这也是存储停止增长的方式：只增不减的图片目录就是一个
+// 堆满再也看不到的截图的目录。
 func TestDroppedEntriesTakeTheirPicturesWithThem(t *testing.T) {
 	store, path := newHistory(t)
 	dir := filepath.Join(filepath.Dir(path), imageDirName)
@@ -363,8 +352,7 @@ func TestDroppedEntriesTakeTheirPicturesWithThem(t *testing.T) {
 	}
 }
 
-// A picture reference survives the history file: it is a short name, and the
-// bytes are beside it.
+// 图片引用能历经历史文件留存：它是一个短名称，字节放在它旁边。
 func TestAPictureReferenceSurvivesTheHistoryFile(t *testing.T) {
 	store, path := newHistory(t)
 	ctx := context.Background()
@@ -383,8 +371,7 @@ func TestAPictureReferenceSurvivesTheHistoryFile(t *testing.T) {
 	if !strings.Contains(string(data), `"imageRef": "sha256:abcdef"`) {
 		t.Errorf("the history file does not name the picture: %s", data)
 	}
-	// No bytes in the history file itself: a screenshot is megabytes and this
-	// file is written whole on every copy.
+	// 历史文件本身不含字节：截图动辄数兆，而本文件每次复制都整体重写。
 	if strings.Contains(string(data), "image\":") {
 		t.Errorf("the history file holds image bytes: %s", data)
 	}
@@ -402,7 +389,7 @@ func TestAPictureReferenceSurvivesTheHistoryFile(t *testing.T) {
 	}
 }
 
-// fileNames is what a directory listing holds, for a test's message.
+// fileNames 是目录列表中的名字，供测试消息使用。
 func fileNames(entries []os.DirEntry) []string {
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {

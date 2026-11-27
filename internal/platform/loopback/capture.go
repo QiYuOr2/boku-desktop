@@ -6,14 +6,14 @@ import (
 )
 
 const (
-	// SourceSystem is the default playback device.
+	// 默认播放设备。
 	SourceSystem = "system"
-	// SourceMicrophone is the default input device.
+	// 默认输入设备。
 	SourceMicrophone = "microphone"
 )
 
-// Stream is one capture. PCM sends 16 kHz mono s16le chunks. Close stops the
-// device. A full queue drops the chunk: the system callback has to return.
+// Stream 表示一次采集，PCM 输出 16 kHz 单声道 s16le 数据块。队列满时丢弃该块，
+// 因为系统回调必须立即返回。Close 会停止设备。
 type Stream struct {
 	mu      sync.Mutex
 	pcm     chan []byte
@@ -22,7 +22,7 @@ type Stream struct {
 	closed  bool
 }
 
-// PCM is the converted audio. It is closed after the capture stops.
+// 转换后的音频通道，采集停止后关闭。
 func (s *Stream) PCM() <-chan []byte {
 	if s == nil {
 		return nil
@@ -30,7 +30,7 @@ func (s *Stream) PCM() <-chan []byte {
 	return s.pcm
 }
 
-// Close stops the capture and waits until the device has been released.
+// 停止采集并等待设备释放完成。
 func (s *Stream) Close() error {
 	if s == nil || s.cancel == nil {
 		return nil

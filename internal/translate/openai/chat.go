@@ -1,14 +1,10 @@
-// Package openai holds what the OpenAI-compatible translators have in common:
-// one chat-completions request, one answer to read out of it, and one way of
-// reading the piece-by-piece annotation that the Japanese settings ask for.
+// Package openai 汇集 OpenAI 兼容翻译器的公共部分：一次 chat-completions 请求、
+// 从响应中读出答案，以及读取日文设置所需逐词标注的唯一方式。
 //
-// It is a package of its own because the two translators differ only in
-// their address, their model and the words they put in the prompt: the
-// protocol is one thing, and it is written down once.
+// 它独立成包，是因为两个翻译器只在地址、模型和提示词措辞上不同：协议是同一件事，
+// 只写一遍。
 //
-// The field names of the wire format stop here. The rest of the application
-// hands over an address, a model, a key and a prompt, and gets back text and
-// segments.
+// 线格式的字段名止步于此。应用其余部分交出地址、模型、密钥和提示词，拿回文本与片段。
 package openai
 
 import (
@@ -26,71 +22,55 @@ import (
 	"boku/internal/platform/httpc"
 )
 
-// DefaultMaxChars bounds what one request carries. The caller truncates before
-// this, so a request that reaches here is already inside it; the constant is
-// the ceiling for callers that are not the use case, such as a test — and the
-// number the note about a shortened text names.
+// DefaultMaxChars 限制单次请求携带的文本量。调用方在此之前已截断，故到达此处的请求本
+// 已在上限内；该常量是给非用例调用方（如测试）的上限，也是「文本被截短」提示里引用的数字。
 const DefaultMaxChars = 4000
 
-// Options is one call: where to ask, what to call the model, what to say,
-// and what to translate.
+// Options 是一次调用：向何处请求、用哪个模型、说什么、翻译什么。
 type Options struct {
 	Client *httpc.Client
-	// Endpoint is the full address, without a trailing slash, and without
-	// the path: the path is added here.
+	// BaseURL 是完整地址，不带尾部斜杠也不带路径：路径在此处附加。
 	BaseURL string
 	Model   string
-	// APIKey is sent as a bearer token. Empty means no Authorization header
-	// at all: a local service that needs none should not be told about an
-	// empty key.
+	// APIKey 作为 bearer token 发送。为空则完全不带 Authorization 头：不需要密钥的本地
+	// 服务不应被告知一个空密钥。
 	APIKey string
-	// System is the instruction that decides the shape of the answer.
+	// System 是决定回答形状的指令。
 	System string
-	// Source and Target are the languages, for the prompt's own use.
+	// Source 与 Target 是语种，供提示词使用。
 	Source domain.Language
 	Target domain.Language
-	// Text is what to translate.
+	// Text 是待翻译内容。
 	Text string
 }
 
-// endpointPath is the OpenAI-compatible path every service of this kind
-// answers on.
+// endpointPath 是这类服务通用的 OpenAI 兼容路径。
 const endpointPath = "/chat/completions"
 
-// CustomService is where a user's own OpenAI-compatible service is, and what
-// to call it.
+// CustomService 是用户自建 OpenAI 兼容服务的位置与称呼。
 //
-// It lives here, beside the protocol it names, because the two things that
-// need it are on either side of a boundary: the custom backend asks a service
-// at this address, and the settings that hold it are the translation feature's.
-// The backend cannot import the feature — the feature imports the backend — so
-// the type they share belongs with the protocol instead.
+// 它与它所命名的协议同处一包，是因为需要它的两边分处边界两侧：自定义后端向此地址请求，
+// 而保存它的设置属于翻译功能。后端不能 import 该功能（功能 import 后端），于是共享类型
+// 随协议而居。
 type CustomService struct {
-	// BaseURL is the service's address, such as "https://api.example.com/v1".
-	// Empty means the service is not configured, and the window says so.
+	// BaseURL 是服务地址，如 "https://api.example.com/v1"。为空表示未配置，窗口会说明。
 	BaseURL string
-	// DisplayName is what the user calls the service. Empty means the
-	// interface uses its own word for it.
+	// DisplayName 是用户对服务的称呼。为空时界面用自带的叫法。
 	DisplayName string
-	// Model is the OpenAI-compatible model name to ask.
+	// Model 是要请求的 OpenAI 兼容模型名。
 	Model string
-	// SupportsImage is a verified capability stored by the translation feature.
+	// SupportsImage 是翻译功能保存的、已核实的图片能力。
 	SupportsImage bool
 }
 
-// NormalizeBaseURL turns what a user typed into an address the application
-// will ask, or into nothing.
+// NormalizeBaseURL 把用户输入的地址整理成应用将请求的地址，或整理为空。
 //
-// It accepts what people write — "api.example.com/v1", or a full URL — and
-// refuses anything that is not plain HTTP: a credential is about to be sent
-// there, and a scheme the transport does not speak is a mistake worth dropping
-// rather than passing on. A protocol-relative address ("//host/v1") is dropped
-// too: it is how a web page means "the same scheme as this page", which a
-// desktop application has no answer for.
+// 它接受人们习惯的写法（"api.example.com/v1" 或完整 URL），拒绝任何非纯 HTTP 的输入：
+// 即将把凭据发往此处，传输层不支持的 scheme 值得丢弃而非放行。协议相对地址（"//host/v1"）
+// 也丢弃：那是网页表示「与本页同 scheme」的写法，桌面应用无从应对。
 //
-// It sits here rather than in the feature that stores the address because the
-// backend that asks it needs the same answer: what is stored and what is asked
-// must be the same string, and two cleanings is two chances for them to differ.
+// 它放在这里而非保存地址的功能里，是因为发起请求的后端需要同一答案：保存的与请求的必须
+// 是同一字符串，两处各自清洗就有两次出现分歧的机会。
 func NormalizeBaseURL(raw string) string {
 	value := strings.TrimSpace(raw)
 	if value == "" || strings.HasPrefix(value, "//") {
@@ -101,12 +81,10 @@ func NormalizeBaseURL(raw string) string {
 	if index := strings.Index(lower, "://"); index >= 0 {
 		scheme, value = lower[:index], value[index+3:]
 	} else if index := strings.IndexAny(lower, ":/?#"); index >= 0 {
-		// Something before the first slash that is not the host is a scheme,
-		// however it is punctuated: "javascript:alert(1)" names a scheme and
-		// a payload, not a host and a path. Two things are hosts rather than
-		// schemes and are let through: a port ("localhost:8080/v1") and an
-		// IPv6 literal in brackets ("[::1]:8080/v1"), whose colons are part of
-		// the address itself.
+		// 首个斜杠之前的东西若不是主机，而是某种标了 scheme 的写法，就是 scheme：
+		// "javascript:alert(1)" 是 scheme 加载荷，不是主机加路径。有两种是主机而非
+		// scheme、予以放行：端口（"localhost:8080/v1"）与方括号中的 IPv6 字面量
+		// （"[::1]:8080/v1"），它们的冒号本就属于地址。
 		head := lower[:index]
 		bracketed := strings.Contains(head, "[")
 		if lower[index] == ':' && !bracketed && !strings.ContainsAny(head, "./") && !isPort(head, lower[index+1:]) {
@@ -126,25 +104,20 @@ func NormalizeBaseURL(raw string) string {
 	return scheme + "://" + strings.TrimRight(host, "/")
 }
 
-// defaultScheme is the scheme a typed address without one is given.
+// defaultScheme 是缺 scheme 的输入地址所补的 scheme。
 //
-// It is https, which is what a hosted service is, with one exception: an
-// address on the machine itself is http. A service the user runs — Ollama, LM
-// Studio, LibreTranslate, the mock in tools/ — listens on plain http, and a
-// bare "127.0.0.1:11434/v1" turned into "https://127.0.0.1:11434/v1" is a
-// request to a port that speaks no TLS. The user typed the address they copied
-// out of that service's own documentation, and the application should not make
-// it wrong.
+// 它是 https，因为托管服务如此，只有一个例外：本机地址用 http。用户自跑的服务
+// （Ollama、LM Studio、LibreTranslate、tools/ 里的 mock）监听明文 http，把裸地址
+// "127.0.0.1:11434/v1" 变成 "https://127.0.0.1:11434/v1" 就是向不讲 TLS 的端口发请求。
+// 用户键入的是从该服务文档里复制的地址，应用不该把它弄错。
 //
-// "localhost" counts as the machine; a hostname that merely contains the word
-// does not.
+// "localhost" 算作本机；仅包含该词的其它主机名不算。
 func defaultScheme(host string) string {
 	name := host
 	if index := strings.IndexAny(name, "/?#"); index >= 0 {
 		name = name[:index]
 	}
-	// An IPv6 literal is bracketed, and its colons are part of the address:
-	// the port, if there is one, is the colon after the closing bracket.
+	// IPv6 字面量带方括号，其冒号属于地址：端口（若有）是右括号之后的冒号。
 	if strings.HasPrefix(name, "[") {
 		if end := strings.IndexByte(name, ']'); end >= 0 {
 			name = name[1:end]
@@ -160,8 +133,7 @@ func defaultScheme(host string) string {
 	return "https"
 }
 
-// isPort reports whether what follows a colon is a port number rather than the
-// payload of a scheme: "8080/v1" is, "alert(1)" is not.
+// isPort 报告冒号之后是否为端口号而非 scheme 载荷："8080/v1" 是，"alert(1)" 不是。
 func isPort(head, rest string) bool {
 	digits := rest
 	if index := strings.IndexAny(rest, "/?#"); index >= 0 {
@@ -175,14 +147,12 @@ func isPort(head, rest string) bool {
 			return false
 		}
 	}
-	// A port is a number, and the host it belongs to is a host: no scheme is
-	// spelled with digits before it.
+	// 端口是数字，且它所属的是主机：没有哪个 scheme 前面以数字写出。
 	return head != ""
 }
 
-// EndpointOf is the address a base URL is asked at, or "" when there is no
-// base URL. The settings window shows it, so that a user can see where their
-// text and their key are going before either is sent.
+// EndpointOf 是 base URL 的请求地址，无 base URL 时为 ""。设置窗口会显示它，让用户在
+// 发出文本与密钥之前知道它们会去哪里。
 func EndpointOf(baseURL string) string {
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if base == "" {
@@ -191,9 +161,8 @@ func EndpointOf(baseURL string) string {
 	return base + endpointPath
 }
 
-// chatRequest is the body of one call. Only the fields every
-// OpenAI-compatible service understands are sent: a service built on the
-// same protocol is not always built on the same extras.
+// chatRequest 是一次调用的请求体。只发送每个 OpenAI 兼容服务都理解的字段：基于同一协议
+// 的服务未必支持同一套扩展。
 type chatRequest struct {
 	Model              string         `json:"model"`
 	Messages           []chatMessage  `json:"messages"`
@@ -208,39 +177,33 @@ type chatMessage struct {
 	Content any    `json:"content"`
 }
 
-// ImageTimeout bounds one vision request. Recognizing and translating a
-// screenshot routinely takes longer than an ordinary API call; the 10-second
-// default would cut the stream in the middle of the model's answer, and the
-// app would report its own deadline as a network timeout. The screenshot task
-// gives the whole operation two minutes, and this request may use all of it.
+// ImageTimeout 限制单次视觉请求。识别并翻译一张截图通常比普通 API 调用久；10 秒默认会
+// 在模型回答中途切断流，应用便把自己设的期限报成网络超时。截图任务整体给两分钟，本请求
+// 可用满它。
 const ImageTimeout = 2 * time.Minute
 
-// ImageMaxBytes is the vision-stream ceiling. Thinking-mode SSE frames every
-// token, so the body is much larger than the final JSON. The ordinary 1 MiB
-// ceiling tears the last event, and that tear is reported as an unreadable
-// response. Apple allows the same 8 MiB.
+// ImageMaxBytes 是视觉流上限。思考模式的 SSE 逐 token 发送，体积远大于最终 JSON。普通
+// 1 MiB 上限会截断最后一个事件，并被报成无法读取的响应。Apple 端同样用 8 MiB。
 const ImageMaxBytes = 8 << 20
 
-// ImageOptions is an OpenAI-compatible vision request. Image is PNG bytes;
-// callers never log it or include it in errors.
+// ImageOptions 是一次 OpenAI 兼容视觉请求。Image 为 PNG 字节；调用方绝不记录它或把它
+// 放进错误。
 type ImageOptions struct {
 	Client                         *httpc.Client
 	BaseURL, Model, APIKey, System string
 	Target                         domain.Language
 	Image                          []byte
-	// Headers, MaxTokens and DisableThinking are only supplied when a
-	// particular OpenAI-compatible service documents them. They remain empty
-	// for generic endpoints so we do not send vendor extensions by default.
+	// Headers、MaxTokens 与 DisableThinking 仅在特定 OpenAI 兼容服务有文档说明时才提供；
+	// 通用端点保持为空，以免默认发送厂商扩展。
 	Headers         map[string]string
 	MaxTokens       int
 	DisableThinking bool
-	// Timeout overrides ImageTimeout for this request; zero uses it.
+	// Timeout 覆盖本次请求的 ImageTimeout；为零则使用它。
 	Timeout time.Duration
 }
 
-// ImageResponse is the complete, structured answer requested from a vision
-// model. A response is either a translation or a closed-set failure, never
-// both and never free-form error prose.
+// ImageResponse 是向视觉模型请求的完整结构化回答。响应要么是译文，要么是封闭集合里的
+// 失败，绝不同时、绝不是自由文本的错误描述。
 type ImageResponse struct {
 	Status         string                `json:"status"`
 	SourceLang     domain.Language       `json:"sourceLang"`
@@ -254,9 +217,8 @@ type imageResponseFailure struct {
 	Code domain.ImageTranslationFailureCode `json:"code"`
 }
 
-// ParseImageResponse enforces the image-model response contract. A declared
-// model failure is useful data, while a response outside this envelope remains
-// a provider bad response.
+// ParseImageResponse 强制执行图片模型的响应契约。模型声明的失败是有用的数据，而超出此
+// 信封的响应仍是服务商无效响应。
 func ParseImageResponse(content string) (ImageResponse, error) {
 	var answer ImageResponse
 	if err := json.Unmarshal([]byte(content), &answer); err != nil {
@@ -278,8 +240,7 @@ func ParseImageResponse(content string) (ImageResponse, error) {
 	}
 }
 
-// chatResponse is as much of the answer as is read: the first choice's
-// message. Everything else a service may add is left alone.
+// chatResponse 只读回答的一部分：首个 choice 的 message。服务可能附加的其余内容一概不管。
 type chatResponse struct {
 	Choices []struct {
 		Message struct {
@@ -288,10 +249,9 @@ type chatResponse struct {
 	} `json:"choices"`
 }
 
-// TranslateImage sends one image as a data URL in the standard multimodal chat
-// shape and reads its SSE response as it arrives. The final model output still
-// has to be the required JSON envelope; streaming only reduces time-to-first
-// output and never turns partial model text into a translation.
+// TranslateImage 以数据 URL 形式在标准多模态 chat 结构里发送一张图片，并边到达边读取
+// 其 SSE 响应。最终模型输出仍必须是要求的 JSON 信封；流式只降低首字延迟，绝不会把模型的
+// 片段文本当成译文。
 func TranslateImage(ctx context.Context, opts ImageOptions) (string, error) {
 	if opts.Client == nil || len(opts.Image) == 0 || strings.TrimSpace(opts.Model) == "" || EndpointOf(opts.BaseURL) == "" {
 		return "", fmt.Errorf("%w: incomplete image translation request", domain.ErrInvalidArgument)
@@ -344,11 +304,9 @@ func TranslateImage(ctx context.Context, opts ImageOptions) (string, error) {
 	return readAnswer(result, opts.Target)
 }
 
-// readSSE accumulates OpenAI-compatible chat-completion deltas. A completed
-// stream ends with [DONE]; accepting an EOF before that would make a network
-// truncation look like a finished translation. Thinking-mode chunks set
-// content to null while they stream reasoning; that null is not text and is
-// not an invalid event. SSE lines may end in CR, which the scanner leaves on.
+// readSSE 累积 OpenAI 兼容 chat-completion 的增量。完整流以 [DONE] 结束；在此之前接受
+// EOF 会把网络截断误当成已完成的译文。思考模式块在流式推理时把 content 设为 null；该 null
+// 不是文本，也不是非法事件。SSE 行可能以 CR 结尾，scanner 会保留它。
 func readSSE(stream io.Reader) (string, error) {
 	scanner := bufio.NewScanner(stream)
 	scanner.Buffer(make([]byte, 8*1024), httpc.DefaultMaxBytes)
@@ -407,13 +365,10 @@ func readSSE(stream io.Reader) (string, error) {
 	return answer.String(), nil
 }
 
-// Translate makes the request and reads the answer out of it.
+// Translate 发起请求并从中读出答案。
 //
-// Everything that can go wrong is a domain error: an unreachable service, a
-// rejected key, a response that is not the documented shape. A response that
-// IS the shape but carries nothing is ErrProviderBadResponse, not an empty
-// translation: the caller must never draw a blank half as if it were an
-// answer.
+// 一切出错都是域错误：服务不可达、密钥被拒、响应不是文档规定的形状。若响应形状正确却
+// 内容为空，那是 ErrProviderBadResponse 而非空译文：调用方绝不能把空白的一半当作答案画出来。
 func Translate(ctx context.Context, opts Options) (content string, err error) {
 	if opts.Client == nil {
 		return "", fmt.Errorf("%w: the translator has no HTTP client", domain.ErrInvalidArgument)
@@ -453,13 +408,10 @@ func Translate(ctx context.Context, opts Options) (content string, err error) {
 	return readAnswer(result, opts.Target)
 }
 
-// readAnswer pulls the text out of a successful response, or says why the
-// response is not one.
+// readAnswer 从成功响应里取出文本，或说明它为何不是成功响应。
 //
-// A fragment of the response goes into the error, so that a service which
-// renamed a field can be diagnosed without a debugger. It is redacted first:
-// a service that echoes a credential back in its answer must not put it in
-// front of the user.
+// 错误里会带一段响应片段，便于诊断服务改名的情况而无需调试器。片段先脱敏：在回答里回显
+// 凭据的服务不能把它摆到用户面前。
 func readAnswer(result domain.FetchResult, target domain.Language) (string, error) {
 	snippet := func() string { return kit.RedactText(domain.Snippet(result.Payload)) }
 	var parsed chatResponse
@@ -495,10 +447,8 @@ func readAnswer(result domain.FetchResult, target domain.Language) (string, erro
 	return content, nil
 }
 
-// hasContent reports whether the answer has a first choice whose message has
-// a content field at all. It is what tells "the service answered with
-// nothing" apart from "the service answered a different shape": both carry
-// an empty string once decoded, and only one of them is worth retrying.
+// hasContent 报告回答是否有首个 choice、且其 message 带 content 字段。它区分「服务答了空」
+// 与「服务答了别的形状」：解码后两者都是空串，但只有一种值得重试。
 func hasContent(payload []byte) bool {
 	var probe struct {
 		Choices []struct {

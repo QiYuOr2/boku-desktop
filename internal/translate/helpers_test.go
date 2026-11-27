@@ -11,19 +11,13 @@ import (
 	"boku/internal/domain"
 )
 
-// The doubles the translation tool is assembled over: a clipboard device the
-// test decides the content of, a settings store in memory, a secret store in
-// memory, and a clock the test moves by hand.
-
-// fakeDevice is a domain.ClipboardDevice whose content the test decides.
 type fakeDevice struct {
-	// now stamps what the device hands back, so that a test's own clock
-	// decides when a copy happened rather than the wall clock.
+	// now 为设备返回的内容打时间戳，让测试自己的时钟决定复制发生的时间，
+	// 而不是墙钟。
 	now func() time.Time
 
-	// readDelay and writeDelay stand in for a platform clipboard that is
-	// being held by something else: the call takes that long to come back.
-	// They are set before the device is used, never while it is.
+	// readDelay 与 writeDelay 模拟剪贴板被其他程序占用：调用要等这么久才返回。
+	// 它们只在设备被使用前设置，使用期间不改。
 	readDelay  time.Duration
 	writeDelay time.Duration
 
@@ -37,8 +31,7 @@ type fakeDevice struct {
 	writeEr error
 }
 
-// failWrite makes the next write fail, the way a platform that refuses the
-// format does.
+// failWrite 让下一次写入失败，模拟平台拒绝该格式。
 func (d *fakeDevice) failWrite(err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -107,8 +100,7 @@ func (d *fakeDevice) WriteFiles(_ context.Context, paths []string) error {
 	return nil
 }
 
-// WriteImage puts a picture on the clipboard, which is what the selection
-// tool putting back what it borrowed does.
+// WriteImage 把图片放到剪贴板，对应划词工具归还借用内容的行为。
 func (d *fakeDevice) WriteImage(_ context.Context, png []byte) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -151,11 +143,7 @@ func (d *fakeDevice) writtenImages() [][]byte {
 	return out
 }
 
-// fakeTools is the settings store, in memory: this feature's section, with the
-// file replaced by the section itself.
-//
-// The section is the real one, so a switch changed through it is changed the
-// way the shipped code changes it; what is faked is only the file underneath.
+// fakeTools 是内存中的设置存储：使用本功能真实的 Section，只把底层文件换成内存。
 type fakeTools struct {
 	mu      sync.Mutex
 	section *Section
@@ -173,8 +161,7 @@ func (f *fakeTools) Load(context.Context) error {
 	return f.err
 }
 
-// Update is the store's read-modify-write, in one critical section: it is what
-// a feature uses to change a setting without overwriting anybody else's.
+// Update 是存储的读-改-写，在一个临界区内完成：功能用它修改设置而不覆盖别人的改动。
 func (f *fakeTools) Update(_ context.Context, _ string, change func() error) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -185,7 +172,7 @@ func (f *fakeTools) Update(_ context.Context, _ string, change func() error) err
 	return change()
 }
 
-// testClock is a clock the test moves by hand.
+// testClock 是测试手动推进的时钟。
 type testClock struct {
 	mu  sync.Mutex
 	now time.Time
@@ -211,8 +198,7 @@ func textReading(text string) domain.ClipContent {
 	return domain.ClipContent{Kind: domain.ClipKindText, Text: text, Display: text}
 }
 
-// waitFor polls a condition until it holds, and fails the test if it never
-// does: waiting on a goroutine is the one place a test may sleep.
+// waitFor 轮询条件直到成立，否则让测试失败：等待 goroutine 是测试中唯一允许 sleep 的地方。
 func waitFor(t *testing.T, what string, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
@@ -225,8 +211,7 @@ func waitFor(t *testing.T, what string, condition func() bool) {
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-// memoryStore is a domain.SecretStore in memory: the tool tests do not depend
-// on the file store.
+// memoryStore 是内存中的 domain.SecretStore：工具测试不依赖文件存储。
 type memoryStore struct {
 	mu     sync.Mutex
 	values map[string]string

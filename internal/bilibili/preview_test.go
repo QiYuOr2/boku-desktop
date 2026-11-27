@@ -5,15 +5,13 @@ import (
 	"testing"
 )
 
-// feedItem wraps one item's modules in the answer the endpoint returns, so a
-// test can state only the part it is about.
+// feedItem 把单个 item 的 modules 包进接口返回的外壳，测试只需写出它关心的部分。
 func feedItem(body string) string {
 	return `{"code":0,"message":"0","data":{"items":[{"id_str":"1","type":"DYNAMIC_TYPE_WORD","modules":{` +
 		`"module_author":{"mid":1,"name":"UP","face":"","pub_ts":1700000000},` + body + `}}]}}`
 }
 
-// Every kind of post the feed carries ends up with a line to preview. The
-// fixtures are the shapes captured from the real endpoint.
+// 动态流里的每种帖子都能得到一行预览文案；样本取自真实接口的形状。
 func TestEveryKindHasAPreview(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -82,8 +80,7 @@ func TestEveryKindHasAPreview(t *testing.T) {
 	}
 }
 
-// A row opens what the post points at, and the timeline entry only when it
-// points nowhere.
+// 行打开帖子指向的内容，指向为空时才回落到时间线条目。
 func TestPreviewLinksPointAtTheEntry(t *testing.T) {
 	cases := []struct{ name, body, want string }{
 		{"a video", `"module_dynamic":{"major":{"archive":{"bvid":"BV1x","title":"t","jump_url":"//www.bilibili.com/video/BV1x"}}}`, "https://www.bilibili.com/video/BV1x"},
@@ -105,7 +102,7 @@ func TestPreviewLinksPointAtTheEntry(t *testing.T) {
 	}
 }
 
-// The label beside the creator's name says what kind of post it is.
+// UP 名字旁的类型标签标明帖子种类。
 func TestDynamicKindLabelsThePost(t *testing.T) {
 	cases := []struct{ name, rawType, body, want string }{
 		{"a video", "DYNAMIC_TYPE_AV", `"module_dynamic":{"major":{"archive":{"bvid":"BV1x"}}}`, "视频"},

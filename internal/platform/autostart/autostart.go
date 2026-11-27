@@ -4,28 +4,20 @@ import (
 	"errors"
 )
 
-// Launcher is one login start: the program it runs, the argument that tells
-// the program the system started it, and the name the start is recorded under.
+// Launcher 描述一个登录启动：运行的程序、告知程序是系统启动它的参数，以及该启动记录所用的名字。
 type Launcher struct {
-	// Label is the application's identifier. macOS no longer names a login
-	// start after it — the system login item is the application itself — but
-	// it is still the label of the launch agent written by the previous
-	// mechanism, which the manager removes on the first read.
+	// Label 是应用的标识符。macOS 不再用它命名登录启动（系统登录项就是应用本身），
+	// 但旧机制写下的 launch agent 仍以它为标签，管理器首次读取时会清除它。
 	Label string
-	// Name is the application's name as a person reads it.
+	// Name 是人可读的应用名。
 	Name string
-	// Exe is the program the start runs, as an absolute path. Windows names
-	// a program; macOS registers the running application bundle and ignores
-	// the path.
+	// Exe 是启动时运行的程序，绝对路径。Windows 用它指定程序；macOS 注册的是运行中的应用包，忽略该路径。
 	Exe string
-	// Arg is appended to the command line: the application's own way of
-	// knowing that nobody asked for this start.
+	// Arg 追加到命令行，是应用判断这次启动并非用户发起的方式。
 	Arg string
 }
 
-// CommandLine is what the system runs: the program, quoted, and the argument.
-// Quoting is what lets a path with a space in it — which every macOS bundle
-// has — stay one argument.
+// CommandLine 返回系统实际执行的命令：加引号的程序路径加参数。加引号是为了让含空格的路径（每个 macOS bundle 都有）保持为一个参数。
 func (l Launcher) CommandLine() string {
 	if l.Arg == "" {
 		return `"` + l.Exe + `"`
@@ -33,82 +25,57 @@ func (l Launcher) CommandLine() string {
 	return `"` + l.Exe + `" ` + l.Arg
 }
 
-// Document is where a Windows login start lives and what is stored there.
+// Document 是 Windows 登录启动所在的位置及其内容。
 type Document struct {
-	// Key is the full name of the Windows registry value.
+	// Key 是 Windows 注册表值的完整名称。
 	Key string
-	// Contents is the command line in it.
+	// Contents 是其中的命令行。
 	Contents []byte
 }
 
-// Manager is a platform's login start.
+// Manager 是某平台的登录启动。
 //
-// Nothing here starts a process, and nothing touches the disk before it is
-// asked: the manager can be built before the application is running, and
-// every question is answered from the platform's own record rather than from
-// what this process remembers.
+// 这里不会启动进程，在未被询问前也不碰磁盘：manager 可以在应用运行前构建，
+// 每个问题都从平台自身的记录作答，而非本进程的记忆。
 type Manager interface {
-	// Read reports whether this launcher's start is recorded and in effect.
+	// Read 报告该 launcher 的启动是否已记录并生效。
 	//
-	// A start that names another program is not this one: an update that
-	// moved the application leaves the old start behind, and the answer to
-	// "does the application start at login" is then no until the switch is
-	// pressed again.
+	// 指向其它程序的启动不算这个：应用被更新移到新位置后旧启动仍会残留，
+	// 此时"应用是否开机启动"的答案就是否，直到重新拨动开关。
 	//
-	// An error means the question could not be answered. ErrUnsupported is
-	// the platform having no login start that Boku can register, and
-	// ErrNeedsApproval is a start the system recorded but the user has to
-	// allow in System Settings before it takes effect.
+	// 返回错误表示无法作答。ErrUnsupported 表示该平台没有 Boku 能注册的登录启动；
+	// ErrNeedsApproval 表示系统已记录该启动，但用户须在系统设置中允许后才生效。
 	Read(Launcher) (bool, error)
-	// Location is where the start lives, in the platform's own terms: a
-	// registry value, or the system settings page that lists login items. It
-	// is what the settings page shows under the switch, and it is asked
-	// rather than assumed so that the line and the platform cannot disagree.
+	// Location 以平台自身的说法给出启动所在位置：注册表值，或列出登录项的系统设置页。
+	// 设置页把它显示在开关下方；它来自询问而非假设，以确保显示行与平台不会不一致。
 	Location(Launcher) (string, error)
-	// Start records the start. Asking again is also how a start the platform
-	// switched off is switched back on — Task Manager's disabled entry on
-	// Windows — and how a start that names an older copy of the application
-	// is brought up to date.
+	// Start 记录启动。再次调用也能把被平台关闭的启动重新打开（Windows 任务管理器中的禁用项），
+	// 以及把指向旧副本的启动更新到当前版本。
 	Start(Launcher) error
-	// Stop removes it. A start that is not there is not an error: nothing is
-	// left behind, which is what was asked for.
+	// Stop 移除启动。不存在也不算错误：什么都没留下，正是所求。
 	Stop(Launcher) error
 }
 
-// The problems a manager reports, spelled so that the caller can tell a
-// machine that cannot have a login start from one where the write failed.
+// manager 报告的问题，以便调用方区分"该机器无法有登录启动"与"写入失败"。
 var (
-	// ErrUnsupported means this desktop has no login start that Boku can
-	// register, and nothing is wrong with the machine.
+	// ErrUnsupported 表示该桌面没有 Boku 能注册的登录启动，机器本身没有问题。
 	ErrUnsupported = errors.New("autostart: this desktop cannot start the application at login")
-	// ErrNotInstalled means the platform can register a login start, but the
-	// application is not running from a place it will still be in at the next
-	// login — `go run`, a build directory, a copy that is about to be
-	// replaced. The start would point at a program that is no longer there,
-	// so it is refused rather than written.
+	// ErrNotInstalled 表示平台能注册登录启动，但应用不在下次登录时仍会存在的运行位置
+	// （`go run`、构建目录、即将被替换的副本）。这样的启动会指向不存在的程序，故拒绝写入。
 	ErrNotInstalled = errors.New("autostart: the application is not running from a location it will still be in at the next login")
-	// ErrNeedsApproval means the system has the login item, but the user
-	// turned it off in System Settings (or the system still requires them to
-	// allow it). It is not a failure of the write: the page says where to
-	// allow it instead of claiming the switch is off.
+	// ErrNeedsApproval 表示系统已有该登录项，但用户在系统设置里关掉了（或仍需其允许）。
+	// 这不是写入失败：页面会提示去哪里允许，而不是错误地显示开关为关。
 	ErrNeedsApproval = errors.New("autostart: the login item needs approval in System Settings")
 )
 
-// OpenedAtLoginArg is the argument the Windows login start appends to the
-// command line: the application's way of knowing that the system started it
-// and nobody is in front of it. The framework removes it from its own command
-// line before main sees it, and answers WasOpenedAtLogin from it, so the
-// Windows manager and the framework have to agree on the string exactly —
-// which is why it is written once, here.
+// OpenedAtLoginArg 是 Windows 登录启动追加到命令行的参数：应用据此知道自己由系统启动且无人操作。
+// 框架会在 main 看到命令行前移除它并据此回答 WasOpenedAtLogin，因此 Windows 管理器与框架
+// 必须使用完全相同的字符串——所以只在这里定义一次。
 //
-// macOS's login item launches the application bundle without an argument; the
-// application does not open a window on launch, so nothing depends on it
-// there.
+// macOS 的登录项启动应用包时不带参数；应用启动时不打开窗口，故那边不依赖它。
 const OpenedAtLoginArg = "--mygo-opened-at-login"
 
-// Available reports whether the manager has a login start at all, which is
-// what tells the settings page whether to draw the switch: a switch that
-// would do nothing is worse than no switch.
+// Available 报告 manager 是否有登录启动，设置页据此决定是否绘制开关：一个什么也不做的开关比没有更糟。
 func Available(m Manager, l Launcher) bool {
 	if m == nil {
 		return false

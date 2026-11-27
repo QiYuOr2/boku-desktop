@@ -16,9 +16,8 @@ import (
 
 const cacheVersion = 2
 
-// Cache owns the short-lived on-disk answer for the animation feature. It is
-// deliberately separate from settings: releases are fetched data, not a user
-// choice, and only the Shanghai day named in the file is usable.
+// Cache 持有动画功能短期的磁盘缓存。它与设置刻意分离：剧集是取回的数据而非用户选择，
+// 且只有文件中标注的上海日期可用。
 type Cache struct{ path string }
 
 func NewCache(path string) *Cache { return &Cache{path: path} }
@@ -31,9 +30,8 @@ type cachedToday struct {
 	Covers    map[int64][]byte        `json:"covers"`
 }
 
-// Load returns only an answer collected for day. Yesterday's file is an
-// expected cache miss, not an error: it must never leak yesterday's schedule
-// into today's flyout.
+// Load 只返回为 day 收集的结果。昨天的文件属于预期的缓存未命中而非错误：
+// 绝不能把昨天的档期泄漏进今天的面板。
 func (c *Cache) Load(day string) ([]domain.EpisodeRelease, map[int64][]byte, time.Time, bool, error) {
 	if c == nil || strings.TrimSpace(c.path) == "" {
 		return nil, nil, time.Time{}, false, nil

@@ -1,4 +1,4 @@
-// Package ui is the flash capture line and the history window.
+// Package ui 提供闪念的捕获栏与历史窗口。
 package ui
 
 import (
@@ -12,9 +12,8 @@ import (
 	"boku/internal/presentation"
 )
 
-// State is the capture line, the history, and the shortcut row.
-// Windows stay in the shell; this type only decides what they show and what a
-// click does.
+// State 管理捕获栏、历史与快捷键行。窗口留在 shell；这里只决定显示什么、
+// 以及点击做什么。
 type State struct {
 	flashes     *flash.Service
 	host        presentation.Host
@@ -48,7 +47,7 @@ type State struct {
 	captureHandle ui.Handle
 }
 
-// Config is what the shell injects. Copy and the window callbacks may be nil.
+// Config 是 shell 注入的依赖。Copy 与窗口回调可以为 nil。
 type Config struct {
 	Service     *flash.Service
 	Host        presentation.Host
@@ -62,7 +61,7 @@ type Config struct {
 	ReturnMark  *ui.SVG
 }
 
-// New returns the flash UI. A nil service still builds; the views say the tool is absent.
+// New 返回闪念 UI。service 为 nil 也能构建；视图会提示该工具未安装。
 func New(config Config) *State {
 	state := &State{
 		flashes: config.Service, host: config.Host, copyText: config.CopyText,
@@ -78,7 +77,7 @@ func New(config Config) *State {
 	return state
 }
 
-// Reload reads the document. The view does not: a frame must not touch the file.
+// Reload 读取文档。视图不做这件事：一帧不能碰文件。
 func (s *State) Reload() {
 	if s.flashes == nil {
 		s.entries = nil
@@ -90,7 +89,6 @@ func (s *State) Reload() {
 	s.loadErr = err
 }
 
-// Accelerator is the shortcut the shell should bind.
 func (s *State) Accelerator() string {
 	if s.flashes != nil {
 		return s.flashes.Accelerator()
@@ -98,8 +96,8 @@ func (s *State) Accelerator() string {
 	return s.accelerator
 }
 
-// Rebind registers this feature's shortcut with the registrar the shell just
-// cleared. text and screenshot are combinations already taken by translation.
+// Rebind 用 shell 刚清空的注册器注册本功能的快捷键。text 与 screenshot 是
+// 翻译已占用的组合键。
 func (s *State) Rebind(register func(string, func()) error, text, screenshot string) {
 	accelerator := s.Accelerator()
 	s.accelerator = accelerator
@@ -134,7 +132,7 @@ func (s *State) onShortcut() {
 	}
 }
 
-// PrepareCapture asks the next frame to put the caret in the capture line.
+// PrepareCapture 让下一帧把光标放进捕获栏。
 func (s *State) PrepareCapture() { s.focusCapture = true }
 
 func (s *State) beginEdit(entry flash.Entry) {

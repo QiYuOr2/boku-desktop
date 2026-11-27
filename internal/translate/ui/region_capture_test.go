@@ -106,7 +106,6 @@ func TestMaskPartsWithoutASelectionMasksEverything(t *testing.T) {
 
 func TestMaskPartsDropsTheBandsTheSelectionCovers(t *testing.T) {
 	full := image.Rect(0, 0, 100, 80)
-	// A selection along the top edge leaves only the right and bottom bands.
 	got := maskParts(full, image.Rect(0, 0, 40, 30))
 	want := []image.Rectangle{
 		image.Rect(40, 0, 100, 30),

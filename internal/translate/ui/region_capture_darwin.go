@@ -8,12 +8,8 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// nativeRegionRect returns the rectangle CoreGraphics reads for a selection in
-// display. Screen capture takes points, the same space NSScreen, MyGo's
-// displays and the overlay window use, so the DIP rectangle is passed as it
-// is: the image that comes back is in the display's pixels, twice the width
-// and height on a Retina display. Scaling the rectangle here as well would
-// read a region at twice the offset.
+// 返回 CoreGraphics 读取选区用的矩形。屏幕截取以点为单位，与 NSScreen、MyGo 显示器和覆盖窗口同一空间，
+// 因此 DIP 矩形原样传入：返回的图像是显示器像素，Retina 下宽高各翻倍。若这里再缩放一次，会读到偏移翻倍的区域。
 func nativeRegionRect(display mygo.Display, local image.Rectangle) image.Rectangle {
 	return desktopRect(display, local, 1)
 }

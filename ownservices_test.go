@@ -11,11 +11,14 @@ import (
 )
 
 func TestOwnServicesFollowStoredSettings(t *testing.T) {
-	_, _, _, _, _, translation, own, _, _, recorder, _, _, err := services(t.TempDir(), "0.1.0")
+	_, _, _, _, _, translation, own, _, _, recorder, _, diarySvc, _, err := services(t.TempDir(), "0.1.0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(recorder.Stop)
+	if diarySvc != nil {
+		t.Cleanup(func() { _ = diarySvc.Close() })
+	}
 	ctx := t.Context()
 	if err := own.registerAll(); err != nil {
 		t.Fatal(err)
@@ -60,7 +63,7 @@ func TestOwnServicesFollowStoredSettings(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// Updating settings must reach the already registered backend, without registering again.
+	// 修改设置必须到达已注册的后端，且无需重新注册。
 	if got := original.Descriptor(); got.Endpoint != server.URL+"/v1/chat/completions" || got.DisplayName != "改过的服务" {
 		t.Fatalf("descriptor after editing settings = %+v", got)
 	}

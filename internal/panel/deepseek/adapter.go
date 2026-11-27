@@ -1,7 +1,6 @@
-// This file maps DeepSeek's balance response onto the application's snapshot.
-// It is a pure function of the response: no network, no clock, and a fixture
-// for every case, so a field the service renames is caught by a test rather
-// than by a card showing 0.
+// 本文件把 DeepSeek 的余额响应映射为应用的快照。它是响应的纯函数：不碰网络、
+// 不读时钟，并且每种情况都有 fixture，使服务改字段名时由测试发现，
+// 而不是由卡片显示 0 来发现。
 package deepseek
 
 import (
@@ -16,11 +15,9 @@ import (
 	"boku/internal/kit"
 )
 
-// balanceResponse is DeepSeek's own shape, and the only place in the
-// application where these field names appear.
+// balanceResponse 是 DeepSeek 自己的结构，也是整个应用中唯一出现这些字段名的地方。
 type balanceResponse struct {
-	// IsAvailable is a pointer so that a response without it is a bad
-	// response rather than an account that is unavailable.
+	// IsAvailable 用指针，使缺少该字段的响应被判为坏响应，而不是"账户不可用"。
 	IsAvailable  *bool         `json:"is_available"`
 	BalanceInfos []balanceInfo `json:"balance_infos"`
 }
@@ -32,22 +29,20 @@ type balanceInfo struct {
 	ToppedUpBalance string `json:"topped_up_balance"`
 }
 
-// Adapter maps the response.
+// Adapter 把响应映射为快照。
 type Adapter struct{}
 
-// NewAdapter returns the adapter.
+// NewAdapter 返回 adapter。
 func NewAdapter() *Adapter { return &Adapter{} }
 
-// ProviderID returns the provider this adapter maps.
+// ProviderID 返回该 adapter 所映射的 provider。
 func (a *Adapter) ProviderID() string { return contract.ProviderID }
 
-// Normalize turns one balance response into a snapshot.
+// Normalize 把一条余额响应转成快照。
 //
-// It refuses, rather than guessing, when the response is not the shape it
-// knows, when there is no balance to show, or when an amount is not a
-// number: a card must never show 0 in place of a failure. An account that
-// reports itself unavailable is not a failure — it is an account with a
-// real, zero balance — so that case becomes a partial snapshot that says so.
+// 当响应不是已知结构、没有余额可显示、或某金额不是数字时，它选择拒绝而不是猜测：
+// 卡片绝不能以 0 代替失败。账户报告自身不可用不算失败——那是余额确实为零的账户——
+// 这种情况会变成带说明的部分快照。
 func (a *Adapter) Normalize(result domain.FetchResult, panel domain.Panel) (domain.Snapshot, error) {
 	var payload balanceResponse
 	if err := json.Unmarshal(result.Payload, &payload); err != nil {
@@ -116,8 +111,7 @@ func (a *Adapter) Normalize(result domain.FetchResult, panel domain.Panel) (doma
 	return snapshot, nil
 }
 
-// pickCurrency chooses the balance to show and reports the currencies it
-// ignores: dropping one silently would hide an account's money.
+// pickCurrency 选出要显示的余额并返回被忽略的币种：静默丢弃会掩盖账户的钱。
 func pickCurrency(infos []balanceInfo) (balanceInfo, []string) {
 	preferred := slices.IndexFunc(infos, func(info balanceInfo) bool {
 		return strings.EqualFold(strings.TrimSpace(info.Currency), PreferCurrency)
@@ -142,7 +136,7 @@ func pickCurrency(infos []balanceInfo) (balanceInfo, []string) {
 	return infos[chosen], ignored
 }
 
-// amount reads one decimal amount as minor units.
+// amount 把一个十进制金额读成最小货币单位。
 func amount(info balanceInfo, field, value string) (int64, error) {
 	minor, err := kit.ParseMoney(value)
 	if err != nil {
@@ -151,9 +145,8 @@ func amount(info balanceInfo, field, value string) (int64, error) {
 	return minor, nil
 }
 
-// observations builds the panel's observations in the order its metrics are
-// defined, so the headline is the first one. A metric the response has no
-// value for is a bad response, not a zero.
+// observations 按面板定义的指标顺序构建观测项，主指标排第一。响应中没有值的
+// 指标判为坏响应，而不是零。
 func observations(panel domain.Panel, values map[string]int64, observedAt time.Time) ([]domain.Observation, error) {
 	all := Metrics()
 	if len(panel.MetricKeys) == 0 {

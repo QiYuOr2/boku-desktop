@@ -9,13 +9,11 @@ import (
 	"boku/internal/domain"
 )
 
-// findLoginCommand looks the CLI up on the PATH the desktop session gives the
-// process.
+// findLoginCommand 在桌面会话给进程的 PATH 上查找 CLI。
 func findLoginCommand(name string) (string, error) { return exec.LookPath(name) }
 
-// startLogin opens the CLI's login in a terminal window. It tries the
-// terminals a desktop Linux usually has; a machine with none of them is told
-// so rather than left waiting for a window that will not appear.
+// startLogin 在终端窗口中打开 CLI 的登录。它依次尝试桌面 Linux 常见的终端；一台都没有
+// 的机器会被告知，而不是空等一个不会出现的窗口。
 func startLogin(command string) error {
 	candidates := [][]string{
 		{"x-terminal-emulator", "-e", command},

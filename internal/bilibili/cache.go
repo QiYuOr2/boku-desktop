@@ -13,28 +13,23 @@ import (
 	"boku/internal/platform/atomicfile"
 )
 
-// cacheVersion is the on-disk shape of the followed-UP cache. It is raised when
-// the stored fields change in a way an older file cannot satisfy.
+// cacheVersion 是关注 UP 缓存的磁盘格式版本。存储字段发生旧文件无法满足的变更时递增。
 const cacheVersion = 1
 
-// Cache owns the on-disk record of what was last known about each followed
-// creator.
+// Cache 保存每个关注 UP 最近一次已知状态的磁盘记录。
 //
-// It is deliberately separate from settings: a creator's latest activity is
-// fetched data, not a user choice. What it keeps is the *last* row per creator
-// — no history — so that a cold start shows the creators the user follows
-// instead of an empty block, and so that a creator who has not posted for a
-// while still says what they last did.
+// 它与设置刻意分离：UP 的最新动态是抓取来的数据，不是用户选择。它只保留每个 UP 的
+// 最后一行动态（不留历史），让冷启动能显示已关注的 UP 而不是空块，也让久未发帖的 UP
+// 仍显示上次做过什么。
 //
-// A creator that is no longer followed is dropped from the file: the cache
-// answers for the followed list, and keeping the others would leave data on
-// disk about someone the user removed.
+// 不再关注的 UP 会从文件中删除：缓存只为关注列表作答，保留其余会在磁盘上留下用户已
+// 移除对象的数据。
 type Cache struct{ path string }
 
 func NewCache(path string) *Cache { return &Cache{path: path} }
 
-// cachedRow is one creator's row as it is written to disk. The domain type has
-// no JSON names of its own, and the stored names are this file's business.
+// cachedRow 是写入磁盘的单个 UP 记录。domain 类型没有自己的 JSON 名，磁盘字段名
+// 由本文件决定。
 type cachedRow struct {
 	CreatorID    int64     `json:"creatorId"`
 	CreatorName  string    `json:"creatorName"`
@@ -87,11 +82,10 @@ func (r cachedRow) update() domain.FollowedUpdate {
 	}
 }
 
-// Load reads the last known row of every creator stored for the given UIDs.
+// Load 读取给定 UID 存储的每个 UP 的最后一行。
 //
-// A file that cannot be read or decoded is a cache miss rather than an error:
-// it is a record of fetched data, and the next refresh replaces it. What it
-// must never do is fail the feature.
+// 无法读取或解码的文件视为缓存未命中而非错误：它只是抓取数据的记录，下次刷新会替换。
+// 它绝不能导致功能失败。
 func (c *Cache) Load(uids []int64) ([]domain.FollowedUpdate, time.Time, bool) {
 	if c == nil || strings.TrimSpace(c.path) == "" {
 		return nil, time.Time{}, false
@@ -113,9 +107,7 @@ func (c *Cache) Load(uids []int64) ([]domain.FollowedUpdate, time.Time, bool) {
 		if row.CreatorID <= 0 || strings.TrimSpace(row.CreatorName) == "" || strings.TrimSpace(row.Summary) == "" {
 			continue
 		}
-		// A creator that is no longer configured is not shown, even if the
-		// file still holds a row for it: the settings are the authority on
-		// who is followed.
+		// 已不再配置的 UP 不予显示，即使文件里仍有其记录：关注关系以设置为准。
 		if !followed[row.CreatorID] {
 			continue
 		}
@@ -125,8 +117,8 @@ func (c *Cache) Load(uids []int64) ([]domain.FollowedUpdate, time.Time, bool) {
 	return updates, saved.FetchedAt.UTC(), true
 }
 
-// Save writes one row per creator, in the order the flyout shows them. Only
-// the creators in updates are kept: Save is the whole file.
+// Save 每个 UP 写一行，顺序与 flyout 显示一致。只保留 updates 中的 UP：
+// Save 写的就是整份文件。
 func (c *Cache) Save(updates []domain.FollowedUpdate, now time.Time) error {
 	if c == nil || strings.TrimSpace(c.path) == "" {
 		return nil
@@ -134,8 +126,7 @@ func (c *Cache) Save(updates []domain.FollowedUpdate, now time.Time) error {
 	rows := make([]cachedRow, 0, len(updates))
 	seen := make(map[int64]bool, len(updates))
 	for _, update := range updates {
-		// One row per creator: the last one written for a creator wins, so a
-		// refresh that reported two rows cannot leave two behind.
+		// 每个 UP 只留一行：同一 UP 后写的覆盖先写的，避免刷新返回两行时留下两条。
 		if seen[update.CreatorID] {
 			for i := range rows {
 				if rows[i].CreatorID == update.CreatorID {
@@ -158,12 +149,10 @@ func (c *Cache) Save(updates []domain.FollowedUpdate, now time.Time) error {
 	return nil
 }
 
-// Forget removes the creators that are not in uids from the file.
+// Forget 从文件中删除不在 uids 里的 UP。
 //
-// It exists for the case where a creator is removed from the settings: the row
-// on disk describes someone the user no longer follows, and leaving it would
-// keep data about them after they asked for it to be gone. A file with nothing
-// left in it is removed rather than kept empty.
+// 用于 UP 从设置中移除的场景：磁盘上的记录描述的是用户已不再关注的人，留着就是在对方
+// 要求删除后继续保留其数据。删空后的文件直接移除，不留空文件。
 func (c *Cache) Forget(uids []int64) error {
 	if c == nil || strings.TrimSpace(c.path) == "" {
 		return nil
@@ -177,8 +166,7 @@ func (c *Cache) Forget(uids []int64) error {
 	}
 	var saved cachedRows
 	if err := json.Unmarshal(data, &saved); err != nil || saved.Version != cacheVersion {
-		// An unreadable file describes nobody: replacing it is the honest
-		// answer, and there is nothing worth preserving.
+		// 无法读取的文件不对应任何人：替换它是诚实的做法，没有值得保留的内容。
 		return c.remove()
 	}
 	followed := make(map[int64]bool, len(uids))
@@ -204,7 +192,7 @@ func (c *Cache) Forget(uids []int64) error {
 	return nil
 }
 
-// remove deletes the file, treating an already absent one as done.
+// remove 删除文件，已不存在视为已完成。
 func (c *Cache) remove() error {
 	if err := os.Remove(c.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove followed-UP cache: %w", err)
@@ -212,7 +200,7 @@ func (c *Cache) remove() error {
 	return nil
 }
 
-// sortRows orders rows the way the flyout shows them: live first, then newest.
+// sortRows 按 flyout 的显示顺序排序：直播在前，然后按时间倒序。
 func sortRows(updates []domain.FollowedUpdate) {
 	sort.SliceStable(updates, func(i, j int) bool {
 		if updates[i].Live != updates[j].Live {

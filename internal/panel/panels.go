@@ -12,44 +12,36 @@ import (
 	"boku/internal/domain"
 )
 
-// PanelDef is one panel and the metrics it shows. The definitions are built
-// by the assembly in main.go from packages such as internal/panel/deepseek,
-// so this package never names a vendor.
+// PanelDef 是一个面板及其展示的指标。定义由 main.go 的装配从
+// internal/panel/deepseek 等包构建，因此本包从不点名任何厂商。
 type PanelDef struct {
 	Panel   domain.Panel
 	Metrics []domain.Metric
-	// OptionalMetricKeys declares additional metrics whose observations may
-	// be absent. Panel.MetricKeys remains the set required in every snapshot.
+	// OptionalMetricKeys 声明可缺席的额外指标；Panel.MetricKeys 仍是每个快照必有的集合。
 	OptionalMetricKeys []string
-	// UsageURL is where the provider keeps the account this panel reads, in
-	// full. It is left empty by an assembly that names none, and then the
-	// provider's own descriptor decides.
+	// UsageURL 是 provider 保存本面板所读账户的完整地址。装配未指定时留空，
+	// 由 provider 自身的描述符决定。
 	UsageURL string
-	// Optional marks a panel the user can turn off in the settings window:
-	// one whose data is not Boku's own to fetch, or one that reads something
-	// of the user's. A panel that is not optional has no switch, and the
-	// settings window cannot offer one.
+	// Optional 标记用户可在设置窗口关闭的面板：数据不属于 Boku、或读取用户自有
+	// 内容的面板。非可选面板没有开关，设置窗口也不能提供。
 	Optional bool
 }
 
-// Panels reads provider-backed panels: it keeps the last good snapshot of
-// each, merges concurrent refreshes into one request, and never replaces a
-// good snapshot with a failure.
+// Panels 读取 provider 驱动的面板：保留每个面板最后一次良好快照，把并发刷新
+// 合并为一次请求，且绝不用失败覆盖良好快照。
 //
-// The interface reads View while drawing and Refresh from a goroutine; both
-// are safe to call at any time from any goroutine.
+// 界面在绘制时调用 View，goroutine 调用 Refresh；两者都可从任意 goroutine、
+// 任意时刻安全调用。
 type Panels struct {
 	registry domain.ProviderRegistry
 	secrets  domain.SecretStore
-	// section holds the choices about the optional panels, and saver is the
-	// store it is written through. A nil saver is an assembly that has no
-	// settings file: the switches then work for this run only.
+	// section 持有可选面板的选择，saver 是写回时经过的存储。saver 为 nil 表示
+	// 装配没有设置文件：开关仅在本次运行内有效。
 	section *Section
 	saver   StoreSettings
-	// sources are the providers whose credentials come from somewhere other
-	// than the store, by provider id. A provider named here is asked of its
-	// source and never of the store. The map is filled once, in NewPanels,
-	// and only read afterwards.
+	// sources 是按 provider id 索引的、凭据并非来自存储的 provider。此处列出的
+	// provider 只向其 source 询问，绝不询问存储。该 map 在 NewPanels 中一次性
+	// 填充，此后只读。
 	sources map[string]domain.CredentialSource
 	now     func() time.Time
 
@@ -59,10 +51,8 @@ type Panels struct {
 	cache    map[string]cached
 	lastErr  map[string]error
 	inflight map[string]*inflight
-	// choices are the panels the user turned off, by id, as they were read
-	// at assembly and as SetPanelOn changes them. A panel with no entry is
-	// on. It is read on every frame, which is why it is not read from the
-	// file there.
+	// choices 是按 id 索引的、用户关闭的面板，其值来自装配时读取以及 SetPanelOn
+	// 的改动。没有条目的面板为开启。它每帧都被读取，因此不在那里读文件。
 	choices map[string]bool
 }
 
@@ -71,59 +61,47 @@ type cached struct {
 	fetchedAt time.Time
 }
 
-// inflight is one refresh other callers wait for: the same panel must not
-// ask its provider twice at once.
+// inflight 是一次其他调用者要等待的刷新：同一面板不能同时两次询问其 provider。
 type inflight struct {
 	done chan struct{}
 }
 
-// View is everything the interface needs to draw one panel, read from what
-// is already in memory: building a frame never touches the network or the
-// disk.
+// View 是界面绘制一个面板所需的全部内容，从已在内存中的数据读取：
+// 构建一帧从不接触网络或磁盘。
 type View struct {
 	Panel   domain.Panel
 	Metrics []domain.Metric
-	// UsageURL is where the provider keeps this account in full, or empty
-	// when the provider names no such page. It is resolved once, when the
-	// panel is added, so a frame does not look it up.
+	// UsageURL 是 provider 保存该账户的完整地址，provider 未指定该页面时为空。
+	// 它在添加面板时解析一次，因此绘制一帧时不需查找。
 	UsageURL string
-	// Snapshot is the last good one; HasSnapshot says whether there is one.
-	// A failed refresh leaves it in place, marked stale, rather than
-	// showing 0.
+	// Snapshot 是最后一次良好快照；HasSnapshot 表示是否存在。刷新失败时保留它并
+	// 标记为过期，而不是显示 0。
 	Snapshot    domain.Snapshot
 	HasSnapshot bool
 	FetchedAt   time.Time
-	// Stale says the numbers on screen are not current: they are older
-	// than the panel's interval, or the last attempt to refresh them
-	// failed.
+	// Stale 表示屏幕上的数字并非最新：早于面板的间隔，或上次刷新尝试失败。
 	Stale bool
-	// Loading is true while a refresh of this panel is running.
+	// Loading 在本面板正在刷新时为 true。
 	Loading bool
-	// Err is the failure of the last attempt, and its kind decides what
-	// the card offers: Missing credentials ask for configuration, others
-	// for a retry.
+	// Err 是上次尝试的失败；其类型决定卡片提供什么：缺少凭据引导去配置，
+	// 其它引导重试。
 	Err error
 }
 
-// NeedsCredentials reports whether the panel failed because nobody has
-// stored the credentials it needs.
+// NeedsCredentials 报告该面板是否因无人存储它所需的凭据而失败。
 func (v View) NeedsCredentials() bool {
 	return errors.Is(v.Err, domain.ErrCredentialMissing)
 }
 
-// NewPanels checks the definitions and returns the service. It fails on a
-// bad definition — an unknown provider, a metric the panel does not list, a
-// refresh interval the provider does not tolerate — because those are
-// assembly mistakes, not something to discover later in a card.
+// NewPanels 校验定义并返回服务。定义有误时失败——未知 provider、面板未列的指标、
+// provider 不容忍的刷新间隔——因为那些是装配错误，不是之后才在卡片里发现的东西。
 //
-// A source is registered per provider for a credential that is not Boku's to
-// keep: the Codex panel reads the login the Codex CLI already made
-// (§9 of the security design). A source is optional, and the store is asked for
-// every provider that has none.
+// 对凭据不归 Boku 保管的 provider，按 provider 注册一个 source：Codex 面板读取
+// Codex CLI 已完成的登录（security 设计 §9）。source 可选，没有 source 的 provider
+// 一律向存储询问。
 //
-// section holds the choices about the optional panels, and saver is the store
-// they are written through; either may be nil for an assembly with no settings
-// file, and the switches then work for this run only.
+// section 持有可选面板的选择，saver 是写回时经过的存储；没有设置文件的装配中
+// 两者都可为 nil，此时开关仅在本次运行内有效。
 func NewPanels(registry domain.ProviderRegistry, secrets domain.SecretStore, section *Section, saver StoreSettings, defs []PanelDef, sources ...domain.CredentialSource) (*Panels, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("%w: no provider registry", domain.ErrInvalidArgument)
@@ -212,9 +190,8 @@ func (p *Panels) add(def PanelDef) error {
 				domain.ErrInvalidArgument, def.Panel.ID, every, def.Panel.ProviderID, floor)
 		}
 	}
-	// The link a panel's headline opens is the provider's to name: an
-	// assembly may write one down, and otherwise the descriptor is asked,
-	// which keeps the address beside the provider that owns it.
+	// 面板标题打开的链接由 provider 命名：装配可以写下一个，否则询问描述符，
+	// 让地址留在拥有它的 provider 旁边。
 	if strings.TrimSpace(def.UsageURL) == "" {
 		def.UsageURL = provider.Descriptor().UsageURL
 	}
@@ -223,10 +200,8 @@ func (p *Panels) add(def PanelDef) error {
 	return nil
 }
 
-// List returns the enabled panels, in the order they are shown. A panel the
-// user turned off is not listed at all: it is not drawn, and nothing fetches
-// it — which for the panels whose credential is somebody else's login is also
-// the promise that the login file is not read.
+// List 返回已启用的面板，按展示顺序。被用户关闭的面板完全不列出：既不绘制，
+// 也不会有任何东西去取它——对于凭据是他人登录的面板，这也意味着不会读取登录文件。
 func (p *Panels) List() []domain.Panel {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -245,8 +220,7 @@ func (p *Panels) List() []domain.Panel {
 	return panels
 }
 
-// onLocked reports whether a panel is shown: its definition must say so, and
-// the user must not have turned it off.
+// onLocked 报告面板是否展示：定义须表示如此，且用户未将其关闭。
 func (p *Panels) onLocked(def PanelDef) bool {
 	if !def.Panel.Enabled {
 		return false
@@ -255,9 +229,8 @@ func (p *Panels) onLocked(def PanelDef) bool {
 	return !chosen || on
 }
 
-// OptionalPanels returns the panels the settings window offers a switch for:
-// the ones the assembly marked optional, whether or not they are on, in the
-// order they are shown.
+// OptionalPanels 返回设置窗口为其提供开关的面板：装配标记为可选的那些，
+// 无论是否开启，按展示顺序。
 func (p *Panels) OptionalPanels() []OptionalPanel {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -280,18 +253,16 @@ func (p *Panels) OptionalPanels() []OptionalPanel {
 	return panels
 }
 
-// OptionalPanel is one panel the user can turn off, with the answer.
+// OptionalPanel 是一个用户可关闭的面板及其状态。
 type OptionalPanel struct {
 	Panel domain.Panel
 	On    bool
 }
 
-// LoadChoices reads the panels the user turned off. It is called once, by the
-// assembly: a frame must not read a file, and the choices change only through
-// SetPanelOn, which remembers them here as well as in the file.
+// LoadChoices 读取用户关闭的面板。由装配调用一次：一帧不能读文件，而选择仅通过
+// SetPanelOn 变化，那里会同时记在内存与文件中。
 //
-// A store that cannot be read is not a reason to fail the start: the panels
-// are all on, which is what a user who never turned one off has.
+// 存储读取失败不应导致启动失败：面板全部开启，正如从未关闭过任何面板的用户。
 func (p *Panels) LoadChoices(ctx context.Context) error {
 	if p.saver != nil {
 		if err := p.saver.Load(ctx); err != nil {
@@ -308,14 +279,12 @@ func (p *Panels) LoadChoices(ctx context.Context) error {
 	return nil
 }
 
-// SetPanelOn turns an optional panel on or off and stores the choice.
+// SetPanelOn 开启或关闭一个可选面板并存储该选择。
 //
-// The change goes through the store's Update rather than a Load and a Save of
-// its own: the file holds every feature's settings, and a value read here and
-// written back would put back whatever another feature changed in between.
-// Update reads, changes and writes as one step, so what it writes is this
-// panel's choice and nothing else. A store that cannot be written is reported,
-// and the switch has already taken effect for this run.
+// 改动经由存储的 Update 而非自行 Load 再 Save：文件持有所有功能的设置，
+// 在此读出又写回会把期间其他功能改动的内容恢复回去。Update 把读、改、写作为
+// 一步完成，因此写入的只是本面板的选择，别无他物。存储写失败会被报告，
+// 而开关已在本次运行中生效。
 func (p *Panels) SetPanelOn(ctx context.Context, panelID string, on bool) error {
 	p.mu.Lock()
 	def, known := p.byID[panelID]
@@ -346,7 +315,7 @@ func (p *Panels) SetPanelOn(ctx context.Context, panelID string, on bool) error 
 	return failed
 }
 
-// PanelOn reports whether one panel is on, by id.
+// PanelOn 按 id 报告某个面板是否开启。
 func (p *Panels) PanelOn(panelID string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -357,7 +326,7 @@ func (p *Panels) PanelOn(panelID string) bool {
 	return p.onLocked(def)
 }
 
-// Metrics returns one panel's metrics, in the order they are shown.
+// Metrics 返回某面板的指标，按展示顺序。
 func (p *Panels) Metrics(panelID string) []domain.Metric {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -368,8 +337,8 @@ func (p *Panels) Metrics(panelID string) []domain.Metric {
 	return append([]domain.Metric(nil), def.Metrics...)
 }
 
-// Descriptor returns what a provider is called and what it asks for, so an
-// interface can offer to configure it without knowing which provider it is.
+// Descriptor 返回 provider 的名称与所需项，使界面能在不知道具体 provider 的情况下
+// 提供配置。
 func (p *Panels) Descriptor(providerID string) (domain.ProviderDescriptor, error) {
 	provider, err := p.registry.Provider(providerID)
 	if err != nil {
@@ -378,7 +347,7 @@ func (p *Panels) Descriptor(providerID string) (domain.ProviderDescriptor, error
 	return provider.Descriptor(), nil
 }
 
-// View returns what is known about a panel right now.
+// View 返回此刻已知的某面板信息。
 func (p *Panels) View(panelID string) View {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -402,9 +371,8 @@ func (p *Panels) View(panelID string) View {
 	return view
 }
 
-// NeedsRefresh reports whether the panel's snapshot is missing, stale or
-// from a failed attempt. A fresh snapshot means the provider is not asked
-// again, and a panel the user turned off is never asked.
+// NeedsRefresh 报告面板快照是否缺失、过期或上次尝试失败。最新快照意味着不会再
+// 询问 provider，被用户关闭的面板从不询问。
 func (p *Panels) NeedsRefresh(panelID string) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -422,16 +390,13 @@ func (p *Panels) NeedsRefresh(panelID string) bool {
 	return p.isStale(def, entry)
 }
 
-// Refresh fetches a panel, whatever its snapshot says, and is what the
-// interface calls when the user asks for a refresh.
+// Refresh 无论快照状态如何都取数一个面板，用户请求刷新时界面即调用它。
 //
-// Concurrent calls for the same panel become one request; a failure keeps
-// the last good snapshot and is remembered until an attempt succeeds. The
-// snapshot returned with an error is that previous one, or nothing.
+// 同一面板的并发调用合并为一次请求；失败保留最后良好快照并记住，直到某次尝试成功。
+// 伴随错误返回的快照是上一次的良好快照，或空。
 //
-// A panel the user turned off is not asked at all, even if something calls
-// here: off means no request, and for the panels whose credential is somebody
-// else's login it means the login file is not read.
+// 被用户关闭的面板完全不会被询问，即使有东西调用到这里：关闭即无请求，
+// 而对于凭据是他人登录的面板，这意味着不读取登录文件。
 func (p *Panels) Refresh(ctx context.Context, panelID string) (domain.Snapshot, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -459,8 +424,7 @@ func (p *Panels) Refresh(ctx context.Context, panelID string) (domain.Snapshot, 
 	call := &inflight{done: make(chan struct{})}
 	p.mu.Lock()
 	if p.inflight[panelID] != nil {
-		// Another caller started one between the two locks: let them do
-		// the work and wait for it.
+		// 另一个调用者在两次加锁之间启动了刷新：让它执行，并等待它。
 		existing := p.inflight[panelID]
 		p.mu.Unlock()
 		select {
@@ -492,9 +456,8 @@ func (p *Panels) Refresh(ctx context.Context, panelID string) (domain.Snapshot, 
 	return result, err
 }
 
-// RefreshIfNeeded fetches a panel only when it has to: no snapshot yet, one
-// that is older than the panel's refresh interval, or a last attempt that
-// failed. It reports whether it asked the provider.
+// RefreshIfNeeded 仅在必要时取数：尚无快照、快照早于面板刷新间隔，或上次尝试失败。
+// 它报告是否询问了 provider。
 func (p *Panels) RefreshIfNeeded(ctx context.Context, panelID string) (domain.Snapshot, bool, error) {
 	p.mu.Lock()
 	def, known := p.byID[panelID]
@@ -518,9 +481,8 @@ func (p *Panels) RefreshIfNeeded(ctx context.Context, panelID string) (domain.Sn
 	return snapshot, true, err
 }
 
-// TestProvider checks credentials without storing them: it fetches the
-// panel of that provider once and maps the answer. The settings window uses
-// it to tell the user whether a key works before saving it.
+// TestProvider 校验凭据但不存储：取数该 provider 的面板一次并映射结果。
+// 设置窗口用它告诉用户在保存密钥前它是否可用。
 func (p *Panels) TestProvider(ctx context.Context, providerID string, secrets map[string]string) error {
 	p.mu.Lock()
 	var def PanelDef
@@ -543,8 +505,7 @@ func (p *Panels) TestProvider(ctx context.Context, providerID string, secrets ma
 	if err != nil {
 		return err
 	}
-	// A candidate that is not there is answered here, so the provider is
-	// only ever asked with a credential in hand.
+	// 缺失的候选凭据在此处就答复，使 provider 只在确实持有凭据时被询问。
 	for _, key := range provider.Descriptor().CredentialKeys {
 		if strings.TrimSpace(secrets[key]) == "" {
 			return fmt.Errorf("%w: %s is empty", domain.ErrCredentialMissing, domain.CredentialKey(providerID, key))
@@ -568,7 +529,7 @@ func (p *Panels) TestProvider(ctx context.Context, providerID string, secrets ma
 	return nil
 }
 
-// fetch asks the provider and maps the answer.
+// fetch 询问 provider 并映射结果。
 func (p *Panels) fetch(ctx context.Context, def PanelDef) (domain.Snapshot, error) {
 	providerID := def.Panel.ProviderID
 	provider, err := p.registry.Provider(providerID)
@@ -609,13 +570,11 @@ func (p *Panels) fetch(ctx context.Context, def PanelDef) (domain.Snapshot, erro
 	return snapshot, nil
 }
 
-// StartCredentialLogin starts the login a provider's credential comes from,
-// for a provider whose credential is not Boku's to keep: the panel has
-// nothing to read until the user has logged the tool in, and this is what
-// saves them finding a terminal.
+// StartCredentialLogin 启动 provider 凭据来源的登录，用于凭据不归 Boku 保管的
+// provider：用户登录该工具前面板无可读取，这里省去他们去找终端。
 //
-// A provider with no source, or whose source has no login of its own, says
-// so: the interface only offers the action when the source has one.
+// 没有 source、或 source 没有自身登录的 provider 会如实报错：界面只在 source
+// 有登录时才提供该操作。
 func (p *Panels) StartCredentialLogin(providerID string) error {
 	source, ok := p.sources[providerID]
 	if !ok {
@@ -628,13 +587,11 @@ func (p *Panels) StartCredentialLogin(providerID string) error {
 	return starter.StartLogin()
 }
 
-// credentials collects what the provider asked for. A missing one is
-// ErrCredentialMissing before the provider is called at all: no request is
-// worth making with a key that is not there.
+// credentials 收集 provider 所需的凭据。缺失时在调用 provider 前即返回
+// ErrCredentialMissing：用不存在的密钥去请求毫无意义。
 //
-// A provider with a source of its own is asked of that source: its
-// credential is not in the store — and must not be copied into it — so the
-// store is not consulted for it at all.
+// 有自身 source 的 provider 向该 source 询问：其凭据不在存储中——且不得复制进去——
+// 因此完全不查存储。
 func (p *Panels) credentials(ctx context.Context, descriptor domain.ProviderDescriptor) (domain.Credentials, error) {
 	if source, ok := p.sources[descriptor.ID]; ok {
 		return source.Credentials(ctx)
@@ -662,8 +619,8 @@ func (p *Panels) credentials(ctx context.Context, descriptor domain.ProviderDesc
 	return creds, nil
 }
 
-// checkSnapshot holds every adapter to the panel's contract: the panel's
-// metrics, in the panel's order, each with the value type it declared.
+// checkSnapshot 让每个 adapter 遵守面板契约：面板的指标、按面板顺序、
+// 各自声明的值类型。
 func checkSnapshot(def PanelDef, snapshot domain.Snapshot) error {
 	if err := snapshot.Validate(); err != nil {
 		return err
@@ -683,9 +640,8 @@ func checkSnapshot(def PanelDef, snapshot domain.Snapshot) error {
 			return fmt.Errorf("%w: observation of %s does not match its value type %s",
 				domain.ErrInvalidMetricValue, observation.MetricKey, metric.ValueType)
 		}
-		// Only an amount has a currency to resolve: a percentage, a duration
-		// and a text are not amounts, and asking for theirs would refuse
-		// every one of them.
+		// 只有金额有币种可解析：百分比、时长和文本不是金额，向它们索取币种
+		// 会拒绝每一个。
 		if metric.Unit == domain.UnitCurrency {
 			if _, err := snapshot.MetricCurrency(metric); err != nil {
 				return err
@@ -702,8 +658,7 @@ func checkSnapshot(def PanelDef, snapshot domain.Snapshot) error {
 	return nil
 }
 
-// isStale reports whether a snapshot is older than the panel's interval.
-// The caller holds the lock.
+// isStale 报告快照是否早于面板间隔。调用方须持有锁。
 func (p *Panels) isStale(def PanelDef, entry cached) bool {
 	if def.Panel.RefreshEvery <= 0 {
 		return false

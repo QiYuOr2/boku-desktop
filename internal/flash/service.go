@@ -9,12 +9,12 @@ import (
 	"boku/internal/domain"
 )
 
-// SettingsStore is the settings file, as this feature writes one key through it.
+// SettingsStore 是设置文件，本功能借此写入自己那个键。
 type SettingsStore interface {
 	Update(ctx context.Context, section string, change func() error) error
 }
 
-// Service is the text-flash tool: the document, and the shortcut that opens it.
+// Service 是文字闪念工具：文档以及打开它的快捷键。
 type Service struct {
 	store    *Store
 	section  *Section
@@ -22,7 +22,7 @@ type Service struct {
 	now      func() time.Time
 }
 
-// Open binds the document and the settings section already registered with the store.
+// Open 绑定文档与已注册到存储的设置段。
 func Open(path string, section *Section, settings SettingsStore, clock domain.Clock) (*Service, error) {
 	if strings.TrimSpace(path) == "" || section == nil || settings == nil {
 		return nil, fmt.Errorf("flash: incomplete setup")
@@ -43,11 +43,10 @@ func (s *Service) Delete(id string) error { return s.store.Delete(id, s.now()) }
 
 func (s *Service) Accelerator() string { return s.section.Current().AcceleratorOr() }
 
-// SetAccelerator stores the shortcut. It does not register it; the shell binds
-// every global shortcut together.
+// SetAccelerator 保存快捷键但不注册；所有全局快捷键由 shell 统一绑定。
 func (s *Service) SetAccelerator(ctx context.Context, accelerator string) error {
 	accelerator = strings.TrimSpace(accelerator)
-	// Empty clears the binding. Nothing is registered until the user sets one.
+	// 空值清除绑定。在用户设置之前不注册任何快捷键。
 	if accelerator != "" && !ValidAccelerator(accelerator) {
 		return fmt.Errorf("%w: shortcut", domain.ErrInvalidArgument)
 	}

@@ -2,21 +2,18 @@ package domain
 
 import "time"
 
-// Clock is where the application reads the time, so that a test can decide
-// it.
+// Clock 是应用读取时间的入口，便于测试决定时间。
 //
-// It is a port and it lives with the other ports: two features need it — the
-// clipboard's history stamps what it records, and the translation tool stamps
-// what it answers — and neither of them should have to import the other to
-// get one.
+// 它是端口，与其它端口放在一起：有两处需要它——剪贴板历史为记录盖时间戳，
+// 翻译工具为答复盖时间戳——而两者都不应为了取得它而去 import 对方。
 type Clock interface {
 	Now() time.Time
 }
 
-// SystemClock is the clock the application runs on: wall time, in UTC, the
-// way §11 of the domain model stores it.
+// SystemClock 是应用运行所用的时钟：UTC 的墙钟时间，
+// 与领域模型 §11 的存储方式一致。
 type SystemClock struct{}
 
-// Now returns the current time in UTC. An implementation that rounds it does
-// so for its own reasons; this one does not.
+// Now 返回 UTC 当前时间。若实现自行取整是出于它自己的原因；
+// 本实现不取整。
 func (SystemClock) Now() time.Time { return time.Now().UTC() }

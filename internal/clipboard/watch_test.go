@@ -10,12 +10,8 @@ import (
 	"boku/internal/domain"
 )
 
-// The watcher is the polling half of the clipboard tool. What it promises is
-// pinned here: a read that is slow is not read again on top of itself, and
-// stopping ends the read that is in progress.
-
-// gatedDevice answers nothing until its gate is closed, so a test can hold a
-// read open and see what the loop does meanwhile.
+// gatedDevice 在 gate 关闭前一直不返回，测试可以借此挂住一次读取，
+// 观察循环在此期间的行为。
 type gatedDevice struct {
 	gate  chan struct{}
 	reads chan struct{}
@@ -45,9 +41,8 @@ func (d *gatedDevice) WriteFiles(context.Context, []string) error { return nil }
 
 func (d *gatedDevice) WriteImage(context.Context, []byte) error { return nil }
 
-// A read on the poll is started again only after the one before it returned:
-// the clipboard is a system resource, and two reads at once is how a poll
-// turns into a storm when the platform is slow.
+// 轮询中的读取必须等上一次返回后才再次发起：剪贴板是系统资源，
+// 平台慢时并发读取会把轮询变成读取风暴。
 func TestWatcherDoesNotOverlapItsReads(t *testing.T) {
 	device := newGatedDevice()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -62,8 +57,7 @@ func TestWatcherDoesNotOverlapItsReads(t *testing.T) {
 		_ = watcher.Run(ctx)
 	}()
 
-	// The first read is in flight and does not return; several intervals
-	// pass while it is.
+	// 首次读取已在飞行中且不返回，期间经过多个轮询周期。
 	select {
 	case <-device.reads:
 	case <-time.After(time.Second):
@@ -76,8 +70,7 @@ func TestWatcherDoesNotOverlapItsReads(t *testing.T) {
 	default:
 	}
 
-	// Canceling the context releases the read, which is what lets the loop
-	// finish: the read is given the context it was called with.
+	// 取消 context 会释放这次读取，循环因此才能结束：读取拿到的是调用时的 context。
 	cancel()
 	select {
 	case <-done:
@@ -86,8 +79,8 @@ func TestWatcherDoesNotOverlapItsReads(t *testing.T) {
 	}
 }
 
-// A device whose read fails is not an empty clipboard: nothing is emitted,
-// and the loop goes on and records what it finds when the device recovers.
+// 读取失败的设备不等于空剪贴板：什么都不发出，循环继续，
+// 待设备恢复后记录它读到的新内容。
 func TestWatcherKeepsGoingAfterAFailedRead(t *testing.T) {
 	device := &fakeDevice{}
 	device.fail(errors.New("the clipboard is busy"))
@@ -132,9 +125,8 @@ func TestWatcherKeepsGoingAfterAFailedRead(t *testing.T) {
 	}
 }
 
-// The watcher loop is the same code the service runs; it is exercised on its
-// own to pin what it promises: one emit per change, none for a repeat, and
-// none at all for a failed read.
+// 该用例单独检验 Watcher 循环与服务共用的同一份代码，锁定其承诺：
+// 每次变化只 emit 一次，重复内容不 emit，读取失败也完全不 emit。
 func TestWatcherEmitsOnlyWhatChanged(t *testing.T) {
 	device := &fakeDevice{}
 	device.set(textReading("first"))
@@ -162,7 +154,7 @@ func TestWatcherEmitsOnlyWhatChanged(t *testing.T) {
 		defer mu.Unlock()
 		return len(emitted) >= 1
 	})
-	// Several polls of the same value must not emit again.
+	// 同一值多次轮询不得重复 emit。
 	time.Sleep(3 * MinPollInterval)
 	mu.Lock()
 	count := len(emitted)
@@ -178,7 +170,7 @@ func TestWatcherEmitsOnlyWhatChanged(t *testing.T) {
 		return len(emitted) >= 2
 	})
 
-	// A failing device emits nothing.
+	// 设备读取失败时不 emit。
 	device.fail(errors.New("the clipboard is busy"))
 	before := len(emitted)
 	time.Sleep(2 * MinPollInterval)

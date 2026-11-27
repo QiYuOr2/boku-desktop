@@ -5,11 +5,10 @@ import (
 	"time"
 )
 
-// Point is how many seconds of one game fall inside one bucket.
+// Point 是一个游戏在一个时间桶内的秒数。
 //
-// Seconds is an integer. A bucket that the game did not touch is still
-// present, with zero, so a line drawn from these points does not skip the
-// quiet minutes.
+// Seconds 为整数。游戏未触及的桶也会以零值出现，这样由这些点画出的线
+// 不会跳过安静的分钟。
 type Point struct {
 	Start   time.Time
 	AppID   string
@@ -17,12 +16,11 @@ type Point struct {
 	Seconds int64
 }
 
-// Fold slices sessions into buckets of width over [from, to).
+// Fold 把会话切成宽度为 width、范围 [from, to) 的桶。
 //
-// from and to are instants. A caller that wants local hours passes the
-// instants of those hours; Fold does not know a timezone. now ends a
-// session that is still open, so a chart of "so far today" can include the
-// game that is running.
+// from 与 to 是时刻。要按本地小时统计的调用方传入那些小时的时刻即可，
+// Fold 不认识时区。now 用来收尾仍打开的会话，使「至今今天」的图表能包含
+// 正在运行的游戏。
 func Fold(sessions []Session, from, to time.Time, width time.Duration, now time.Time) ([]Point, error) {
 	if width <= 0 {
 		return nil, fmt.Errorf("playtime: a bucket must be wider than zero")

@@ -6,9 +6,8 @@ import (
 	"time"
 )
 
-// Ids are UUIDv7: sortable by the time they were minted. A history sorts on
-// them when two copies share a second, which is ordinary, so their order
-// within one millisecond has to be the order they were made in.
+// Id 是 UUIDv7：按生成时间可排序。两次复制常在同一秒内，历史有时据此排序，
+// 因此同一毫秒内的顺序必须是它们生成的顺序。
 
 func TestNewIDLooksLikeAUUID(t *testing.T) {
 	at := time.Date(2026, 2, 3, 9, 0, 0, 123000000, time.UTC)
@@ -41,8 +40,7 @@ func TestNewIDLooksLikeAUUID(t *testing.T) {
 	}
 }
 
-// The time is the first 48 bits: a later time always sorts later, whatever
-// the rest of the id holds.
+// 时间在前 48 位：更晚的时间总是排在后面，无论 id 其余部分是什么。
 func TestNewIDsSortByTime(t *testing.T) {
 	forgetMintedIDs()
 	previous := ""
@@ -63,8 +61,7 @@ func TestNewIDsSortByTime(t *testing.T) {
 	}
 }
 
-// Several ids in one millisecond are ordinary for the clipboard, and their
-// order is what a history of copies is sorted by.
+// 同一毫秒内出现多个 id 对剪贴板很常见，它们的顺序正是复制历史排序的依据。
 func TestNewIDsOfOneMillisecondCountUp(t *testing.T) {
 	forgetMintedIDs()
 	at := time.Date(2026, 2, 3, 9, 0, 0, 0, time.UTC)
@@ -84,8 +81,7 @@ func TestNewIDsOfOneMillisecondCountUp(t *testing.T) {
 	}
 }
 
-// Two ids of the same millisecond are not the same id twice: a store keyed
-// on id would lose one of them.
+// 同一毫秒的两个 id 不能是同一个 id：以 id 为键的存储会丢掉其中一个。
 func TestNewIDsAreUnique(t *testing.T) {
 	forgetMintedIDs()
 	at := time.Date(2026, 2, 3, 9, 0, 0, 0, time.UTC)
@@ -102,8 +98,7 @@ func TestNewIDsAreUnique(t *testing.T) {
 	}
 }
 
-// A clock that goes backwards must not hand out ids that collide with what
-// is already out there.
+// 时钟倒退时不能发出已存在于外部的重复 id。
 func TestNewIDSurvivesAClockGoingBackwards(t *testing.T) {
 	forgetMintedIDs()
 	later := time.Date(2026, 2, 3, 10, 0, 0, 0, time.UTC)
@@ -123,8 +118,7 @@ func TestNewIDSurvivesAClockGoingBackwards(t *testing.T) {
 	}
 }
 
-// The first 48 bits are the time the id was minted at, which is what makes
-// a list of ids sortable by when they happened.
+// 前 48 位是 id 生成的时间，这正是 id 列表能按发生时间排序的原因。
 func TestNewIDCarriesTheMintTime(t *testing.T) {
 	cases := []time.Time{
 		time.Date(2026, 2, 3, 9, 0, 0, 0, time.UTC),
@@ -137,16 +131,14 @@ func TestNewIDCarriesTheMintTime(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewIDAt failed: %v", err)
 		}
-		// The first six bytes are the millisecond of the epoch, with the
-		// version nibble sitting in the middle of the last pair.
+		// 前六个字节是纪元毫秒数，版本半字节位于最后一对的中间。
 		if got := id[:8] + id[9:13]; got != millisHex(at) {
 			t.Errorf("NewIDAt(%s) = %q, whose time bits are %s, want %s", at, id, got, millisHex(at))
 		}
 	}
 }
 
-// The id NewID mints is the time of the call: it sorts between an id of an
-// hour ago and one of an hour's time.
+// NewID 生成的 id 是调用时刻：它排在一小时前与一小时后生成的 id 之间。
 func TestNewIDUsesTheCurrentTime(t *testing.T) {
 	forgetMintedIDs()
 	now := time.Now().UTC()
@@ -154,8 +146,7 @@ func TestNewIDUsesTheCurrentTime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewID failed: %v", err)
 	}
-	// Both comparisons are made against the same instant, so that a clock
-	// that moves while the test runs cannot make them disagree.
+	// 两次比较用同一时刻，使测试运行期间时钟移动也不会令它们不一致。
 	if got := id[:8] + id[9:13]; got < millisHex(now.Add(-time.Minute)) || got > millisHex(now.Add(time.Minute)) {
 		t.Errorf("NewID = %q, whose time is %s, and the call happened at %s", id, got, millisHex(now))
 	}

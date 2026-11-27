@@ -61,7 +61,7 @@ func TestShouldIsSafeFromSeveralGoroutines(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	// The map must still answer, and a repeat is still a repeat.
+	// 并发写之后 map 仍需可用，且重复仍判为重复。
 	if Should("shared", "同一个错误") {
 		t.Error("a repeat after concurrent writes was reported as new")
 	}

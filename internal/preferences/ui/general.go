@@ -11,11 +11,6 @@ func (s *State) GeneralView(c *ui.Context, head *ui.Handle, props GeneralProps) 
 			presentation.SectionHead(c, head, props.Mark, presentation.ColorStoneInk, "通用", "启动与外观")
 
 			presentation.Stacked(c, presentation.RowGap, func() {
-				// The appearance is the section's first choice because it is
-				// the one the user sees before reading anything: three words
-				// in the same segmented control the clipboard's record range
-				// uses, so a choice between a few fixed things looks the same
-				// wherever it appears.
 				presentation.Stacked(c, presentation.FieldGap, func() {
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 						presentation.SectionLabel(c, "主题")
@@ -27,11 +22,6 @@ func (s *State) GeneralView(c *ui.Context, head *ui.Handle, props GeneralProps) 
 					}
 				})
 
-				// The panels that read something of the user's own — today
-				// the Codex quota, which comes from the login the command
-				// line already made — are switches here. What the switch
-				// says is the application's words; which panels exist is the
-				// assembly's.
 				props.Panels(c)
 				if props.Status != "" {
 					presentation.Notice(c, presentation.NotePlain, props.Status)

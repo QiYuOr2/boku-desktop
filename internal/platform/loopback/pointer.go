@@ -2,10 +2,10 @@ package loopback
 
 import "unsafe"
 
-// cPtr turns an address owned by the system into a pointer.
+// cPtr 把系统拥有的地址转成指针。
 //
-// The uintptr is stored in a local first. Vet rejects a direct conversion of
-// a uintptr value, and these addresses were never Go pointers.
+// 先把 uintptr 存进局部变量再转换：vet 禁止直接把 uintptr 值转成指针，
+// 且这些地址从来不是 Go 指针。
 func cPtr(addr uintptr) unsafe.Pointer {
 	return *(*unsafe.Pointer)(unsafe.Pointer(&addr))
 }

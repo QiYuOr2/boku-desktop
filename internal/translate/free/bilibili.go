@@ -11,23 +11,14 @@ import (
 	"boku/internal/translate/openai"
 )
 
-// Bilibili is B 站's Index-Translate engine: an open translation model served
-// on a public OpenAI-compatible endpoint.
+// Bilibili 是 B 站的 Index-Translate 引擎：public OpenAI-compatible 端点上
+// 的开放翻译模型。
 //
-// Note that the model is Bilibili's, not Boku's: the name is written here
-// because it is the service's own name, which is what the user is shown and
-// what the request has to say.
+// 它是唯一能做标注的免费引擎：对工具自己的标注 prompt 逐片返回一个 JSON 对象，
+// 因而日语读音也不需要 key。这是选它翻译日语的原因。
 //
-// It is the engine that can annotate. Measured (§3.2 of the free-translate research):
-// no key, reachable without a proxy, 0.16–0.6 s per sentence, and — the part
-// that matters — it answers the tool's own annotation prompt with one JSON
-// object per piece, so the Japanese readings work without a key. That is what
-// makes it the engine to pick for Japanese, and the settings page says so.
-//
-// The endpoint is OpenAI-compatible, so the request is openai.Translate's, the
-// one the paid backends already use. That is deliberate: there is one
-// chat-completions request in this application, and a second copy of it would
-// be a second thing to keep right.
+// 端点是 OpenAI-compatible 的，请求复用 openai.Translate，与付费后端共用一个
+// chat-completions 请求，避免维护第二份副本。
 type Bilibili struct {
 	client  *httpc.Client
 	baseURL string
@@ -36,21 +27,14 @@ type Bilibili struct {
 }
 
 const (
-	// bilibiliEndpoint is the address the open endpoint answers on. The
-	// OpenAI-compatible path is added by openai.Translate.
 	bilibiliEndpoint = "https://index-translate.bilibili.com/v1"
-	// bilibiliModel is the model the public endpoint serves. It is written here
-	// so that a model change is one line in one file.
-	bilibiliModel = "Index-Translate-35B-A3B"
+	bilibiliModel    = "Index-Translate-35B-A3B"
 )
 
-// NewBilibili returns the engine over the HTTP client.
 func NewBilibili(client *httpc.Client) *Bilibili {
 	return newBilibili(client, bilibiliEndpoint, bilibiliModel)
 }
 
-// newBilibili returns the engine asking another base URL and model. Tests use
-// it to point at an httptest server.
 func newBilibili(client *httpc.Client, baseURL, model string) *Bilibili {
 	return &Bilibili{
 		client:  client,
@@ -60,11 +44,8 @@ func newBilibili(client *httpc.Client, baseURL, model string) *Bilibili {
 	}
 }
 
-// ID returns the translator's id, which is what the settings file stores.
 func (b *Bilibili) ID() string { return contract.Bilibili }
 
-// Descriptor says what the engine is called, that it needs no key, and where
-// the text goes.
 func (b *Bilibili) Descriptor() domain.TranslatorDescriptor {
 	return domain.TranslatorDescriptor{
 		ID:                   contract.Bilibili,
@@ -76,10 +57,7 @@ func (b *Bilibili) Descriptor() domain.TranslatorDescriptor {
 	}
 }
 
-// Translate asks the model.
-//
-// No credential is read, and none is required: the endpoint is public, and the
-// header is left off rather than sent empty.
+// Translate 不读取凭据，也不要求凭据：端点公开，省略认证头而非发送空值。
 func (b *Bilibili) Translate(ctx context.Context, _ domain.Credentials, req domain.TranslationRequest) (domain.TranslationResult, error) {
 	if err := req.Validate(); err != nil {
 		return domain.TranslationResult{}, err

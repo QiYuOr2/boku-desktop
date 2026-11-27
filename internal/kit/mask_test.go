@@ -2,8 +2,7 @@ package kit
 
 import "testing"
 
-// A credential is only ever shown as its last four characters, so the mask is
-// the one shape a secret takes on its way to a window.
+// 凭据只以最后四个字符示人，故掩码是密钥通往窗口时唯一的形态。
 func TestMaskSecret(t *testing.T) {
 	cases := []struct {
 		in   string

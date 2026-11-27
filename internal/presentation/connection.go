@@ -1,7 +1,6 @@
 package presentation
 
-// Connection is display metadata shared by credential configuration and the
-// translation provider picker. It never contains a stored secret value.
+// Connection 是凭据配置与翻译服务选择器共享的展示元数据，绝不包含已存储的凭据值。
 type Connection struct {
 	ID                                            string
 	DisplayName, DocsURL, Endpoint, CredentialKey string

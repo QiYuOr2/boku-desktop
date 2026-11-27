@@ -13,15 +13,13 @@ import (
 	"github.com/ebitengine/purego/objc"
 )
 
-// fakeLoginItem is the system side of SMAppService the tests decide: its
-// status, what each write answers, and how often it was asked.
+// fakeLoginItem 是测试可控的 SMAppService 系统侧：状态、每次写入的返回、被调用次数。
 type fakeLoginItem struct {
 	status        loginItemStatus
 	statusErr     error
 	registerErr   error
 	unregisterErr error
-	// afterRegister is the status the system reports once a register
-	// succeeds; nil means enabled.
+	// afterRegister 是注册成功后系统报告的状态；nil 表示已启用。
 	afterRegister *loginItemStatus
 	registers     int
 	unregisters   int
@@ -56,8 +54,7 @@ func (f *fakeLoginItem) Unregister() error {
 	return nil
 }
 
-// testManager is the real manager with the system service and the legacy
-// folder replaced: no test registers the test binary as a login item.
+// testManager 返回替换掉系统服务与旧目录的真实 manager：不让任何测试把测试二进制注册成登录项。
 func testManager(t *testing.T, service loginItemService) *SMAppService {
 	t.Helper()
 	manager := NewSMAppService()
@@ -67,9 +64,7 @@ func testManager(t *testing.T, service loginItemService) *SMAppService {
 	return manager
 }
 
-// Read maps the four statuses to the switch: enabled is on, a record that is
-// not there is off, and a record the user turned off is a third answer the
-// page has to explain.
+// 四种状态到开关的映射：已启用为开；没有记录为关；被用户关掉的记录是需要页面解释的第三种答案。
 func TestSMAppServiceRead(t *testing.T) {
 	for _, test := range []struct {
 		name      string
@@ -100,8 +95,7 @@ func TestSMAppServiceRead(t *testing.T) {
 	}
 }
 
-// A status the system could not answer is not "off": it is returned as the
-// error it is, so the page can say it does not know.
+// 系统无法回答的状态不是「关」：按错误返回，让页面能说它不知道。
 func TestSMAppServiceReadReportsStatusFailure(t *testing.T) {
 	manager := testManager(t, &fakeLoginItem{statusErr: errors.New("the system did not answer")})
 	if _, err := manager.Read(Launcher{}); err == nil {
@@ -109,8 +103,7 @@ func TestSMAppServiceReadReportsStatusFailure(t *testing.T) {
 	}
 }
 
-// The switch writes the system login item: Start registers it, Stop removes
-// it, and the state the page reads afterwards is the system's.
+// 开关写入系统登录项：Start 注册、Stop 移除，之后页面读到的是系统状态。
 func TestSMAppServiceStartStop(t *testing.T) {
 	service := &fakeLoginItem{}
 	manager := testManager(t, service)
@@ -134,8 +127,7 @@ func TestSMAppServiceStartStop(t *testing.T) {
 	}
 }
 
-// Stopping a login item that was never registered asks for nothing and is not
-// a failure.
+// 从未注册过的登录项、移除它不请求任何操作，也不算失败。
 func TestSMAppServiceStopWithoutARecord(t *testing.T) {
 	service := &fakeLoginItem{status: loginItemNotRegistered}
 	manager := testManager(t, service)
@@ -147,8 +139,7 @@ func TestSMAppServiceStopWithoutARecord(t *testing.T) {
 	}
 }
 
-// A register that succeeds but still waits for the user's approval is
-// reported as such: the record exists, and the page says where to allow it.
+// 注册成功但仍等待用户授权的，按需授权报告：记录已存在，页面说明去哪里允许。
 func TestSMAppServiceStartNeedsApproval(t *testing.T) {
 	approval := loginItemRequiresApproval
 	manager := testManager(t, &fakeLoginItem{afterRegister: &approval})
@@ -157,8 +148,7 @@ func TestSMAppServiceStartNeedsApproval(t *testing.T) {
 	}
 }
 
-// A build outside an Applications folder never reaches the system: the
-// login item would name a bundle that is not there at the next login.
+// 不在 Applications 文件夹里的构建永远不碰系统：否则登录项会指向下次登录时已不存在的 bundle。
 func TestSMAppServiceStartRefusesAnUninstalledBuild(t *testing.T) {
 	service := &fakeLoginItem{}
 	manager := testManager(t, service)
@@ -171,8 +161,7 @@ func TestSMAppServiceStartRefusesAnUninstalledBuild(t *testing.T) {
 	}
 }
 
-// The line under the switch names the page the system lists the item on, not
-// a file this package writes.
+// 开关下方的说明指向系统列出该登录项的页面，而不是本包写入的某个文件。
 func TestSMAppServiceLocation(t *testing.T) {
 	manager := testManager(t, &fakeLoginItem{})
 	location, err := manager.Location(Launcher{})
@@ -184,9 +173,8 @@ func TestSMAppServiceLocation(t *testing.T) {
 	}
 }
 
-// The previous mechanism's launch agent is migrated on the first read: the
-// login item is registered first, and only then is the file removed, so an
-// upgrade does not lose the start or leave two behind.
+// 旧机制的 launch agent 在首次读取时迁移：先注册登录项、再删除文件，
+// 升级时既不会丢失启动，也不会留下两份。
 func TestSMAppServiceMigratesTheLaunchAgent(t *testing.T) {
 	for _, test := range []struct {
 		name          string
@@ -229,8 +217,7 @@ func TestSMAppServiceMigratesTheLaunchAgent(t *testing.T) {
 	}
 }
 
-// The path helpers are what decide whether a login item may be written at
-// all. A dev build, a disk image, and a sibling directory are all outside.
+// 路径辅助函数决定能否写入登录项：开发构建、磁盘镜像、同级目录都算在外部。
 func TestSMAppServiceInstalledPaths(t *testing.T) {
 	if got := appBundle("/Applications/Boku.app/Contents/MacOS/Boku"); got != "/Applications/Boku.app" {
 		t.Errorf("appBundle = %q, want the bundle", got)
@@ -252,9 +239,8 @@ func TestSMAppServiceInstalledPaths(t *testing.T) {
 	}
 }
 
-// nsString is the bridge from the system's NSError text to a Go error. It is
-// tested with an NSString the test makes, so the account of a failed register
-// does not depend on making one fail on a real machine.
+// nsString 把系统的 NSError 文本桥接成 Go error。这里用测试自造的 NSString 来测，
+// 这样对注册失败的叙述就不依赖于在真实机器上制造一次失败。
 func TestNSStringCopiesAnNSString(t *testing.T) {
 	if _, err := purego.Dlopen(
 		"/System/Library/Frameworks/Foundation.framework/Foundation",

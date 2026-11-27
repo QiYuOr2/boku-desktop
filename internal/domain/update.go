@@ -7,38 +7,29 @@ import (
 	"unicode/utf8"
 )
 
-// UpdateStatus is where the application is in finding and preparing a newer
-// version of itself. It is the whole of what the interface knows: the
-// service in internal/update decides it, and the views draw it.
+// UpdateStatus 表示应用在查找和准备新版本过程中所处的阶段，是界面获知的全部状态：
+// 由 internal/update 的服务决定，视图负责绘制。
 type UpdateStatus int
 
 const (
-	// UpdateIdle is a build that has not looked for an update yet. The
-	// interface draws nothing for it.
+	// UpdateIdle 表示尚未检查更新，界面不绘制任何内容。
 	UpdateIdle UpdateStatus = iota
-	// UpdateChecking is a check in flight: the feed is being asked, or a
-	// release is being compared with the running version.
+	// UpdateChecking 表示检查进行中：正在请求 feed，或正在比较发布版本与运行版本。
 	UpdateChecking
-	// UpdateUpToDate is an answer that this is the newest version.
+	// UpdateUpToDate 表示已是最新版本。
 	UpdateUpToDate
-	// UpdateDownloading is a newer version being fetched in the background,
-	// with UpdateState.Downloaded of UpdateState.Total bytes so far.
+	// UpdateDownloading 表示正在后台下载新版本，进度见 UpdateState.Downloaded/Total。
 	UpdateDownloading
-	// UpdateReady is a newer version that has been downloaded and checked:
-	// it is in place and takes effect at the next launch.
+	// UpdateReady 表示新版本已下载并校验，就位并在下次启动时生效。
 	UpdateReady
-	// UpdateUnsupported is a build that cannot update itself — a
-	// development build, or an installation a package manager or an
-	// administrator owns. It is not a failure and it is not said out loud:
-	// there is nothing for the user to fix, and a row explaining it would
-	// be noise on every launch.
+	// UpdateUnsupported 表示该构建无法自更新（开发构建，或由包管理器/管理员拥有的安装）。
+	// 这不是失败，也不必提示用户：没有可修复的问题，每次启动都提示只会成为噪音。
 	UpdateUnsupported
-	// UpdateFailed is a check or a download that did not finish. It is the
-	// only status with something for the user to do about it.
+	// UpdateFailed 表示检查或下载未完成，是唯一需要用户处理的状态。
 	UpdateFailed
 )
 
-// String names the status the way a log record wants it.
+// String 返回适合日志记录的状态名。
 func (s UpdateStatus) String() string {
 	switch s {
 	case UpdateIdle:
@@ -59,41 +50,31 @@ func (s UpdateStatus) String() string {
 	return fmt.Sprintf("update_status(%d)", int(s))
 }
 
-// Valid reports whether the status is one this build knows.
 func (s UpdateStatus) Valid() bool {
 	return s >= UpdateIdle && s <= UpdateFailed
 }
 
-// UpdateState is what the update service reports about itself, in the shape
-// the interface draws: the status, the version it is about, and a sentence
-// for the cases that need one.
+// UpdateState 是更新服务报告的状态，按界面绘制所需：状态、相关版本，以及必要时的一句话。
 //
-// Detail is a human sentence and nothing else. It never holds a URL, a
-// signature or a fragment of a response, because it is drawn on a settings
-// page and written to a log; the errors that carry those are the service's,
-// and what it keeps here is the answer it would show the user.
+// Detail 只放人类可读的句子，绝不含 URL、签名或响应片段：它会被画在设置页并写入日志，
+// 携带这些内容的是服务的错误，这里只保留给用户看的答案。
 type UpdateState struct {
 	Status UpdateStatus
-	// Version is the version a Ready update would install, or — for
-	// Downloading — the version being downloaded. It is empty for the
-	// statuses that are about no particular version.
+	// Version 是 Ready 时将安装的版本，或 Downloading 时正在下载的版本；
+	// 与具体版本无关的状态下为空。
 	Version string
-	// Notes are the release notes, in Markdown, as the release publishes
-	// them. They are the newer version's own words, or empty.
+	// Notes 是发布说明（Markdown），取自发布的原文，可为空。
 	Notes string
-	// Downloaded is how many bytes of the update are on disk, and Total how
-	// many there are to fetch. Total may be zero while it is not known yet;
-	// Percent says whether the two are worth showing.
+	// Downloaded 是已下载字节数，Total 是需获取的总字节数。Total 未知时可能为零；
+	// Percent 判断二者是否值得显示。
 	Downloaded int64
 	Total      int64
-	// Detail is why the check or the download failed, in a sentence, for
-	// UpdateFailed. It is empty for every other status.
+	// Detail 是 UpdateFailed 时检查或下载失败的一句话原因；其它状态为空。
 	Detail string
 }
 
-// Percent is how much of the update has been fetched, 0..100, and whether
-// the bound is known. A total of zero is "not known": a caller that shows
-// nought percent then would tell the user the download is not happening.
+// Percent 返回已获取进度（0..100）以及总量是否已知。总量为零表示未知：
+// 若此时显示 0% 会让用户误以为下载未在进行。
 func (s UpdateState) Percent() (int, bool) {
 	if s.Total <= 0 || s.Downloaded < 0 {
 		return 0, false
@@ -104,9 +85,7 @@ func (s UpdateState) Percent() (int, bool) {
 	return int(s.Downloaded * 100 / s.Total), true
 }
 
-// Settled reports whether the status is one a check has finished on: a
-// check is not running and the state is not going to change until another
-// one starts.
+// Settled 报告状态是否已结束：检查不再运行，且在下次检查前不会变化。
 func (s UpdateState) Settled() bool {
 	switch s.Status {
 	case UpdateIdle, UpdateUpToDate, UpdateReady, UpdateUnsupported, UpdateFailed:
@@ -115,39 +94,29 @@ func (s UpdateState) Settled() bool {
 	return false
 }
 
-// Update errors. They are separate names because they are separate
-// sentences: "this build cannot update itself" is a fact about the
-// installation that the interface keeps quiet about, while an unavailable
-// update is a check or a download that failed and that the user can try
-// again.
+// 更新错误。拆成两个名字是因为语义不同：“该构建无法自更新”是关于安装的事实，
+// 界面对其保持安静；而 update 不可用是一次可重试的检查或下载失败。
 var (
-	// ErrUpdateUnsupported is returned by a check when the running build
-	// cannot update itself. It is not a failure: see UpdateUnsupported.
+	// ErrUpdateUnsupported 在运行构建无法自更新时由检查返回；它不是失败，见 UpdateUnsupported。
 	ErrUpdateUnsupported = errors.New("updates are not available for this build")
-	// ErrUpdateUnavailable is what anything that went wrong on the way to
-	// a ready update wraps: a download, a download that does not match what
-	// the release promised, a file that cannot be put in place, a
-	// relaunch that could not be started.
+	// ErrUpdateUnavailable 是通往就绪更新途中一切错误的包装：下载失败、下载与发布承诺不符、
+	// 文件无法就位、重启无法发起。
 	ErrUpdateUnavailable = errors.New("update unavailable")
 )
 
-// maxUpdateReasonBytes is how much of a reason is kept for a release that
-// could not be used. It is MaxSnippetBytes: the rule for what a domain error
-// carries, and the same rule applies whether the text came from a response
-// body or from a JSON decoder.
+// maxUpdateReasonBytes 是保留的错误原因长度上限，等于 MaxSnippetBytes：
+// 领域错误携带内容的统一规则，无论文本来自响应体还是 JSON 解码器。
 const maxUpdateReasonBytes = MaxSnippetBytes
 
-// UpdateReason trims a reason to the length an error message may carry, so
-// that a manifest that failed to parse does not become a log full of it. It
-// also makes the text valid UTF-8, because a truncated encoding is not text.
+// UpdateReason 将原因裁剪到错误消息允许的长度，避免解析失败的 manifest 撑满日志；
+// 同时确保文本是合法 UTF-8，因为截断的编码不是文本。
 func UpdateReason(reason string) string {
 	reason = strings.ToValidUTF8(strings.TrimSpace(reason), "\uFFFD")
 	if len(reason) <= maxUpdateReasonBytes {
 		return reason
 	}
 	cut := maxUpdateReasonBytes
-	// An encoded character is one to four bytes, and the one starting
-	// before the cut is the only one that can be left half in it.
+	// 一个编码字符为一到四字节，只有跨过切点起始的那个字符会被截成半个。
 	for cut > 0 && !utf8.RuneStart(reason[cut]) {
 		cut--
 	}

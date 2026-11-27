@@ -1,0 +1,38 @@
+{
+  "mutations": [
+    {
+      "mutationId": "0198b000-0000-7000-8000-000000000001",
+      "entityType": "diary_entry",
+      "entityId": "0198b000-0000-7000-8000-0000000000e1",
+      "operation": "upsert",
+      "baseVersion": 2,
+      "payload": {
+        "title": "河边",
+        "markdown": "今天走到了**河边**。",
+        "diaryDateKey": "2026-11-20",
+        "createdAt": "2026-11-20T01:00:00Z",
+        "updatedAt": "2026-11-20T01:02:00Z",
+        "tags": [
+          "散步"
+        ],
+        "attachments": [
+          {
+            "attachmentId": "0198b000-0000-7000-8000-0000000000a1",
+            "originalName": "IMG_0001.HEIC",
+            "width": 4032,
+            "height": 3024,
+            "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+            "size": 182044,
+            "addedAt": "2026-11-20T01:00:05Z"
+          }
+        ],
+        "linkCards": [],
+        "location": {
+          "place": "宇治",
+          "capturedAt": "2026-11-20T01:00:00Z"
+        },
+        "weather": null
+      }
+    }
+  ]
+}

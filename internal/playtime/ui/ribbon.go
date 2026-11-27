@@ -10,23 +10,20 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-// dayChip is the legend square beside a game's name. It is the same 10-point
-// rounded mark the month heat legend uses, so a color means the same kind of
-// thing in both places: a key, not a decoration.
+// dayChip 是游戏名旁的图例方块，与月热力图例同样大小的 10 点圆角标记；
+// 两处同色代表同类含义——它是图例标记，不是装饰。
 const dayChip = 10
 
-// ribbonLayers is how many games the 6-point track can still show when they
-// run at the same time. A fourth would be under two points tall. It stays in
-// the list; only the bar leaves it out of that slice.
+// ribbonLayers 是 6 点高的轨道在游戏同时进行时仍能显示的最大层数；
+// 第四层将不足两像素。游戏仍保留在列表中，只是柱状图在该切片里不画它。
 const ribbonLayers = 3
 
-// ribbonMark is the thinnest a session is allowed to paint. Under about twenty
-// minutes the true width disappears on a 0–24 track.
+// ribbonMark 是一段会话允许绘制的最小宽度。约二十分钟以下的真实宽度
+// 在 0–24 的轨道上会消失。
 const ribbonMark = 2
 
-// ribbonBand is one painted piece of the day track. Start and End are
-// fractions of the local day. Lane is this game's row in that instant, and
-// Lanes is how many rows that instant has.
+// ribbonBand 是日轨道上的一块绘制片段。Start、End 为本地一天的比例。
+// Lane 是该游戏在此时刻的行号，Lanes 是此时刻的总行数。
 type ribbonBand struct {
 	Start float64
 	End   float64
@@ -35,9 +32,8 @@ type ribbonBand struct {
 	Lanes int
 }
 
-// gameInk is the color of one game on this day, longest first. The order is
-// the palette the panel already has. It is not stored: tomorrow's longest
-// game takes the brand green again.
+// gameInk 返回某游戏当天的颜色，按时长从长到短。顺序即面板已有的调色板。
+// 颜色不存储：明天时长最长的游戏重新得到品牌绿。
 func gameInk(index int) ui.Color {
 	switch index {
 	case 0:
@@ -122,9 +118,8 @@ func paintBand(p *ui.Painter, track ui.Rect, band ribbonBand, colors []ui.Color)
 	p.Fill(ui.Rect{X: x, Y: y, W: w, H: h}, colors[band.Game], 999)
 }
 
-// dayBands lays each game's runs on one local day. Games that do not overlap
-// share the single row. Where they do, the slice splits into one row per
-// game, longest first, and stops at ribbonLayers.
+// dayBands 把每个游戏的多段游玩铺到同一天。互不重叠的游戏共用一行；
+// 发生重叠时，该切片按游戏拆成多行（时长从长到短），最多到 ribbonLayers。
 func dayBands(games []playtime.GameDay, day time.Time) []ribbonBand {
 	if day.IsZero() {
 		return nil

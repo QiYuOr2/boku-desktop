@@ -16,7 +16,7 @@ const (
 	freeBilibiliID  = contractfree.Bilibili
 )
 
-// okTranslation is an answer a free engine gives when it works.
+// okTranslation 是免费引擎正常工作时返回的结果。
 func okTranslation() domain.TranslationResult {
 	return domain.TranslationResult{
 		TranslatedText: "你好",
@@ -25,13 +25,12 @@ func okTranslation() domain.TranslationResult {
 	}
 }
 
-// errTranslationUnavailable is a free engine that could not answer: the
-// endpoint refused, which is the failure the user reads.
+// errTranslationUnavailable 是免费引擎无法作答时的失败（端点拒绝），也是用户看到的错误。
 func errTranslationUnavailable() error {
 	return fmt.Errorf("%w: the endpoint answered 429", domain.ErrProviderRateLimited)
 }
 
-// aTranslationSettings reads the settings a state is running on.
+// aTranslationSettings 读取某个 state 正在使用的设置。
 func aTranslationSettings(t *testing.T, state *State) translate.Settings {
 	t.Helper()
 	settings, err := state.translate.Settings()
@@ -41,7 +40,7 @@ func aTranslationSettings(t *testing.T, state *State) translate.Settings {
 	return settings
 }
 
-// cardOf is one card of the window, by id.
+// cardOf 按 id 取窗口中的一张卡片。
 func cardOf(t *testing.T, state *State, id string) credentialui.TranslateCard {
 	t.Helper()
 	for _, card := range state.credentialUI.TranslateCards() {
@@ -53,17 +52,9 @@ func cardOf(t *testing.T, state *State, id string) credentialui.TranslateCard {
 	return credentialui.TranslateCard{}
 }
 
-// The free engines as the settings window drives them: the two options the
-// translation section draws, the group they are drawn in, and the fact that
-// the API Key section leaves them out.
-//
-// These are behavior tests, not view tests: what the window decides — which
-// cards it draws where, which group a card lands in — is checked, and what it
-// looks like is not. The view itself is accepted at runtime, as the testing
-// rules ask.
+// 免费引擎是设置窗口里的两个独立选项，位于同一分组；API Key 分区不包含它们。
 
-// The free engines are two independent options, and they are what a fresh
-// installation starts on.
+// 两个免费引擎是独立选项，也是新安装时的默认选择。
 func TestTheFreeEnginesAreTwoSeparateChoices(t *testing.T) {
 	state, _ := translateState(t)
 	cards := state.credentialUI.TranslateCards()
@@ -84,26 +75,23 @@ func TestTheFreeEnginesAreTwoSeparateChoices(t *testing.T) {
 			t.Errorf("%s is not usable out of the box: %+v", id, card)
 		}
 	}
-	// The names are the design's own: the two free options the mock draws.
+	// 名字取自设计稿：两个免费选项的名字。
 	if got := byID[freeMicrosoftID].DisplayName; got != "微软 Edge 翻译" {
 		t.Errorf("the first free option is called %q", got)
 	}
 	if got := byID[freeBilibiliID].DisplayName; got != "B站 Index-Translate" {
 		t.Errorf("the second free option is called %q", got)
 	}
-	// A fresh installation translates with the Microsoft engine, which is one
-	// of the two free choices rather than a tier above them.
+	// 新安装使用微软引擎，它是两个免费选项之一，而非更高一档。
 	if got := aTranslationSettings(t, state).ProviderOr(); got != freeMicrosoftID {
 		t.Errorf("a fresh installation uses %q, want the Microsoft engine", got)
 	}
 }
 
-// The picker's two groups: the free engines above, the services that have
-// something to fill in below.
+// 选择器的两个分组：免费引擎在上，有内容需要填写的服务在下。
 func TestThePickerGroupsFreeEnginesSeparately(t *testing.T) {
 	state, fixture := translateState(t)
-	// A service of the user's own is added, because that is the only way one
-	// exists: there is no card for a service nobody configured.
+	// 用户自定义服务只能通过添加产生，因为没有人为之配置就不存在卡片。
 	own := fixture.addService(translate.CustomSettings{
 		BaseURL:     "https://api.example.com/v1",
 		DisplayName: "本地 Ollama",
@@ -122,9 +110,8 @@ func TestThePickerGroupsFreeEnginesSeparately(t *testing.T) {
 	for _, card := range keyed {
 		ids[card.ID] = true
 	}
-	// DeepSeek needs a key, and the user's own service has an address it is
-	// asked at: both belong under the heading that says something has to be
-	// configured, even though the second one's key is optional.
+	// DeepSeek 需要 key；用户自己的服务有请求地址，两者都属于「需要配置」分组，
+	// 即便后者 key 可选。
 	for _, want := range []string{"deepseek", own} {
 		if !ids[want] {
 			t.Errorf("%s is not in the group that needs configuring: %+v", want, ids)
@@ -137,9 +124,7 @@ func TestThePickerGroupsFreeEnginesSeparately(t *testing.T) {
 	}
 }
 
-// The API Key section draws only the services that have a key: the free
-// engines are chosen in the translation section instead, where the user is
-// deciding what to translate with rather than what to type.
+// API Key 分区只绘制有 key 的服务；免费引擎在翻译分区中选择。
 func TestTheAPIKeySectionLeavesTheFreeEnginesOut(t *testing.T) {
 	state, fixture := translateState(t)
 	own := fixture.addService(translate.CustomSettings{
@@ -157,8 +142,7 @@ func TestTheAPIKeySectionLeavesTheFreeEnginesOut(t *testing.T) {
 	for _, card := range keyed {
 		ids[card.ID] = true
 	}
-	// The cards the design draws there: the services with a key, and the ones
-	// the user runs themselves.
+	// 该分区绘制的卡片：有 key 的服务，以及用户自己运行的服务。
 	for _, want := range []string{"deepseek", own} {
 		if !ids[want] {
 			t.Errorf("the API Key section lost %s: %+v", want, ids)
@@ -169,18 +153,12 @@ func TestTheAPIKeySectionLeavesTheFreeEnginesOut(t *testing.T) {
 	}
 }
 
-// The user's own services are the last cards in the API Key section, whichever
-// order the registry hands the translators over in, and the blank card that
-// adds another is drawn after them.
-//
-// The named services are a fixed catalogue the application knows; these are the
-// user's own entries. A list reads better when what is fixed comes first and
-// what was added comes after it.
+// 用户自己的服务排在 API Key 分区的最后，无论注册表给出翻译器的顺序如何；
+// 用于新增的空白卡片绘制在它们之后。
 func TestTheOwnServiceCardsComeLast(t *testing.T) {
 	state, fixture := translateState(t)
 
-	// An unconfigured service is not a card: it has nothing to show and
-	// nothing to ask.
+	// 未配置的服务不成卡片：没有内容可显示，也无从请求。
 	keyed := credentialui.KeyedTranslateCards(state.credentialUI.TranslateCards())
 	if len(keyed) == 0 {
 		t.Fatal("the API Key section has no cards")
@@ -191,7 +169,7 @@ func TestTheOwnServiceCardsComeLast(t *testing.T) {
 		}
 	}
 
-	// Once added, every one of them is after every named service.
+	// 添加后，它们都排在所有具名服务之后。
 	ids := []string{}
 	for i := 0; i < 2; i++ {
 		id := fixture.addService(translate.CustomSettings{
@@ -222,9 +200,8 @@ func TestTheOwnServiceCardsComeLast(t *testing.T) {
 	}
 }
 
-// A service of the user's own is configured when it has an address, which is
-// the same fact the badge states for every other card: it is added configured,
-// so the badge never reads 未配置 on one.
+// 用户自己的服务有地址即为已配置，与其他卡片状态徽标一致：添加时即已配置，
+// 因此其徽标不会显示「未配置」。
 func TestAnAddedOwnServiceIsConfigured(t *testing.T) {
 	state, fixture := translateState(t)
 
@@ -236,23 +213,17 @@ func TestAnAddedOwnServiceIsConfigured(t *testing.T) {
 	if !card.Configured {
 		t.Errorf("a service the user just added is not configured: %+v", card)
 	}
-	// Its name is the user's own, not this feature's word for a service.
+	// 名字是用户自己起的，不是本功能对服务的称呼。
 	if card.DisplayName != "本地 Ollama" {
 		t.Errorf("the card is called %q, want the name the user gave it", card.DisplayName)
 	}
 }
 
-// Every card the user can take something away from offers 删除, which is two
-// kinds of card and not one.
-//
-// The bug this pins: the word was drawn only once a credential was stored, so a
-// service of the user's own with no key — a model on their own machine needs
-// none — was a card they had added and could not get rid of.
+// 每张有内容可移除的卡片都提供删除；共两类卡片。
 func TestDeleteIsOnEveryCardThatHasSomethingToRemove(t *testing.T) {
 	state, fixture := translateState(t)
 
-	// The user's own service, added with no key at all: nothing is stored for
-	// it, and it is still removable.
+	// 用户自己的服务，完全没 key：没有存储任何内容，仍可移除。
 	own := fixture.addService(translate.CustomSettings{
 		BaseURL:     "http://127.0.0.1:11434/v1",
 		DisplayName: "本地 Ollama",
@@ -264,21 +235,18 @@ func TestDeleteIsOnEveryCardThatHasSomethingToRemove(t *testing.T) {
 		t.Error("a keyless service of the user's own cannot be removed")
 	}
 
-	// A built-in service with no key stored has nothing for the word to do.
+	// 内置服务没有存 key 时，删除按钮无事可做。
 	if credentialui.CardCanBeRemoved(cardOf(t, state, "deepseek"), false) {
 		t.Error("a card with nothing stored offers to remove something")
 	}
-	// Once it holds a key, it does.
+	// 一旦持有 key，即可移除。
 	if !credentialui.CardCanBeRemoved(cardOf(t, state, "deepseek"), true) {
 		t.Error("a card holding a key cannot give it up")
 	}
 }
 
-// Removing a keyless service of the user's own works: the service goes, and
-// the missing key under it is not reported as a failure.
-//
-// It is what a local model goes through — added with no key, then removed —
-// and the credential store answers ErrSecretNotFound for a name it never had.
+// 移除用户自己无 key 的服务可以成功：服务被删掉，其下缺失的 key 不报为失败。
+// 凭据存储对于从未有过的名字会返回 ErrSecretNotFound。
 func TestRemovingAKeylessOwnServiceWorks(t *testing.T) {
 	state, fixture := translateState(t)
 	id := fixture.addService(translate.CustomSettings{
@@ -286,8 +254,8 @@ func TestRemovingAKeylessOwnServiceWorks(t *testing.T) {
 		DisplayName: "本地 Ollama",
 	})
 
-	// What the removal does on the goroutine, without the window handoff: the
-	// settings lose the service, and the key it never had is not an error.
+	// 不含窗口交接，只测移除在 goroutine 上做的事：设置里去掉该服务，
+	// 从未有过的 key 不视为错误。
 	if err := fixture.service.RemoveCustomTranslator(t.Context(), id); err != nil {
 		t.Fatalf("RemoveCustomTranslator failed: %v", err)
 	}
@@ -303,7 +271,7 @@ func TestRemovingAKeylessOwnServiceWorks(t *testing.T) {
 	}
 }
 
-// Registry synchronization is covered by ownservices_test.go in the assembly package.
+// 注册表同步由 assembly 包的 ownservices_test.go 覆盖。
 func TestRemovedTranslatorIsAbsentFromCardsAndPicker(t *testing.T) {
 	state, fixture := translateState(t)
 	id := fixture.addService(translate.CustomSettings{
@@ -311,7 +279,7 @@ func TestRemovedTranslatorIsAbsentFromCardsAndPicker(t *testing.T) {
 		DisplayName: "本地 Ollama",
 	})
 
-	// It is on the page in both places to begin with.
+	// 一开始它同时出现在两个位置。
 	if !hasCard(state, id) {
 		t.Fatalf("the service that was just added is not a card: %+v", state.credentialUI.TranslateCards())
 	}
@@ -319,7 +287,7 @@ func TestRemovedTranslatorIsAbsentFromCardsAndPicker(t *testing.T) {
 		t.Fatalf("the service that was just added is not a row: %+v", pickerTranslateCards(state.credentialUI.TranslateCards()))
 	}
 
-	// What the removal does on the goroutine, without the window handoff.
+	// 不含窗口交接，只测移除在 goroutine 上做的事。
 	if err := fixture.service.RemoveCustomTranslator(t.Context(), id); err != nil {
 		t.Fatalf("RemoveCustomTranslator failed: %v", err)
 	}
@@ -331,14 +299,13 @@ func TestRemovedTranslatorIsAbsentFromCardsAndPicker(t *testing.T) {
 	if hasPickerRow(state, id) {
 		t.Errorf("the removed service is still a row: %+v", pickerTranslateCards(state.credentialUI.TranslateCards()))
 	}
-	// The other cards are untouched: removing one service does not empty the
-	// section.
+	// 其他卡片不受影响：移除一个服务不会清空该分区。
 	if !hasCard(state, freeMicrosoftID) && !hasCard(state, "deepseek") {
 		t.Error("the removal took the named services with it")
 	}
 }
 
-// hasCard reports whether the API Key section draws a card for an id.
+// hasCard 报告 API Key 分区是否为某 id 绘制了卡片。
 func hasCard(state *State, id string) bool {
 	for _, card := range credentialui.KeyedTranslateCards(state.credentialUI.TranslateCards()) {
 		if card.ID == id {
@@ -348,7 +315,7 @@ func hasCard(state *State, id string) bool {
 	return false
 }
 
-// hasPickerRow reports whether the translation section offers an id.
+// hasPickerRow 报告翻译分区是否提供某 id。
 func hasPickerRow(state *State, id string) bool {
 	for _, card := range pickerTranslateCards(state.credentialUI.TranslateCards()) {
 		if card.ID == id {
@@ -358,12 +325,11 @@ func hasPickerRow(state *State, id string) bool {
 	return false
 }
 
-// A service of the user's own is a row only once it exists: it is created from
-// the API Key section, and there is nothing to choose until then.
+// 用户自己的服务只有存在后才是选项：它由 API Key 分区创建，在此之前无从选择。
 func TestAnUnaddedOwnServiceIsNotARow(t *testing.T) {
 	state, fixture := translateState(t)
 
-	// Nothing added yet: no row of the user's own.
+	// 尚未添加：没有用户自己的选项。
 	cards := pickerTranslateCards(state.credentialUI.TranslateCards())
 	for _, card := range cards {
 		if translate.IsCustomService(card.ID) {
@@ -371,8 +337,7 @@ func TestAnUnaddedOwnServiceIsNotARow(t *testing.T) {
 		}
 	}
 
-	// Once added it is a row, under the heading for services that have
-	// something to configure.
+	// 添加后成为选项，归属「有内容需要配置」的分组。
 	id := fixture.addService(translate.CustomSettings{
 		BaseURL:     "https://api.example.com/v1",
 		DisplayName: "本地 Ollama",
@@ -393,15 +358,14 @@ func TestAnUnaddedOwnServiceIsNotARow(t *testing.T) {
 	}
 }
 
-// Two options mean two answers: picking one asks that engine, and nothing else
-// is asked in its place when it fails.
+// 两个选项意味着两个独立答案：选哪个就问哪个引擎，失败时也不会用另一个顶替。
 func TestPickingAFreeEngineAsksThatEngineOnly(t *testing.T) {
 	state, fixture := translateState(t)
 
 	if err := state.translate.SetProvider(t.Context(), freeBilibiliID); err != nil {
 		t.Fatalf("SetProvider failed: %v", err)
 	}
-	// The B 站 engine fails; the Microsoft engine is never asked.
+	// B 站引擎失败；微软引擎完全不会被询问。
 	fixture.translator(t, freeBilibiliID).fail(errTranslationUnavailable())
 	fixture.translator(t, freeMicrosoftID).answer(okTranslation())
 
@@ -417,8 +381,7 @@ func TestPickingAFreeEngineAsksThatEngineOnly(t *testing.T) {
 	}
 }
 
-// And the other way round: picking the Microsoft engine does not fall back to
-// B 站 when it fails.
+// 反过来也一样：选择微软引擎失败时不会回退到 B 站。
 func TestAFailedFreeEngineDoesNotFallBackToTheOther(t *testing.T) {
 	state, fixture := translateState(t)
 
@@ -439,8 +402,7 @@ func TestAFailedFreeEngineDoesNotFallBackToTheOther(t *testing.T) {
 	}
 }
 
-// Switching between the two free engines is an ordinary choice: whatever was
-// stored is what is asked.
+// 在两个免费引擎间切换是普通选择：存的是哪个就问哪个。
 func TestTheTwoFreeEnginesAreSwitchedBetween(t *testing.T) {
 	state, fixture := translateState(t)
 	fixture.translator(t, freeMicrosoftID).answer(okTranslation())

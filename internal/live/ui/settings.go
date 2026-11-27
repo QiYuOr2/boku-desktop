@@ -10,8 +10,7 @@ import (
 	"boku/internal/presentation"
 )
 
-// SettingsView is the 实时翻译 section. It is a few rows, not a form: the
-// glossary is edited here, and the float window is not.
+// SettingsView 是实时翻译设置区：术语在此编辑，浮动窗口不在此编辑。
 func (s *State) SettingsView(c *ui.Context, head *ui.Handle) {
 	if s == nil || s.live == nil {
 		return

@@ -12,9 +12,8 @@ import (
 	"time"
 )
 
-// readyQuiet is how long CrispASR's stderr has to stay quiet before the model
-// counts as loaded. The stream has no ready event; the log stops once the
-// model is in memory.
+// readyQuiet 是 CrispASR 的 stderr 需要保持安静多久才认为模型已载入。
+// 该流没有 ready 事件；模型进入内存后日志就停止输出。
 const readyQuiet = 400 * time.Millisecond
 
 type processSpec struct {
@@ -159,8 +158,8 @@ func (s *procSlot) alive() bool {
 	}
 }
 
-// run starts the process, and starts it once more if it exits. The second
-// exit is returned. A cancelled context is a stop, not a crash.
+// run 启动进程，退出后再启动一次；第二次退出时返回错误。上下文被取消视为停止，
+// 不是崩溃。
 func (s *procSlot) run(ctx context.Context, onLine func(string), onReady func(*running)) error {
 	for {
 		if ctx.Err() != nil {

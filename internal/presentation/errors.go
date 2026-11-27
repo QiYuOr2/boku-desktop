@@ -5,8 +5,8 @@ import (
 	"errors"
 )
 
-// friendlyError says what went wrong in the interface's own words. The
-// errors themselves are built so that they never carry a credential.
+// FriendlyError 用界面自己的话说明出了什么问题。错误本身在构造时就保证不会
+// 携带凭据。
 func FriendlyError(err error) string {
 	var bad *domain.BadResponseError
 	var imageFailure *domain.ImageTranslationError

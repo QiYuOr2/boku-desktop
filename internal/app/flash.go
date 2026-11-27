@@ -47,13 +47,11 @@ func (s *State) openFlashCapture() {
 			DisableResize: true,
 			AlwaysOnTop:   true,
 			SkipTaskbar:   true,
-			// Same sheet as the translation card: no title bar, the rounded
-			// card is the window, and the platform draws the shadow outside it.
+			// 与翻译卡片一致的无边框透明窗口，圆角卡片即窗口本身。
 			Frameless:   true,
 			Transparent: true,
-			// A normal window would activate Boku and stay off the current
-			// Space and full-screen apps. The translation card is a panel
-			// for the same reason. Windows keeps a regular window.
+			// 普通窗口会激活 Boku 并停留在当前 Space 与全屏应用之外；因此 macOS
+			// 上用 panel 窗口，Windows 仍用普通窗口。
 			Panel:   runtime.GOOS == "darwin",
 			Content: ui.View(s.flashCaptureView),
 		})

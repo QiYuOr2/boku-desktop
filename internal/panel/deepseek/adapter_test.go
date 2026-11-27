@@ -12,10 +12,9 @@ import (
 	"boku/internal/domain"
 )
 
-// The vectors live inside this module (testdata/providers) so it can be built
-// and tested on its own. They mirror the repository-level fixtures/ directory,
-// which both ends share: both ends map the same raw response to the same
-// snapshot. Change both copies.
+// 样本放在本模块内（testdata/providers），以便单独构建测试。它与仓库级
+// fixtures/ 互为副本，两端共享：同样的原始响应必须映射成同样的快照，
+// 改动时两处都要改。
 const fixturesDir = "../../../testdata/providers/deepseek"
 
 var fetchedAt = time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
@@ -83,14 +82,14 @@ func TestNormalizeHappyPath(t *testing.T) {
 			t.Errorf("%s = %d, want %d", key, got, value)
 		}
 	}
-	// The observations follow the panel's order, headline first.
+	// 观测项按面板顺序排列，主指标在最前。
 	if got := snapshot.Observations[0].MetricKey; got != MetricBalanceMinor {
 		t.Errorf("the first observation is %s, want %s", got, MetricBalanceMinor)
 	}
 }
 
-// An account the service calls unavailable is an answer, not a failure: the
-// balance is really zero and the card says the account is unavailable.
+// 服务标记为不可用的账户是一种有效答复而非失败：余额确实为零，卡片上
+// 说明账户不可用。
 func TestNormalizeUnavailableAccountIsPartialNotAFailure(t *testing.T) {
 	adapter := NewAdapter()
 	snapshot, err := adapter.Normalize(result(readFixture(t, "balance_unavailable.json"), 200), Panel())
@@ -149,8 +148,7 @@ func TestNormalizePrefersCNYAndSaysWhatItIgnored(t *testing.T) {
 	}
 }
 
-// An error body is not a balance: even if a service answered 200 with it,
-// the card must not show 0.
+// 错误体不是余额：即使服务以 200 返回它，卡片也不能显示 0。
 func TestNormalizeRejectsAnErrorBody(t *testing.T) {
 	adapter := NewAdapter()
 	_, err := adapter.Normalize(result(readFixture(t, "error_unauthorized.json"), 401), Panel())
@@ -219,8 +217,7 @@ func TestNormalizeWithoutAPanelReportsEveryMetric(t *testing.T) {
 	}
 }
 
-// A bad response has to be diagnosable: which provider, which address, which
-// status, and a clipped look at what came back.
+// 坏响应必须可诊断：哪个厂商、哪个地址、什么状态码，以及裁剪后的响应片段。
 func assertErrorIsTraceable(t *testing.T, err error) {
 	t.Helper()
 	var bad *domain.BadResponseError

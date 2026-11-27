@@ -2,9 +2,7 @@ package presentation
 
 import "github.com/egoist/mygo/ui"
 
-// ShortcutField is the shared recorder: a fixed 140-point field, a click that
-// waits for the next combination, and an optional clear mark inside the field.
-// What the combination does after it is read stays with the feature.
+// ShortcutField 是共享的快捷键录制控件；组合键读取后的行为由功能自己处理。
 type ShortcutField struct {
 	Accelerator string
 	Recording   bool
@@ -15,9 +13,8 @@ type ShortcutField struct {
 	OnClear     func()
 }
 
-// View builds the recorder. The clear mark only appears when a binding is
-// present; its column is reserved in the label so the last letter is not
-// drawn under the icon.
+// View 构建录制控件。清除图标仅在已有绑定时出现，其占位在 label 中预留，
+// 避免最后一个字母被图标遮住。
 func (field ShortcutField) View(c *ui.Context) ui.Element {
 	label := CompactAccelerator(field.Accelerator)
 	if label == "" {

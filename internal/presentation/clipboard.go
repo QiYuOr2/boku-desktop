@@ -2,7 +2,7 @@ package presentation
 
 import "github.com/egoist/mygo/ui"
 
-// ClipboardDesign is the current theme and shared controls for history views.
+// ClipboardDesign 是历史视图当前的主题与共享控件。
 type ClipboardDesign struct {
 	ReadingDesign
 	WindowFrame                                                                                 func(*ui.Context) ui.Element

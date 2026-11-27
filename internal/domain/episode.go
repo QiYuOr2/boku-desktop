@@ -2,9 +2,8 @@ package domain
 
 import "time"
 
-// EpisodeRelease is one publicly scheduled main episode. It deliberately
-// contains no provider fields: features map their provider response into this
-// small, reusable shape before presentation reads it.
+// EpisodeRelease 是一条已公开定档的正片剧集。它有意不含任何 provider 字段：
+// 各功能先把 provider 响应映射成这个可复用的小形状，再由展示层读取。
 type EpisodeRelease struct {
 	SubjectID   int64
 	SubjectName string

@@ -1,0 +1,12 @@
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "menutypelist": [],
+    "grayUser": false,
+    "errordetail": "NoAccount",
+    "success": "0",
+    "errmsg": "NoAccount",
+    "returncode": 0.0
+  }
+}

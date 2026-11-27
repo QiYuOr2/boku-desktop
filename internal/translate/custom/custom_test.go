@@ -15,9 +15,8 @@ import (
 	"boku/internal/translate/openai"
 )
 
-// The address is the user's to name, so the descriptor reports what they
-// typed — and nothing when they typed nothing, rather than an address the
-// application made up.
+// 地址由用户指定，因此 descriptor 如实回报用户填写的内容；未填写时为空，
+// 而不是应用编造的地址。
 func TestDescriptorFollowsTheSettings(t *testing.T) {
 	settings := openai.CustomService{}
 	reply := New(httpc.New(httpc.Options{}), "custom", func() openai.CustomService { return settings })
@@ -35,8 +34,7 @@ func TestDescriptorFollowsTheSettings(t *testing.T) {
 	if got := reply.Descriptor().Endpoint; got != "https://api.example.com/v1/chat/completions" {
 		t.Errorf("endpoint = %q", got)
 	}
-	// The settings may change while the application runs, and the next
-	// translation uses the new address.
+	// 设置可在运行中变更，下一次翻译使用新地址。
 	settings = openai.CustomService{BaseURL: "http://127.0.0.1:11434/v1"}
 	if got := reply.Descriptor().Endpoint; got != "http://127.0.0.1:11434/v1/chat/completions" {
 		t.Errorf("endpoint after a change = %q", got)
@@ -77,8 +75,7 @@ func TestImageTranslationStreamsAndFollowsVerifiedCapability(t *testing.T) {
 	}
 }
 
-// An address nobody typed is a configuration problem, and it is named as
-// one before anything is sent.
+// 未填地址属于配置问题，应在发送任何请求之前就报出。
 func TestTranslateWithoutAnAddress(t *testing.T) {
 	asked := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -100,8 +97,7 @@ func TestTranslateWithoutAnAddress(t *testing.T) {
 	}
 }
 
-// A service the user runs themselves may need no key at all: no
-// Authorization header is sent rather than one carrying an empty key.
+// 用户自托管的服务可能不需要密钥：此时不发 Authorization 头，而不是带空密钥。
 func TestTranslateWithoutAKeySendsNoAuthorization(t *testing.T) {
 	var auth string
 	var hasAuth bool
@@ -170,8 +166,7 @@ func TestTranslateUsesTheConfiguredModel(t *testing.T) {
 	}
 }
 
-// A service that rejects the key says so through the domain's own error, and
-// the window then says "check the key" rather than showing a status code.
+// 服务拒绝密钥时以领域错误呈现，窗口据此提示“检查密钥”而非显示状态码。
 func TestTranslateTranslatesARejectedKey(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
@@ -192,8 +187,7 @@ func TestTranslateTranslatesARejectedKey(t *testing.T) {
 	}
 }
 
-// The address is cleaned the way the settings clean it, so a user who typed
-// a trailing slash still gets one request path rather than two.
+// 地址按设置的方式清洗，用户粘贴的尾部斜杠不会造成重复路径。
 func TestTranslateNormalizesTheAddress(t *testing.T) {
 	var path string
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -202,8 +196,7 @@ func TestTranslateNormalizesTheAddress(t *testing.T) {
 	}))
 	defer server.Close()
 	reply := New(httpc.New(httpc.Options{HTTPClient: server.Client()}), "custom", func() openai.CustomService {
-		// A trailing slash is what a person pastes; the request must not
-		// end up with two.
+		// 尾部斜杠是用户会粘贴的，请求中不能出现两个。
 		return openai.CustomService{BaseURL: server.URL + "/v1/"}
 	})
 	if _, err := reply.Translate(context.Background(), domain.Credentials{}, domain.TranslationRequest{
@@ -217,8 +210,7 @@ func TestTranslateNormalizesTheAddress(t *testing.T) {
 	}
 }
 
-// The annotation settings reach the request, which is what makes the
-// Japanese switches mean anything.
+// 标注设置会进入请求，日语开关才因此生效。
 func TestTranslateAsksForAnnotations(t *testing.T) {
 	var body map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

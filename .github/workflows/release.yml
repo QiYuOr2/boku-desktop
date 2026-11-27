@@ -1,0 +1,291 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release
+  # Avoid overlapping tag or release creation when sync merges land close together.
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      should_release: ${{ steps.check.outputs.should_release }}
+      version: ${{ steps.check.outputs.version }}
+      tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Check version and tag
+        id: check
+        env:
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          version="$(jq -r '.version // empty' mygo.json)"
+          tag_prefix="$(jq -r '.updates.tagPrefix // "v"' mygo.json)"
+          if [ -z "$version" ]; then
+            echo "::error::mygo.json is missing version"
+            exit 1
+          fi
+          tag="${tag_prefix}${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+          existing="$(git ls-remote --tags origin "refs/tags/${tag}")"
+          if [ -n "$existing" ]; then
+            echo "Tag ${tag} already exists; skipping release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "${MYGO_UPDATER_PRIVATE_KEY:-}" ]; then
+            echo "::error::MYGO_UPDATER_PRIVATE_KEY secret is not configured; refusing to publish an unsigned release."
+            exit 1
+          fi
+
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+
+  build-macos:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build darwin/universal
+        env:
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          go tool mygo build -platform darwin/universal
+
+      - name: Stage macOS release assets
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          rm -rf dist-release
+          mkdir -p dist-release
+
+          dmg_src="build/darwin-universal/Boku ${VERSION}.dmg"
+          tar_src="build/darwin-universal/boku-${VERSION}-darwin-universal.tar.gz"
+          manifest_src="build/darwin-universal/update-darwin-universal.json"
+
+          for f in "$dmg_src" "$tar_src" "$manifest_src"; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Missing expected macOS release artifact: $f"
+              ls -la build/darwin-universal || true
+              exit 1
+            fi
+          done
+
+          cp "$dmg_src" "dist-release/Boku-${VERSION}-universal.dmg"
+          cp "$tar_src" "dist-release/"
+          cp "$manifest_src" "dist-release/"
+
+          shopt -s nullglob
+          for delta in build/darwin-universal/*.delta; do
+            cp "$delta" "dist-release/"
+          done
+
+          ls -lh dist-release
+
+      - name: Upload macOS release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-darwin-universal
+          path: dist-release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  build-windows:
+    needs: prepare
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build windows/amd64
+        env:
+          MYGO_UPDATER_PRIVATE_KEY: ${{ secrets.MYGO_UPDATER_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          go tool mygo build -platform windows/amd64
+
+      - name: Stage Windows release assets
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          rm -rf dist-release
+          mkdir -p dist-release
+
+          setup_src="build/windows-amd64/Boku Setup ${VERSION} amd64.exe"
+          tar_src="build/windows-amd64/boku-${VERSION}-windows-amd64.tar.gz"
+          manifest_src="build/windows-amd64/update-windows-amd64.json"
+
+          for f in "$setup_src" "$tar_src" "$manifest_src"; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Missing expected Windows release artifact: $f"
+              ls -la build/windows-amd64 || true
+              exit 1
+            fi
+          done
+
+          if [ ! -f "build/windows-amd64/mygo-sqlite3.dll" ]; then
+            echo "::error::Missing build/windows-amd64/mygo-sqlite3.dll"
+            exit 1
+          fi
+
+          # Standalone Boku.exe is omitted because it requires mygo-sqlite3.dll
+          # next to it; users install via Setup.exe or self-update archives.
+          cp "$setup_src" "dist-release/Boku-Setup-${VERSION}-amd64.exe"
+          cp "$tar_src" "dist-release/"
+          cp "$manifest_src" "dist-release/"
+
+          shopt -s nullglob
+          for delta in build/windows-amd64/*.delta; do
+            cp "$delta" "dist-release/"
+          done
+
+          ls -lh dist-release
+
+      - name: Upload Windows release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows-amd64
+          path: dist-release/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [prepare, build-macos, build-windows]
+    if: needs.prepare.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: release-assets
+
+      - name: Verify release assets and extract notes
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          ls -lh release-assets
+
+          required=(
+            "release-assets/Boku-${VERSION}-universal.dmg"
+            "release-assets/Boku-Setup-${VERSION}-amd64.exe"
+            "release-assets/boku-${VERSION}-darwin-universal.tar.gz"
+            "release-assets/boku-${VERSION}-windows-amd64.tar.gz"
+            "release-assets/update-darwin-universal.json"
+            "release-assets/update-windows-amd64.json"
+          )
+          for f in "${required[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Missing required release asset: $f"
+              exit 1
+            fi
+          done
+
+          if [ -e "release-assets/Boku.exe" ]; then
+            echo "::error::Standalone Boku.exe must not be published"
+            exit 1
+          fi
+
+          for manifest in \
+            release-assets/update-darwin-universal.json \
+            release-assets/update-windows-amd64.json; do
+            got_version="$(jq -r '.version // empty' "$manifest")"
+            if [ "$got_version" != "$VERSION" ]; then
+              echo "::error::${manifest} version is ${got_version}, want ${VERSION}"
+              exit 1
+            fi
+            got_sig="$(jq -r '.signature // empty' "$manifest")"
+            if [ -z "$got_sig" ]; then
+              echo "::error::${manifest} is missing update signature"
+              exit 1
+            fi
+          done
+
+          jq -r '.notes // empty' release-assets/update-darwin-universal.json > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::Empty release notes in update-darwin-universal.json"
+            exit 1
+          fi
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # Remove an unpublished draft left by an interrupted earlier run, if any.
+          existing_draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+          if [ "$existing_draft" = "true" ]; then
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes
+          fi
+
+          assets=()
+          shopt -s nullglob
+          for f in release-assets/*; do
+            case "$(basename "$f")" in
+              update-*.json) ;;
+              *) assets+=("$f") ;;
+            esac
+          done
+          # Upload update manifests last so manifests never point at missing files.
+          for f in release-assets/update-*.json; do
+            assets+=("$f")
+          done
+
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Boku ${VERSION}" \
+            --notes-file release-notes.md \
+            --latest \
+            "${assets[@]}"

@@ -1,15 +1,11 @@
-// This file is the translation tool's own configuration: which translator to
-// ask, how to ask, and how its window behaves.
+// 本文件是划词翻译工具自己的配置：用哪个翻译器、怎么问、窗口如何表现。
 //
-// It lives with the feature rather than in internal/domain because the
-// translation tool is the only thing that reads it. What a feature stores
-// should look like what that feature is, and a type only one feature uses
-// belongs to that feature — domain is for the entities and ports several
-// features share.
+// 它放在功能一起，而不是 internal/domain，是因为只有翻译工具读它。功能存的东西
+// 应当像该功能本身，而只被一个功能使用的类型属于该功能——domain 留给多个功能
+// 共享的实体与端口。
 //
-// The file it is written to is still the application's one settings file, and
-// the keys it is written under are still the ones §8 of the storage design
-// describes. internal/settings owns that file and does not know this type.
+// 它写入的文件仍是应用的同一份设置文件，写入的键仍是存储设计 §8 描述的那些。
+// internal/settings 拥有该文件，但不认识这个类型。
 package translate
 
 import (
@@ -22,80 +18,64 @@ import (
 	"boku/internal/translate/openai"
 )
 
-// customServicePrefix is the id every one of the user's own services is stored
-// under, numbered after the first: "custom", "custom-2", "custom-3" …
+// customServicePrefix 是用户每个自有服务存储时所用 id 的前缀，从第一个起编号：
+// "custom"、"custom-2"、"custom-3"……
 //
-// It is spelled here, and in section.go as customID, because the two are the
-// same decision seen from two sides: what the settings file calls a service,
-// and what the tool calls the translator that asks it.
+// 它在此处拼写，并在 section.go 中作为 customID 拼写，因为两者是同一决定的两面：
+// 设置文件怎么称呼一个服务，以及工具怎么称呼去问它的翻译器。
 const customServicePrefix = "custom"
 
-// Settings is what the selection-translation tool was told to do.
+// Settings 是划词翻译工具被指定要做的事。
 //
-// The default is on, with nothing else configured: pressing the shortcut
-// should reach the tool, and the tool should then say where to put a key
-// rather than be silent. A user who wants the shortcut to do nothing turns
-// Enabled off, and the window it would have opened says so.
+// 默认开启、其它均未配置：按快捷键应能到达工具，工具随后应告诉用户在哪里放 key，
+// 而不是毫无反应。想让快捷键什么都不做的用户关闭 Enabled，它本会打开的窗口会说明
+// 这一点。
 type Settings struct {
-	// Enabled turns the tool on. Off means the shortcut opens a window that
-	// says the tool is off, rather than a window that fails.
+	// Enabled 开启工具。关闭时快捷键打开一个说明工具已关闭的窗口，而不是一个出错的窗口。
 	Enabled bool
-	// Accelerator is the global shortcut that starts a translation, in the
-	// form the framework's shortcut API takes, such as
-	// "CmdOrCtrl+Shift+T". Changing it is a later task; it is stored now so
-	// that the file is where the answer lives.
+	// Accelerator 是启动翻译的全局快捷键，采用框架快捷键 API 的形式，如
+	// "CmdOrCtrl+Shift+T"。
 	Accelerator string
-	// ScreenshotAccelerator starts native region capture. Empty disables it.
+	// ScreenshotAccelerator 启动原生区域截图。空值表示禁用。
 	ScreenshotAccelerator string
-	// Provider names the translator to use, by the id it is registered under.
-	// A name no translator answers to is replaced by the default.
+	// Provider 按注册 id 指定要用的翻译器。没有任何翻译器响应的名字会被替换为默认值。
 	Provider string
-	// Furigana asks the translator to annotate Japanese kanji with their kana
-	// reading.
+	// Furigana 让翻译器为日语汉字标注假名读音。
 	Furigana bool
-	// LoanwordGloss asks it to annotate katakana loanwords with the word they
-	// came from.
+	// LoanwordGloss 让翻译器为片假名外来词标注其来源词。
 	LoanwordGloss bool
-	// Pinned is whether the window starts pinned: a pinned window stays where
-	// it was put and does not close when the user clicks elsewhere.
+	// Pinned 决定窗口是否以固定状态打开：固定的窗口停在放置处，点击别处不关闭。
 	Pinned bool
-	// CloseDelay is how long the window waits before closing itself once it
-	// loses the keyboard. It is bounded by the constants below, and a stored
-	// value outside them is brought back inside rather than kept.
+	// CloseDelay 是窗口失去键盘焦点后等待多久自行关闭。它受下方常量约束，
+	// 存储值越界时会被拉回范围内而非保留。
 	CloseDelay time.Duration
-	// Custom is the OpenAI-compatible services the user runs themselves, keyed
-	// by the id each one is stored under ("custom", "custom-2", …).
+	// Custom 是用户自己运行的 OpenAI 兼容服务，按各自存储的 id 索引
+	// （"custom"、"custom-2"……）。
 	//
-	// It is a map rather than one service because the settings window offers
-	// adding another: a user may have a model on their own machine and a
-	// gateway somewhere else, and both are theirs to keep. An entry's id is
-	// what the provider setting names, so a file that remembers "custom-2"
-	// still points at the service it did.
+	// 用 map 而非单个服务，是因为设置窗口提供「再添加一个」：用户可能既在本机有
+	// 一个模型、又在别处有一个网关，都归他保留。某项的 id 就是 provider 设置所指
+	// 的名字，因此记得 "custom-2" 的文件仍指向原来的服务。
 	//
-	// It is not sensitive: a credential never goes in here. The addresses and
-	// the names are in the clear, in the settings file, which is where §8 of
-	// the storage design says they live.
+	// 它不敏感：凭据绝不放在这里。地址和名字是明文的，保存在设置文件中，正是
+	// 存储设计 §8 所说的所在。
 	Custom map[string]CustomSettings
 }
 
-// CustomSettings is one of the user's own translation services: where it is,
-// and what to call it.
+// CustomSettings 是用户自己的一个翻译服务：它在哪，以及怎么称呼它。
 type CustomSettings struct {
-	// BaseURL is the service's address, such as "https://api.example.com/v1".
-	// Empty means the service is not configured, and the window says so.
+	// BaseURL 是服务地址，如 "https://api.example.com/v1"。
+	// 为空表示服务未配置，窗口会说明这一点。
 	BaseURL string
-	// DisplayName is what the user calls the service. Empty means the
-	// interface uses its own word for it.
+	// DisplayName 是用户对该服务的称呼。为空时界面使用自己的说法。
 	DisplayName string
-	// Model is the OpenAI-compatible model name selected by the user.
+	// Model 是用户选定的 OpenAI 兼容模型名。
 	Model string
-	// SupportsImage is set only after Boku successfully completes a real
-	// multimodal request against this service. Missing means not yet verified.
+	// SupportsImage 仅在 Boku 成功对该服务完成一次真实多模态请求后才置位。
+	// 缺失表示尚未验证。
 	SupportsImage bool
 }
 
-// CustomServiceIDs returns the ids of the user's own services, sorted, which is
-// the order the settings window draws them in.
+// CustomServiceIDs 返回用户自有服务的 id，排序后即设置窗口绘制它们的顺序。
 func (s Settings) CustomServiceIDs() []string {
 	ids := make([]string, 0, len(s.Custom))
 	for id := range s.Custom {
@@ -105,18 +85,17 @@ func (s Settings) CustomServiceIDs() []string {
 	return ids
 }
 
-// CustomService returns one of the user's own services, by id.
+// CustomService 按 id 返回用户自有服务之一。
 func (s Settings) CustomService(id string) (CustomSettings, bool) {
 	service, ok := s.Custom[id]
 	return service, ok
 }
 
-// NextCustomServiceID is the id a service being added is stored under: the
-// first of "custom", "custom-2", "custom-3" … that is not taken.
+// NextCustomServiceID 是新增服务存储时用的 id："custom"、"custom-2"、"custom-3"……
+// 中第一个未被占用的。
 //
-// The bare "custom" is kept as the first id because a file written before there
-// could be several services holds that name, and reading it as the first of
-// them is what makes this change need no migration.
+// 裸 "custom" 保留为第一个 id，因为在可以有多于一个服务之前写下的文件持有该名，
+// 把它读作其中第一个正是这一变更无需迁移的原因。
 func (s Settings) NextCustomServiceID() string {
 	if _, taken := s.Custom[customServicePrefix]; !taken {
 		return customServicePrefix
@@ -129,55 +108,43 @@ func (s Settings) NextCustomServiceID() string {
 	}
 }
 
-// IsCustomService reports whether an id names one of the user's own services
-// rather than a built-in translator.
+// IsCustomService 报告一个 id 是否指用户自己的服务，而非内置翻译器。
 //
-// The test is the prefix, not a fixed id: the ids are generated so that several
-// services fit side by side, and every one of them is the same kind of thing to
-// the window and to the backend that asks it.
+// 判断依据是前缀而非固定 id：id 是生成的，让多个服务并存，且它们对窗口和去问
+// 它们的后端而言都是同一类东西。
 func IsCustomService(id string) bool {
 	return id == customServicePrefix || strings.HasPrefix(id, customServicePrefix+"-")
 }
 
-// Bounds on the translation window's own behavior.
+// 翻译窗口自身行为的边界。
 const (
-	// DefaultProvider is the translator a fresh installation uses: the
-	// Microsoft Edge engine, which needs no key, no account and no
-	// configuration.
+	// DefaultProvider 是全新安装使用的翻译器：微软 Edge 引擎，无需 key、账号或配置。
 	//
-	// It is one of the free engines rather than a tier that picks between
-	// them, because the settings page offers the engines as separate choices.
-	// A user who configured a service of their own picks it, and the choice is
-	// theirs from then on — a stored provider is never rewritten, which is
-	// what keeps "I configured a key, why did the answer change" from being a
-	// question nobody can answer (§4.5 of the free-translation design).
+	// 它是免费引擎之一，而非在它们之间挑选的一层，因为设置页把各引擎作为独立选项
+	// 呈现。配置了自有服务的用户会选它，此后选择属于用户——存储的 provider 永不被
+	// 改写，这正是「我配了 key，为什么答案变了」不会成为无人能答的问题的原因
+	// （免费翻译设计 §4.5）。
 	DefaultProvider = contract.MicrosoftEdge
-	// DefaultAccelerator is the shortcut that starts a translation: the one
-	// the design's settings page shows, written the way the framework's
-	// parser reads it. "CmdOrCtrl" is resolved by the platform parser:
-	// Command on macOS, Ctrl on Windows and Linux. Writing "Ctrl" here would
-	// bind Control+Shift+T on macOS, which is not the combination a Mac user
-	// means.
+	// DefaultAccelerator 是启动翻译的快捷键：设计设置页展示的那个，按框架解析器
+	// 读取的方式书写。"CmdOrCtrl" 由平台解析器解析：macOS 上是 Command，
+	// Windows 与 Linux 上是 Ctrl。写 "Ctrl" 会在 macOS 上绑定 Control+Shift+T，
+	// 那不是 Mac 用户想要的组合。
 	DefaultAccelerator           = "CmdOrCtrl+Shift+T"
 	DefaultScreenshotAccelerator = "CmdOrCtrl+Alt+T"
-	// MinCloseDelay and MaxCloseDelay bound the wait before the window closes
-	// itself. Zero is allowed and means "at once": a user who wants the
-	// window gone when they look away can say so.
+	// MinCloseDelay 与 MaxCloseDelay 约束窗口自行关闭前的等待。允许零，表示「立即」：
+	// 想让窗口一移开视线就消失的用户可以这样设。
 	MinCloseDelay     = 0
 	MaxCloseDelay     = 5 * time.Second
 	DefaultCloseDelay = 400 * time.Millisecond
-	// MaxChars bounds what is sent to a translator. A selection is a sentence
-	// or a paragraph; a whole document pasted into the clipboard is not what
-	// this tool is for, and the window says what it left out.
+	// MaxChars 约束发给翻译器的字符数。选中内容是一句话或一段话；整篇文档粘贴进
+	// 剪贴板不是这个工具的用途，窗口会说明省略了什么。
 	MaxChars = 4000
-	// MaxNameChars bounds the user's own name for a service: it is drawn in a
-	// line of a window, not stored as a document.
+	// MaxNameChars 约束用户对服务的称呼长度：它画在窗口的一行里，不作为文档存储。
 	MaxNameChars = 40
 )
 
-// Defaults is the configuration of a user who has never opened the settings:
-// the tool on, the built-in translator, both Japanese annotations on, the
-// window unpinned and closing soon after it loses the keyboard.
+// Defaults 是从未打开过设置的用户的配置：工具开启、内置翻译器、两个日语注释开启、
+// 窗口不固定、失去焦点后很快关闭。
 func Defaults() Settings {
 	return Settings{
 		Enabled:               true,
@@ -190,9 +157,8 @@ func Defaults() Settings {
 	}.Normalize()
 }
 
-// Normalize fills in what a stored setting left out and brings the values that
-// are not free-form into their bounds. It never fails: a hand-edited file
-// should not keep the application from starting, it should be made sane.
+// Normalize 补全存储设置省略的内容，并把非自由形式的值拉回边界内。
+// 它从不失败：手工编辑的文件不应阻止应用启动，而应被改成合理的值。
 func (s Settings) Normalize() Settings {
 	if strings.TrimSpace(s.Provider) == "" {
 		s.Provider = DefaultProvider
@@ -207,15 +173,12 @@ func (s Settings) Normalize() Settings {
 		s.CloseDelay = MaxCloseDelay
 	}
 	s.Custom = normalizeCustomServices(s.Custom)
-	// A provider that names one of the user's own services has to still name
-	// one. Removing a service leaves the setting pointing at an id that is no
-	// longer there, and a tool whose provider does not exist cannot translate:
-	// it falls back to the default rather than failing every press.
+	// 指定用户自有服务的 provider 必须仍指向一个存在的服务。删除服务后设置会指向
+	// 一个已不在的 id，而 provider 不存在的工具无法翻译：此时回退到默认值，而不是
+	// 每次按键都失败。
 	//
-	// Only the user's own services are checked here. Whether a built-in id is
-	// one this build knows is the registry's question, and the registry is not
-	// reachable from a value type — there the lookup fails and the window says
-	// so, which is the right answer for a hand-edited file.
+	// 这里只检查用户自有服务。内置 id 是否为本版本所知是注册表的问题，而注册表
+	// 无法从值类型访问——那时查找会失败、窗口会说明，这对手工编辑的文件是正确答复。
 	if IsCustomService(s.Provider) {
 		if _, exists := s.Custom[s.Provider]; !exists {
 			s.Provider = DefaultProvider
@@ -224,9 +187,8 @@ func (s Settings) Normalize() Settings {
 	return s
 }
 
-// Normalize cleans up the address and the name of a user's own service: an
-// address that is not http or https is dropped rather than handed to the HTTP
-// client, and a name is cut to what a line can show.
+// Normalize 清理用户自有服务的地址与名字：非 http 或 https 的地址被丢弃，
+// 而非交给 HTTP 客户端；名字裁到一行能显示的长度。
 func (c CustomSettings) Normalize() CustomSettings {
 	c.BaseURL = NormalizeBaseURL(c.BaseURL)
 	c.DisplayName = strings.TrimSpace(c.DisplayName)
@@ -237,12 +199,10 @@ func (c CustomSettings) Normalize() CustomSettings {
 	return c
 }
 
-// normalizeCustomServices cleans up every one of the user's own services.
+// normalizeCustomServices 清理用户的每一个自有服务。
 //
-// A service whose address does not survive the cleaning is dropped: an entry
-// with nowhere to send anything is not a service, and keeping it would leave a
-// row in the window that can never answer. A nil map becomes an empty one, so
-// that a caller may add to it without checking.
+// 地址未能通过清理的服务被丢弃：无处可发的项不是服务，留下它会在窗口里留一行
+// 永远无法作答的内容。nil map 变成空 map，让调用者无需检查即可添加。
 func normalizeCustomServices(services map[string]CustomSettings) map[string]CustomSettings {
 	cleaned := make(map[string]CustomSettings, len(services))
 	for id, service := range services {
@@ -258,8 +218,7 @@ func normalizeCustomServices(services map[string]CustomSettings) map[string]Cust
 	return cleaned
 }
 
-// CloseDelayOr is the wait before the window closes itself, inside its bounds
-// whatever the stored value said.
+// CloseDelayOr 是窗口自行关闭前的等待，无论存储值如何都在边界内。
 func (s Settings) CloseDelayOr() time.Duration {
 	switch {
 	case s.CloseDelay < MinCloseDelay:
@@ -270,8 +229,7 @@ func (s Settings) CloseDelayOr() time.Duration {
 	return s.CloseDelay
 }
 
-// ProviderOr is the translator to use, the default when nothing usable was
-// named.
+// ProviderOr 是要用的翻译器，未指定可用值时用默认。
 func (s Settings) ProviderOr() string {
 	if strings.TrimSpace(s.Provider) == "" {
 		return DefaultProvider
@@ -279,8 +237,7 @@ func (s Settings) ProviderOr() string {
 	return s.Provider
 }
 
-// AcceleratorOr is the shortcut that starts a translation, the default when
-// nothing was stored.
+// AcceleratorOr 是启动翻译的快捷键，未存储时用默认。
 func (s Settings) AcceleratorOr() string {
 	if strings.TrimSpace(s.Accelerator) == "" {
 		return DefaultAccelerator
@@ -288,17 +245,13 @@ func (s Settings) AcceleratorOr() string {
 	return s.Accelerator
 }
 
-// ScreenshotAcceleratorOr returns the capture shortcut. Empty is meaningful:
-// the user explicitly cleared it.
+// ScreenshotAcceleratorOr 返回截图快捷键。空是有意义的：用户显式清除了它。
 func (s Settings) ScreenshotAcceleratorOr() string { return strings.TrimSpace(s.ScreenshotAccelerator) }
 
-// NormalizeBaseURL turns what a user typed into an address the application
-// will ask, or into nothing.
+// NormalizeBaseURL 把用户输入转成应用会去问的地址，或者转成空。
 //
-// It is the protocol package's own cleaning, re-exported rather than written
-// again: the backend asks the address the settings stored, and two cleanings of
-// the same string is two chances for them to differ — a stored "127.0.0.1:11434/v1"
-// that the backend read as https would be a request to a port that speaks no
-// TLS. The rule for what an address is lives with the protocol that speaks it;
-// this feature only decides that it keeps one.
+// 它复用协议包自身的清理，而非重写一遍：后端会去问设置里存的地址，对同一字符串
+// 做两次清理就是两次可能不一的机会——存下 "127.0.0.1:11434/v1" 却被后端读成
+// https，就是对不提供 TLS 的端口发请求。什么算合法地址的规则留在讲该协议的包里；
+// 本功能只决定保留一个地址。
 func NormalizeBaseURL(raw string) string { return openai.NormalizeBaseURL(raw) }

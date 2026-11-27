@@ -6,9 +6,8 @@ import (
 	"unicode/utf8"
 )
 
-// htmlBlockTags are the tags that end a line of text. Everything else is
-// treated as inline: a link or a styled span contributes its text and
-// nothing else.
+// htmlBlockTags 是结束一行的标签。其余标签都按内联处理：
+// 链接或带样式的 span 只贡献其文本。
 var htmlBlockTags = map[string]bool{
 	"address": true, "article": true, "aside": true, "blockquote": true,
 	"caption": true, "dd": true, "details": true, "div": true, "dl": true,
@@ -21,14 +20,11 @@ var htmlBlockTags = map[string]bool{
 	"ul": true, "br": true,
 }
 
-// htmlSkipTags are the elements whose content is markup or code rather than
-// what the user read, so their text is dropped entirely.
+// htmlSkipTags 是内容为标记或代码、而非用户所读的元素，其文本整段丢弃。
 var htmlSkipTags = map[string]bool{"script": true, "style": true, "head": true, "title": true}
 
-// htmlNamedEntities are the entities that carry more than spelling: the
-// characters a rich-text copy from a browser is full of. Anything else that
-// is not numeric is left as written, which is what a plain-text conversion
-// should do rather than guess.
+// htmlNamedEntities 是带有超过拼写含义的实体：浏览器富文本复制里常见的字符。
+// 非数字且不在表内的实体按原样保留，这是纯文本转换应有的做法，而非猜测。
 var htmlNamedEntities = map[string]string{
 	"amp": "&", "lt": "<", "gt": ">", "quot": "\"", "apos": "'",
 	"nbsp": " ", "ensp": " ", "emsp": " ", "thinsp": " ",
@@ -46,18 +42,15 @@ var htmlNamedEntities = map[string]string{
 	"omega": "ω", "lambda": "λ", "mu": "µ", "sigma": "σ", "tau": "τ",
 }
 
-// ExtractHTMLText turns copied markup into the text it shows: tags go away,
-// block elements become line breaks, entities are decoded, and the result is
-// collapsed to at most one blank line between paragraphs.
-//
-// This is what makes a copy from a browser, a word processor or a chat
-// window read as the sentence the user saw rather than as its markup.
+// ExtractHTMLText 把复制的标记转成它显示的文字：去掉标签，块级元素变成换行，
+// 解码实体，并把段间空行压到最多一个。
+// 这样从浏览器、文字处理器或聊天窗口复制的内容读起来就是用户看到的句子，
+// 而不是它的标记。
 func ExtractHTMLText(markup string) string {
 	if markup == "" {
 		return ""
 	}
-	// One line-break convention inside: what a copy brought from Windows
-	// then reads the same as one from anywhere else.
+	// 内部统一为一种换行约定：这样从 Windows 复制来的内容与别处复制来的读取一致。
 	if strings.ContainsRune(markup, '\r') {
 		markup = strings.ReplaceAll(markup, "\r\n", "\n")
 		markup = strings.ReplaceAll(markup, "\r", "\n")
@@ -88,7 +81,7 @@ func ExtractHTMLText(markup string) string {
 				breakLine()
 			case part.space:
 				if !lineHasText {
-					continue // a line never starts with a space
+					continue // 行首不放空格
 				}
 				out.WriteByte(' ')
 			default:
@@ -112,11 +105,11 @@ func ExtractHTMLText(markup string) string {
 				i += 4 + end + 3
 				continue
 			}
-			break // an unterminated comment: nothing readable follows
+			break // 未闭合的注释：后面再无可读内容
 		}
 		end := strings.IndexByte(markup[i:], '>')
 		if end < 0 {
-			// A `<` with no end is not a tag; keep it as text.
+			// 没有结尾的 `<` 不是标签，按文本保留。
 			writeText("<")
 			i++
 			continue
@@ -126,8 +119,7 @@ func ExtractHTMLText(markup string) string {
 		name, closing, selfClosing := parseTag(tag)
 
 		if !closing && !selfClosing && htmlSkipTags[name] {
-			// Drop the element's content: it is code, not what the user
-			// read.
+			// 丢弃元素内容：它是代码，不是用户所读的内容。
 			if close := indexOfClosingTag(markup[i:], name); close >= 0 {
 				skip := markup[i+close:]
 				if stop := strings.IndexByte(skip, '>'); stop >= 0 {
@@ -153,10 +145,8 @@ func ExtractHTMLText(markup string) string {
 	return collapseLines(out.String())
 }
 
-// splitRuns is one piece of text as runs of the same kind: a line break, a
-// run of other whitespace, or ordinary text. Treating them separately is
-// what lets a space be dropped at a line start while the line itself is
-// kept.
+// splitRuns 把一段文本拆成同类 run 的片段：一个换行、一段其他空白，或普通文本。
+// 分开处理才能做到行首丢弃空格而保留行本身。
 type textRun struct {
 	text  string
 	space bool
@@ -166,7 +156,7 @@ type textRun struct {
 func splitRuns(text string) []textRun {
 	runs := make([]textRun, 0, 4)
 	start := 0
-	kind := byte(0) // 0 text, 1 space, 2 line
+	kind := byte(0) // 0 文本，1 空白，2 换行
 	kindOf := func(r rune) byte {
 		switch r {
 		case '\n', '\r', '\v', '\f':
@@ -195,8 +185,7 @@ func splitRuns(text string) []textRun {
 	return runs
 }
 
-// parseTag reads a tag's name and the two things that decide what it does:
-// whether it closes an element, and whether it closes itself.
+// parseTag 读取标签名以及决定其行为的两个标志：是否闭合元素、是否自闭合。
 func parseTag(tag string) (name string, closing, selfClosing bool) {
 	body := strings.TrimSpace(tag)
 	if strings.HasPrefix(body, "/") {
@@ -206,22 +195,21 @@ func parseTag(tag string) (name string, closing, selfClosing bool) {
 	selfClosing = strings.HasSuffix(body, "/")
 	body = strings.TrimSuffix(body, "/")
 	name = strings.ToLower(strings.TrimSpace(body))
-	// A tag may carry attributes: the name is the first word.
+	// 标签可能带属性：名字是第一个词。
 	if index := strings.IndexAny(name, " \t\n\r"); index >= 0 {
 		name = name[:index]
 	}
 	return name, closing, selfClosing
 }
 
-// indexOfClosingTag returns where an element's closing tag starts, or -1.
+// indexOfClosingTag 返回元素闭合标签的起始位置，没有则返回 -1。
 func indexOfClosingTag(text, name string) int {
 	needle := "</" + name
 	lower := strings.ToLower(text)
 	return strings.Index(lower, needle)
 }
 
-// collapseLines trims each line and drops the empty ones at either end,
-// keeping one blank line where the markup had one.
+// collapseLines 逐行去空白，去掉首尾空行，并在标记原本有空行处保留一个空行。
 func collapseLines(text string) string {
 	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
 	out := make([]string, 0, len(lines))
@@ -237,9 +225,8 @@ func collapseLines(text string) string {
 	return strings.Join(out, "\n")
 }
 
-// decodeHTMLEntities replaces the entities a copied document uses. An entity
-// it does not know is left as it was written, which is more honest than
-// guessing what it meant.
+// decodeHTMLEntities 替换复制文档里用到的实体。不认识的实体按原样保留，
+// 这比猜测其含义更诚实。
 func decodeHTMLEntities(text string) string {
 	if !strings.Contains(text, "&") {
 		return text
@@ -270,7 +257,7 @@ func decodeHTMLEntities(text string) string {
 	return out.String()
 }
 
-// decodeEntity decodes one entity name or number, without its delimiters.
+// decodeEntity 解码单个实体名或数字（不含分隔符）。
 func decodeEntity(entity string) (string, bool) {
 	if entity == "" {
 		return "", false
@@ -290,9 +277,8 @@ func decodeEntity(entity string) (string, bool) {
 	return decoded, ok
 }
 
-// printableRune reports whether a code point is worth putting on the screen:
-// a control character would end up in the clipboard line as an invisible
-// character, and half a surrogate pair is not a character at all.
+// printableRune 判断一个码点是否值得上屏：控制字符会在剪贴板行里变成不可见字符，
+// 半个代理对也根本不是字符。
 func printableRune(r rune) bool {
 	if r == '\t' || r == '\n' || r == '\r' {
 		return true

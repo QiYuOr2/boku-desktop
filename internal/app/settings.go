@@ -16,40 +16,26 @@ import (
 	preferencesui "boku/internal/preferences/ui"
 )
 
-// The settings window is a sidebar and the page it navigates: the sidebar
-// names every chapter of the page, and the page is the sections themselves,
-// one under the other. The sections are still peers — the sidebar does not
-// nest them — and the line between two of them still says where one ends.
-//
-// The window is created when it is first asked for and closed for real
-// afterwards: a tray application should cost nothing while nobody is
-// configuring it.
+// 设置窗口只在首次被请求时创建，之后会被真正关闭：
+// 托盘应用在无人配置时应不占资源。
 const (
-	// settingsWidth is the page plus the room the sidebar keeps. The page is
-	// the width it has always been (560): a column of words beside it must
-	// not narrow the forms underneath, which are the thing being configured.
+	// 页面宽度固定为 560，旁边一列文字不得挤窄下方的表单。
 	settingsSidebarWidth = 132
 	settingsPageWidth    = 560
 	settingsWidth        = settingsPageWidth + settingsSidebarWidth
-	// settingsAnchor is the room the page keeps above the section the
-	// sidebar was just asked for: it is what tells the user that the section
-	// begins there rather than at the window's edge. The design's own
-	// scrollToSection keeps 16 above the target.
+	// 页面在目标分区上方保留的空间，让用户看出分区从这里开始，而非贴着窗口边缘。
 	settingsAnchor = 16
-	// settingsHeight is the room the page wants: five sections and the
-	// footer. A page with more on it scrolls rather than growing the window
-	// past the screen.
+	// 页面期望的高度：五个分区加页脚；内容更多时滚动，而不是把窗口撑出屏幕。
 	settingsHeight = 660
 )
 
-// settingsSectionKind names one chapter of the settings page: what the
-// sidebar says and what the page shows.
 type settingsSectionKind int
 
 const (
 	sectionAPIKey settingsSectionKind = iota
 	sectionTranslate
 	sectionClipboard
+	sectionDiary
 	sectionFlash
 	sectionAnime
 	sectionBilibili
@@ -59,14 +45,9 @@ const (
 	sectionLive
 )
 
-// settingsPage is one section of the settings page and the sidebar entry that
-// reaches it: the entry's name, the mark beside it, and what the section
-// draws.
-//
-// The two are one thing rather than two lists kept in step by hand: a section
-// added here is in the sidebar and on the page, and an entry can therefore
-// never point at a section that is not there. The entry's name is the
-// section's own, which is what tells the user where it goes.
+// settingsPage 是一个设置分区及其侧栏入口。
+// 二者是同一样东西而非两份手工对齐的列表：在此加一个分区，侧栏与页面就会同时出现，
+// 入口因此不可能指向不存在的分区。
 type settingsPage struct {
 	kind  settingsSectionKind
 	name  string
@@ -74,8 +55,6 @@ type settingsPage struct {
 	build func(c *ui.Context, head *ui.Handle)
 }
 
-// settingsPages is the settings page as the sidebar and the page both read
-// it, in the order they show it.
 func (s *State) settingsPages() []*settingsPage {
 	pages := []*settingsPage{
 		{kind: sectionAPIKey, name: "API Key", mark: s.keyMark, build: s.credentialUI.ApiKeySection},
@@ -85,6 +64,9 @@ func (s *State) settingsPages() []*settingsPage {
 		pages = append(pages, &settingsPage{kind: sectionLive, name: "实时翻译", mark: s.liveMark, build: s.liveSection})
 	}
 	pages = append(pages, &settingsPage{kind: sectionClipboard, name: "剪贴板", mark: s.clipboardMark, build: s.clipboardSection})
+	if s.diaryUI != nil {
+		pages = append(pages, &settingsPage{kind: sectionDiary, name: "日记", mark: s.diaryMark, build: s.diarySection})
+	}
 	if s.flashUI != nil {
 		pages = append(pages, &settingsPage{kind: sectionFlash, name: "闪念", mark: s.flashMark, build: s.flashSection})
 	}
@@ -105,7 +87,7 @@ func (s *State) animeSection(c *ui.Context, head *ui.Handle) {
 	s.animeUI.SettingsView(c, head, s.readingDesign(s.tvMark))
 }
 
-// openSettings shows the settings window, creating it the first time.
+// openSettings 显示设置窗口，首次调用时创建它。
 func (s *State) openSettings() {
 	s.syncActivationPolicy()
 	s.RefreshSelectionAccess()
@@ -115,6 +97,9 @@ func (s *State) openSettings() {
 		return
 	}
 	s.credentialUI.LoadCredentials()
+	if s.diaryUI != nil {
+		s.diaryUI.ReloadSyncSettings()
+	}
 	window := mygo.NewWindow(mygo.WindowOptions{
 		Title:     appName + " 设置",
 		Width:     settingsWidth,
@@ -134,22 +119,16 @@ func (s *State) openSettings() {
 	})
 }
 
-// settingsView builds the settings window: the sidebar that names every
-// section, the page those sections are on, and the version at its foot.
+// settingsView 构建设置窗口：命名各分区的侧栏、承载这些分区的页面，以及底部的版本号。
 //
-// The window draws no title bar of its own: the system's title bar already
-// names it, and repeating that name inside the window is a second title.
-// The sidebar is not a second title either: it says where each section is,
-// and what is drawn at the top of the page is the section itself.
+// 窗口不绘制自己的标题栏：系统标题栏已经命名了它，窗口内再重复一次就是第二个标题。
 func (s *State) settingsView(c *ui.Context) {
 	s.useDesign(c)
 	presentation.WindowFrame(c).Children(func() {
 		ui.Row(c).FillWidth().Grow(1).AlignItems(ui.Stretch).Children(func() {
 			s.settingsSidebar(c)
 			ui.Column(c).Fill().Grow(1).Children(func() {
-				// The page takes the room that is left of the column and
-				// scrolls inside it: a scroll container sized by its content
-				// has nothing to scroll.
+				// 页面占满列剩余空间并在其中滚动：尺寸由内容决定的滚动容器没有可滚动的余地。
 				body := ui.Scroll(c).FillWidth().Grow(1).TrackScroll(&s.settingsScroll)
 				body.Children(func() {
 					presentation.Content(c, false, func() {
@@ -163,12 +142,6 @@ func (s *State) settingsView(c *ui.Context) {
 	s.updateCheckDialogView(c)
 }
 
-// settingsPageContent draws the sections, one under the other, and then puts
-// the page where the sidebar last asked for it.
-//
-// The walk is the sidebar's own list, so the page and the sidebar can only
-// agree: the sections are drawn in the order the entries are, and the boxes
-// of the sections and of their headings are what the sidebar reads.
 func (s *State) settingsPageContent(c *ui.Context, body ui.Element) {
 	pages := s.settingsPages()
 	sections := make([]settingsSectionBox, 0, len(pages))
@@ -176,15 +149,12 @@ func (s *State) settingsPageContent(c *ui.Context, body ui.Element) {
 		if index > 0 {
 			presentation.BetweenSections(c)
 		}
-		// Each section is one box, so that the arithmetic has the box's own
-		// top to work from: MyGo gives an element the box the frame before it
-		// laid out, which is the first one a click can act on. Its head is a
-		// box of its own inside it: what the sidebar follows is where the
-		// heading is, not where the section begins.
+		// 每个分区是一个盒子，算术便有盒子自身的顶边可用：MyGo 给元素的是前一帧布局出的
+		// 盒子，也就是点击能作用到的第一个盒子。它的标题是内部自成一个盒子：侧栏跟随的是
+		// 标题所在，而非分区起点。
 		//
-		// What is kept of the two is a handle rather than the element: an
-		// element belongs to the frame that built it, and a handle is how a
-		// piece of a view is found again in the next one.
+		// 保存的是 handle 而非 element：element 属于构建它的帧，handle 才能让一块视图在
+		// 下一帧被重新找到。
 		section := ui.Box(c).FillWidth()
 		record := settingsSectionBox{kind: page.kind}
 		section.Bind(&record.box)
@@ -195,70 +165,49 @@ func (s *State) settingsPageContent(c *ui.Context, body ui.Element) {
 	s.settingsScrollTo(c, sections, body)
 }
 
-// settingsSectionBox is one section as the sidebar reads it: what it is, and
-// the handles to the box it is drawn in and to the box its heading is drawn
-// in. Handles rather than elements: an element is the frame that built it, and
-// the sidebar reads these again in every frame.
+// settingsSectionBox 是侧栏读取的一个分区：它是什么，以及它所在盒子与标题所在盒子的
+// handle。用 handle 而非 element：element 属于构建它的帧，而侧栏每一帧都要重新读取。
 type settingsSectionBox struct {
 	kind settingsSectionKind
 	box  ui.Handle
 	head ui.Handle
 }
 
-// settingsScrollTo puts the page on its way to the section the sidebar asked
-// for, and keeps that entry open until the page has arrived.
+// settingsScrollTo 把页面送向侧栏请求的分区，并在页面到达前保持该入口为打开状态。
 //
-// The page travels rather than jumps: the offset is handed to the scroll
-// container as a ScrollTo, so MyGo glides to it frame by frame, as the
-// design's own scroll-behavior does.
+// 页面是滑动而非跳转：偏移量作为 ScrollTo 交给滚动容器，由 MyGo 逐帧滑过去。
 func (s *State) settingsScrollTo(c *ui.Context, sections []settingsSectionBox, body ui.Element) {
 	s.settingsRoom = body.Bounds().H
 	s.settingsSection = s.sectionInView(c, sections, body)
-	// The sidebar's own request, if there is one: a section's box is where it
-	// is drawn with the page where it is, so moving the page down by that much
-	// puts the section at the anchor. MyGo gives an element the box of the
-	// frame before, which is why this runs in the frame after the click and
-	// not in the frame of it.
+	// 处理侧栏自身的请求：分区盒子是它在当前页面位置绘制的位置，把页面向下移动对应距离即把
+	// 该分区带到锚点处。MyGo 给元素的是前一帧的盒子，故在点击后的那一帧执行，而非点击当帧。
 	if pending := s.settingsReveal; pending != nil {
-		// The entry the user clicked is the open one for as long as the page
-		// is moving: where the page is on the way says nothing about where it
-		// is going, and lighting the sections it passes is what the user sees
-		// as a flicker.
+		// 用户点击的入口在页面移动期间始终是打开的那个：页面在途位置不能说明它要去哪，
+		// 点亮途经的分区会被用户看成闪烁。
 		s.settingsSection = *pending
 		s.settingsAim(c, *pending, sections)
 		if !s.settingsScroll.Scrolling() {
-			// The page has arrived when the scroll it was given has stopped.
-			// The entry is left to the scroll from the frame after — the one
-			// whose boxes are laid out where the page now is — so that the
-			// entry and the section never disagree.
+			// 页面给定的滚动停止时即已到达。入口交给随后那一帧的滚动决定——那一帧的
+			// 盒子已按页面当前所在布局——使入口与分区永不失配。
 			s.settingsReveal, s.settingsAiming, s.settingsAimAt = nil, false, 0
 		}
 	}
 }
 
-// settingsAim points the page at a section, or at the section clicked after
-// it: a second click while the first one is still travelling retargets the
-// scroll from where the page is now, which is what makes the last entry
-// clicked the one that wins.
+// settingsAim 把页面指向某分区，或指向紧接着它被点击的分区：第一个仍在移动时再次点击，
+// 会从页面当前位置重新定向滚动，因此最后点击的入口胜出。
 //
-// A section's box moves with the page it is drawn on, so where the page is
-// going is worked out once per destination and then left alone: re-aiming
-// every frame would chase a target running away from the scroll. A section
-// the page has no room to bring to the anchor — the ones at the end of a page
-// never reach its top — leaves the page resting at its end, which the
-// container does for itself.
+// 分区盒子随其所在页面移动，故目标每确定一次就固定下来，不再每帧重算：每帧重定向会追一个
+// 不断逃离滚动的目标。页面无空间把某分区带到锚点（页尾分区永远到不了顶部）时，页面停在末尾，
+// 这由容器自己完成。
 //
-// The box is where the section is drawn at the offset the frame before laid
-// the page out at, and the target is an offset: the two are added with the
-// page where it is now, which is the offset the box was measured at.
+// 盒子是前一帧布局出的偏移处所绘制的位置，而目标是偏移量：两者与页面当前位置相加。
 func (s *State) settingsAim(c *ui.Context, kind settingsSectionKind, sections []settingsSectionBox) {
 	if s.settingsAiming && s.settingsAimAt == kind {
 		return
 	}
-	// Kind is not the page index. 实时翻译 is inserted after 划词翻译, and 闪念
-	// is optional, so the enum order and the list the sidebar draws are not
-	// the same list. Using the ordinal scrolled 实时翻译 to whichever section
-	// happened to sit at that number.
+	// kind 不是页面索引。实时翻译插在划词翻译之后，闪念又是可选的，所以枚举顺序与侧栏
+	// 绘制的列表不是同一个列表。用序号会把实时翻译滚到恰好处于该编号的分区。
 	index, ok := settingsSectionIndex(kind, sections)
 	if !ok {
 		return
@@ -280,28 +229,21 @@ func settingsSectionIndex(kind settingsSectionKind, sections []settingsSectionBo
 	return 0, false
 }
 
-// sectionInView is the section the sidebar marks open: the last one whose
-// heading has crossed the middle of the page. A reader is looking at a
-// section once its heading is in the upper half of the page, so the entry
-// changes when the next heading comes up past the middle of it rather than
-// only when it reaches the top.
+// sectionInView 是侧栏标记为打开的分区：标题越过页面中线的最后一个分区。标题进入页面上半部
+// 即视为读者在看该分区，故入口在下一个标题越过中线时才切换，而非等它到顶。
 //
-// The comparison is on the screen: a box is where the element is drawn, and
-// the middle of the page is the middle of the room the page scrolls in.
+// 比较在屏幕上进行：盒子是元素绘制的位置，页面中线是页面滚动区域的中间。
 //
-// One exception at the end of the page: the last sections are never brought
-// to the middle — there is nothing below them to scroll — so the page resting
-// at its end opens the last section whose heading it managed to show. Without
-// it, the entries at the foot of the sidebar could never be lit at all.
+// 页尾有一处例外：末尾分区永远带不到中线（下方无内容可滚），页面停在末尾时打开它能显示出
+// 标题的最后一个分区；没有这条，侧栏底部的入口永远无法被点亮。
 func (s *State) sectionInView(c *ui.Context, sections []settingsSectionBox, body ui.Element) settingsSectionKind {
 	active := settingsSectionKind(0)
 	if len(sections) == 0 {
 		return active
 	}
 	viewport := body.Bounds()
-	// A new window has no committed layout yet. Keep its current selection
-	// until there is a viewport to compare headings against; zero scroll
-	// limits at this point do not mean the reader reached the page's end.
+	// 新窗口尚无提交的布局。在有视口可比较标题之前保持当前选择；此处的零滚动范围并不
+	// 表示读者到了页面末尾。
 	if viewport.H <= 0 {
 		return s.settingsSection
 	}
@@ -309,9 +251,8 @@ func (s *State) sectionInView(c *ui.Context, sections []settingsSectionBox, body
 	atEnd := s.settingsScroll.Y >= s.settingsScroll.MaxY-1
 	last := len(sections) - 1
 	for _, section := range sections {
-		// A section the frame before this one did not lay out has no box to
-		// read, and nothing may be concluded from a zero: it is not a heading
-		// at the top of the page, it is one that has not been drawn yet.
+		// 前一帧未布局的分区没有盒子可读，不能从零得出结论：它不是位于页顶的标题，
+		// 而是尚未绘制的标题。
 		head := c.Resolve(section.head)
 		if head.Bounds().H <= 0 {
 			continue
@@ -330,17 +271,13 @@ func (s *State) sectionInView(c *ui.Context, sections []settingsSectionBox, body
 	return active
 }
 
-// settingsSidebar is the column of entries down the left of the window: one
-// per section of the page, with the one the page is showing filled in the
-// brand green.
 func (s *State) settingsSidebar(c *ui.Context) {
 	active := s.settingsSection
 	ui.Column(c).
 		Width(float32(settingsSidebarWidth)).
 		Shrink(0).
 		Background(presentation.ColorSidebar).
-		// The sidebar's own edge: the line is only on the side that faces the
-		// page, because that is the side where the two regions meet.
+		// 侧栏的边界只在朝向页面的那一侧：那是两块区域相接的地方。
 		BorderWidth(0, 0, 0, 1).
 		BorderColor(presentation.ColorBorder).
 		Padding(float32(12), float32(8)).
@@ -354,12 +291,9 @@ func (s *State) settingsSidebar(c *ui.Context) {
 		})
 }
 
-// settingsNav is one entry of the sidebar: the section's mark and its name,
-// filled in the brand green while the page is showing that section.
+// settingsNav 是侧栏的一个入口：分区的图标记与名称，页面显示该分区时以品牌绿填充。
 //
-// The whole entry is the target rather than the words in it: a row that is
-// about one place should answer anywhere on it. The green is the same green
-// the picked segment of a form wears, because it means the same thing.
+// 整行都是点击目标而非其中文字：一行指向一个位置，就应在行内任意处响应。
 func (s *State) settingsNav(c *ui.Context, page *settingsPage, open bool) bool {
 	row := ui.ButtonBase(c).Label(page.name).
 		FillWidth().
@@ -400,14 +334,11 @@ func (s *State) settingsNav(c *ui.Context, page *settingsPage, open bool) bool {
 	return row.Clicked()
 }
 
-// openSettingsSection answers a click on the sidebar: the page is taken to
-// that section, and the entry is marked open from this frame rather than from
-// where the scroll has reached.
+// openSettingsSection 响应侧栏点击：页面被带到该分区，入口在这一帧即标记为打开，
+// 而不是等滚动到达处。
 //
-// Both halves matter. Reading the scroll alone would mark the entry the page
-// has not left yet while it travels; and the click has to leave the section
-// behind, because the travel is worked out in the next frame, once the box of
-// the section it is going to exists.
+// 两半都重要：只读滚动会在页面移动时标记尚未离开的入口；而点击必须把分区留在身后，
+// 因为移动在下一帧才计算，那时目标分区的盒子才存在。
 func (s *State) openSettingsSection(kind settingsSectionKind) {
 	pages := s.settingsPages()
 	for index, page := range pages {
@@ -418,30 +349,23 @@ func (s *State) openSettingsSection(kind settingsSectionKind) {
 		s.settingsReveal = &pages[index].kind
 		break
 	}
-	// The click was answered in this frame, and the page moves in the next
-	// one: a frame is what carries the request to the scroll container.
+	// 点击已在当前帧响应，页面在下一帧移动：帧是把请求带给滚动容器的载体。
 	s.Refresh()
 }
 
-// clipboardSection is the clipboard tool: the two switches, the record range
-// and the way to the history.
+// clipboardSection 是剪贴板工具：两个开关、记录范围与通往历史的入口。
 //
-// Both switches start off, and the section says why: the clipboard is the most
-// sensitive thing Boku can read. Turning monitoring off stops the reading
-// rather than hiding it, and the form says that too, because "off" that
-// still reads would be a lie.
+// 两个开关默认关闭，分区也说明了原因：剪贴板是 Boku 能读取的最敏感的东西。关闭监控是停止
+// 读取而非隐藏，表单也这么写，因为「关了却仍在读」就是撒谎。
 func (s *State) clipboardSection(c *ui.Context, head *ui.Handle) {
 	s.clipboardUI.SettingsView(c, head, s.clipboardDesign())
 }
 
-// generalSection is the application's own behavior: what it does when it
-// starts, where its data is, and what the platform starts for the user.
+// generalSection 是应用自身行为：启动时做什么、数据在哪、平台为用户启动什么。
 //
-// The last of those is the "开机自动启动" switch, which is a fact about the
-// machine rather than a preference Boku stores: the section asks the platform
-// every frame (autostart.go), so a start the user disabled somewhere else
-// shows as disabled here. The switch is drawn only where the platform can
-// register one; failures remain visible below it.
+// 最后一项是「开机自动启动」开关，它是关于机器的事实而非 Boku 存储的偏好：分区每帧向平台
+// 询问（autostart.go），用户在别处禁用的启动会在此显示为关闭。只有在平台能注册启动项时才
+// 绘制该开关，失败信息保留在下方可见。
 func (s *State) generalSection(c *ui.Context, head *ui.Handle) {
 	s.preferencesUI.GeneralView(c, head, preferencesui.GeneralProps{
 		Mark: s.settingsMark, Appearance: s.appearance.Mode(), SetAppearance: s.setAppearance,
@@ -450,9 +374,7 @@ func (s *State) generalSection(c *ui.Context, head *ui.Handle) {
 	})
 }
 
-// aboutSection is what the application is: the version, what it was built
-// with, where its files are, and a button to check whether there is a newer
-// version.
+// aboutSection 是应用本身：版本、构建环境、文件位置，以及检查是否有更新的按钮。
 func (s *State) aboutSection(c *ui.Context, head *ui.Handle) {
 	presentation.Inset(c, func() {
 		presentation.Stacked(c, presentation.GroupGap, func() {
@@ -483,8 +405,6 @@ func (s *State) aboutSection(c *ui.Context, head *ui.Handle) {
 	})
 }
 
-// aboutLine is one row of the about box: what it is on the left, what it is
-// on the right, both on the field's own face.
 func aboutLine(c *ui.Context, label, value string) {
 	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
 		ui.Text(c, label).FontSize(presentation.SizeSmall).TextColor(presentation.ColorTextMuted).SingleLine().Shrink(0)
@@ -497,8 +417,7 @@ func aboutLine(c *ui.Context, label, value string) {
 	})
 }
 
-// dataPath is where the application keeps its files, or a line saying that
-// it does not have one.
+// dataPath 是应用存放文件的位置，取不到时返回一行说明。
 func (s *State) dataPath() string {
 	path, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil || strings.TrimSpace(path) == "" {
@@ -507,8 +426,6 @@ func (s *State) dataPath() string {
 	return path
 }
 
-// revealDataPath opens the data directory in the system's file manager. It
-// is what a user wants after reading a path: not to copy it, but to look.
 func (s *State) revealDataPath() {
 	path, err := mygo.App.Path(mygo.PathUserData)
 	if err != nil || strings.TrimSpace(path) == "" {
@@ -517,8 +434,7 @@ func (s *State) revealDataPath() {
 	mygo.Shell.OpenPath(path)
 }
 
-// copyVersionInfo puts what the about box says on the clipboard, because a
-// bug report wants it and a person should not have to retype it.
+// copyVersionInfo 把关于框的内容复制到剪贴板，因为提交 bug 需要它，用户不应重打一遍。
 func (s *State) copyVersionInfo() {
 	if s.clipboard == nil {
 		return

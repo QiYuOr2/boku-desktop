@@ -32,10 +32,8 @@ func (s *State) SettingsView(c *ui.Context, head *ui.Handle, design presentation
 					FontSize(s.design.SizeBody).
 					OnClick(func() { s.setClipboardRegionVisible(visible) })
 
-				// The record range: how much of what was copied is kept. It
-				// is a choice among three rather than a number, and the line
-				// under it says what shortening it costs, because the entries
-				// that no longer fit are dropped rather than hidden.
+				// 记录范围是三个选项而非常量，选更短会立刻丢弃装不下的旧记录，
+				// 所以下方说明强调这一点。
 				sizes := clipboard.HistorySizes()
 				selected := 0
 				for index, size := range sizes {
@@ -72,7 +70,7 @@ func (s *State) SettingsView(c *ui.Context, head *ui.Handle, design presentation
 	})
 }
 
-// historyButton is the compact trailing action that opens clipboard history.
+// historyButton 是打开剪贴板历史的紧凑尾部动作。
 func (s *State) historyButton(c *ui.Context) ui.Element {
 	b := ui.ButtonBase(c).Label("打开剪贴板历史").
 		Height(s.design.HeightControl).
@@ -99,7 +97,7 @@ func (s *State) historyButton(c *ui.Context) ui.Element {
 	return b
 }
 
-// intervalLabel names the poll interval the way the switch reads.
+// intervalLabel 按开关的读法格式化轮询间隔。
 func intervalLabel(settings clipboard.Settings) string {
 	interval := settings.Interval()
 	if interval%time.Second == 0 {
@@ -108,8 +106,7 @@ func intervalLabel(settings clipboard.Settings) string {
 	return strconv.Itoa(int(interval/time.Millisecond)) + " 毫秒"
 }
 
-// setClipboardMonitoring flips the switch. The checkbox shows the result;
-// this only reports a write that did not stick.
+// setClipboardMonitoring 切换监听开关。复选框会显示结果，这里只报告写入失败。
 func (s *State) setClipboardMonitoring(enabled bool) {
 	err := s.clipboard.SetMonitoring(context.Background(), enabled)
 	if err != nil {
@@ -120,8 +117,7 @@ func (s *State) setClipboardMonitoring(enabled bool) {
 	s.host.Refresh()
 }
 
-// setClipboardRegionVisible flips the visibility of the quick window's
-// clipboard line.
+// setClipboardRegionVisible 切换快捷窗口底部剪贴板行的可见性。
 func (s *State) setClipboardRegionVisible(visible bool) {
 	err := s.clipboard.SetRegionVisible(context.Background(), visible)
 	if err != nil {
@@ -132,7 +128,7 @@ func (s *State) setClipboardRegionVisible(visible bool) {
 	s.host.Refresh()
 }
 
-// historySizeLabels names the record ranges the way the segments read.
+// historySizeLabels 按分段控件的读法格式化记录范围。
 func historySizeLabels(sizes []int) []string {
 	labels := make([]string, 0, len(sizes))
 	for _, size := range sizes {
@@ -141,8 +137,7 @@ func historySizeLabels(sizes []int) []string {
 	return labels
 }
 
-// setClipboardHistorySize chooses the record range: what no longer fits is
-// dropped here, not at the next copy.
+// setClipboardHistorySize 选择记录范围：装不下的记录在此刻立即丢弃，不留到下次复制。
 func (s *State) setClipboardHistorySize(size int) {
 	if s.clipboard == nil {
 		return
@@ -154,5 +149,5 @@ func (s *State) setClipboardHistorySize(size int) {
 	s.host.Refresh()
 }
 
-// clipboardStatusLine is the last thing the clipboard switches said.
+// clipboardStatusLine 返回剪贴板开关最近一次的结果提示。
 func (s *State) clipboardStatusLine() string { return s.clipboardStatus }

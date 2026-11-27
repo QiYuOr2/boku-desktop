@@ -8,15 +8,14 @@ import (
 	"boku/internal/domain"
 )
 
-// sleepGap is how far the sleep clock has to run ahead of awake time before
-// a gap is treated as sleep. A poll of a couple of seconds moves both clocks
-// together; the noise between them is well under this.
+// sleepGap 是睡眠时钟需领先清醒时长多少，才把间隔视为睡眠。几秒一次的轮询
+// 会让两个时钟同步推进，两者间的噪声远低于此。
 const sleepGap = 2 * time.Second
 
-// Tracker turns samples into sessions.
+// Tracker 把采样变成一局一局的记录。
 //
-// It keeps every session it has accepted. Closing one does not drop it:
-// the file and the charts read the same list.
+// 它保留每一个已接受的会话。关闭一局不会丢弃它：
+// 文件与图表读取的是同一份列表。
 type Tracker struct {
 	sessions []Session
 	at       time.Time
@@ -25,19 +24,16 @@ type Tracker struct {
 	seen     bool
 }
 
-// Restore replaces the sessions with ones read from disk.
 func (t *Tracker) Restore(sessions []Session) {
 	t.sessions = append([]Session(nil), sessions...)
 }
 
-// Sessions returns a copy of every session, open ones included.
 func (t *Tracker) Sessions() []Session {
 	return append([]Session(nil), t.sessions...)
 }
 
-// CloseAbandoned ends sessions that were still open when the process
-// stopped. Each one ends at its own last look, not at the time of this
-// call: the hours between a crash and the next launch are not play.
+// CloseAbandoned 结束进程停止时仍处于打开状态的会话。每个会话结束于它自己
+// 的最后一次观察，而不是本次调用的时刻：崩溃到下次启动之间的时间不算游玩。
 func (t *Tracker) CloseAbandoned() bool {
 	changed := false
 	for i := range t.sessions {
@@ -54,10 +50,9 @@ func (t *Tracker) CloseAbandoned() bool {
 	return changed
 }
 
-// Touch moves the last look of every open session forward.
+// Touch 把每个打开会话的最后观察时间向前推进。
 //
-// The caller saves on its own heartbeat. Observe does not, or a game left
-// open would rewrite the file on every poll.
+// 由调用方按自己的心跳保存。Observe 不保存，否则一直开着的游戏会在每次轮询时重写文件。
 func (t *Tracker) Touch(at time.Time) bool {
 	at = at.UTC().Truncate(time.Second)
 	moved := false
@@ -71,8 +66,8 @@ func (t *Tracker) Touch(at time.Time) bool {
 	return moved
 }
 
-// Observe applies one sample. The bool is whether a session opened, closed
-// or was split, which is when the file has to be written.
+// Observe 应用一次采样。返回的 bool 表示是否有会话开启、关闭或被切分，
+// 这正是需要写文件的时刻。
 func (t *Tracker) Observe(sample Sample) (bool, error) {
 	at := sample.At.UTC().Truncate(time.Second)
 	if at.IsZero() {
@@ -167,7 +162,7 @@ func (t *Tracker) Observe(sample Sample) (bool, error) {
 	return changed, nil
 }
 
-// deviceOrder is the order a session stores controller kinds in.
+// deviceOrder 是会话存储手柄类型时的顺序。
 var deviceOrder = []string{"dualsense", "switch-pro", "xbox"}
 
 func mergeDevices(session *Session, extra []string) bool {

@@ -18,165 +18,115 @@ import (
 	"boku/internal/translate"
 )
 
-// The translation window is the tool's face: what was selected, what it
-// became, and the few things that can be done with either.
-//
-// It is a card rather than a flyout: it appears where the pointer was when
-// the shortcut was pressed, it stays on top of what the user was reading,
-// and it closes itself when they look away — unless they pin it, which is
-// what the pin is for.
-//
-// The window is created once and reused. It is repositioned for each
-// translation, which is cheaper than a window per press and keeps the shape
-// of the window stable: the answer replaces the placeholder in the same
-// card, rather than a second card appearing.
+// 翻译窗口创建一次并复用：每次翻译只重新定位，比每次按键新建窗口更省，
+// 也能保持窗口形状稳定——答案替换同一张卡片里的占位内容，而不是再冒出一张卡。
 const (
-	// translateWidth is the card's width: wide enough for a sentence of
-	// Japanese with its readings above the words and for the translation
-	// under it without wrapping at every third word, and no wider. The
-	// design's own card is narrower still; this is that card at a size that
-	// keeps a sentence on one line.
+	// translateWidth 是卡片宽度：够放一行日文及其中文注音，下面是译文，不至于每三四个词就换行。
 	translateWidth = 478
-	// translateMinHeight is the shortest the card may be: a line of notice, a
-	// hairline and the foot.
+	// translateMinHeight 是卡片最小高度：一行提示、一条分隔线和脚部。
 	translateMinHeight = 84
-	// translateMaxHeight is the tallest: past this the body scrolls, because a
-	// card taller than the screen is a window rather than a card.
+	// translateMaxHeight 是最大高度：超过后正文滚动，因为比屏幕还高的卡片就成了窗口而非卡片。
 	translateMaxHeight = 620
-	// translateHeight is what the window starts at, before a frame has
-	// measured what is in it.
+	// translateHeight 是首帧量出内容前窗口的初始高度。
 	translateHeight = 240
-	// translateGap is how far the card sits from the pointer: far enough not
-	// to be under it, close enough to be where the user is looking.
+	// translateGap 是卡片与指针的距离：不压在指针下，又足够近。
 	translateGap = 12
-	// copiedMarkDuration is how long a copy action says what it did. It is
-	// the clipboard history's own pause, because it is the same gesture.
+	// copiedMarkDuration 是复制操作反馈持续时长，与剪贴板历史一致，因为这是同一种手势。
 	copiedMarkDuration = 700 * time.Millisecond
 )
 
-// translateStatus is what the card is showing. It is a state rather than a
-// set of booleans because the card draws exactly one of them, and which one
-// is the whole of what it has to say.
+// translateStatus 是卡片当前显示的状态。用单个状态而非一组布尔，因为卡片只画其中之一。
 type translateStatus int
 
 const (
-	// translateIdle is before anything was asked for.
+	// translateIdle 是尚未请求任何内容。
 	translateIdle translateStatus = iota
-	// translateLoading is while the translator is being asked.
+	// translateLoading 是正在请求翻译器。
 	translateLoading
-	// translateReady is a translation.
+	// translateReady 是已有译文。
 	translateReady
-	// translateQRReady is the text of a QR code, read locally. It is not a
-	// translation: it has no target language, no service and no annotation.
+	// translateQRReady 是本地识别出的二维码文本。它不是翻译：没有目标语言、服务和注音。
 	translateQRReady
-	// translateOff is the tool switched off in the settings.
+	// translateOff 是在设置里关闭了该工具。
 	translateOff
-	// translateUnconfigured is the tool with no usable translator.
+	// translateUnconfigured 是没有可用的翻译器。
 	translateUnconfigured
-	// translateNoText is a clipboard with nothing to translate in it.
+	// translateNoText 是剪贴板里没有可翻译的内容。
 	translateNoText
-	// translateNeedsScreenRecording is macOS without the permission the
-	// screenshot read needs. It is not a translation failure: the fix is a
-	// switch in System Settings, and the card says where it is.
+	// translateNeedsScreenRecording 是 macOS 缺少截图读取所需权限。这不是翻译失败：
+	// 修复办法是系统设置里的一个开关，卡片会说明在哪里。
 	translateNeedsScreenRecording
-	// translateFailed is a translator that failed, with the reason kept.
+	// translateFailed 是翻译器失败，保留了原因。
 	translateFailed
 )
 
-// translationState is the window's state, on the main thread with the rest of
-// the view state.
+// translationState 是窗口状态，与其他视图状态一样位于主线程。
 type translationState struct {
 	status translateStatus
-	// image says the card is about a screenshot, which is what the foot says
-	// and what a failure tells the user to try again with.
+	// image 表示卡片是关于截图的，脚部据此说明，失败时也据此提示重试方式。
 	image bool
-	// qr says the card is about a QR code. The capture is the same one the
-	// screenshot tool uses, but the answer is text read on this machine
-	// rather than a translation: there is no service and no network.
+	// qr 表示卡片是关于二维码的：截图方式与截图工具相同，但答案是本机识别的文本而非翻译，
+	// 不涉及服务和网络。
 	qr      bool
 	preview *ui.Bitmap
-	// imageTaskID is non-zero only for a screenshot task. It lets a completed
-	// background task update the card that is already showing that task without
-	// reopening a card the user closed.
+	// imageTaskID 仅截图任务非零，使完成的后台任务能更新已显示该任务的卡片，
+	// 而不会重新打开用户已关闭的卡片。
 	imageTaskID uint64
-	// source is what was translated; result is what came back.
-	source string
-	result translate.Result
-	// failure is why the last attempt failed, in the words the window
-	// shows. It is set only with translateFailed.
+	source      string
+	result      translate.Result
+	// failure 是最近一次失败的原因，用窗口展示的措辞，仅在 translateFailed 时设置。
 	failure string
-	// pinned is whether the card stays where it is when the user clicks
-	// elsewhere. It starts from the setting and the pin action flips it.
+	// pinned 是卡片是否在用户点击别处时保持不动，初值来自设置，由固定操作翻转。
 	pinned bool
-	// readings is whether the annotation under the translation is open. It
-	// starts closed: the translation is what the card is for, and the words
-	// behind it are what a reader asks for.
+	// readings 是译文下的注音是否展开，初值关闭。
 	readings bool
-	// annotation is the second request's answer: the words of the source and
-	// how they are read. It is asked for when the annotation is opened, and
-	// kept until the card is about something else.
+	// annotation 是第二次请求的结果：原文的词及其读法。展开时请求，切换卡片内容前保留。
 	annotation annotationState
-	// copied is which side was copied, and when: the action says so for a
-	// moment. "source" or "target", empty when nothing was copied.
+	// copied 是复制了哪一侧（"source" / "target"），空表示未复制；copiedAt 是时间，用于短暂反馈。
 	copied   string
 	copiedAt time.Time
-	// dragging is whether the pointer is moving the card by its foot,
-	// dragFrom is where the window was when the press started, and
-	// dragPointer is where the pointer was then. The card is moved by the
-	// distance the pointer has travelled since that press, so it stays
-	// under the point the user grabbed rather than jumping by the pointer's
-	// position.
+	// dragging 表示指针正通过脚部拖动卡片；dragFrom 是按下时的窗口位置，dragPointer 是按下时的指针位置。
+	// 按两次按下之间指针的位移移动卡片，使卡片停在抓取点之下而不是跳跃到指针位置。
 	dragging    bool
 	dragFrom    mygo.Rectangle
 	dragPointer mygo.Point
 }
 
-// annotationStatus is where the request for the words of the source is.
+// annotationStatus 是请求原文词读法的进度。
 type annotationStatus uint8
 
 const (
-	// annotationIdle is the state the card is in until someone opens the
-	// annotation: nothing has been asked for, and nothing has been paid for.
+	// annotationIdle 是展开注音之前的状态：未请求，也未付费。
 	annotationIdle annotationStatus = iota
 	annotationLoading
 	annotationReady
 	annotationFailed
 )
 
-// annotationState is the answer to that request: the words of the source, and
-// how each one is read.
+// annotationState 是该请求的答案：原文的词及每个词的读法。
 type annotationState struct {
 	status   annotationStatus
 	segments []domain.Segment
 	failure  string
 }
 
-// startTranslation is what the shortcut and the settings window's test both
-// reach: it shows the card and asks the use case for a translation.
+// startTranslation 是快捷键和设置窗口测试都会调用的入口：显示卡片并向用例请求翻译。
 //
-// It returns at once. The request runs on a goroutine, and the answer comes
-// back through Window.Update, because the caller is the main thread with the
-// whole application behind it.
+// 它立即返回。请求在 goroutine 中运行，答案经 Window.Update 回来，因为调用方是主线程。
 //
-// The card appears before the keyboard is taken, and the text to translate is
-// read in between: what has to be read is what the user selected in the
-// application they were working in, and an application that has just lost the
-// keyboard cannot be asked what is selected in it (§2.2 of the tool design). The
-// wait is the read — the platform's own call, bounded by the selection device —
-// not the translation: the card has the keyboard while the request is in
-// flight.
+// 卡片在取得键盘之前先出现，其间读取待翻译文本：要读的是用户所在应用里选中的内容，
+// 而刚失去键盘的应用无法再被询问选中了什么（工具设计 §2.2）。这段等待是读取（平台调用，
+// 受选区设备限制）而非翻译；请求进行期间卡片持有键盘。
 func (s *State) startTranslation(at mygo.Point) {
 	if s.translate == nil {
 		return
 	}
 	startedAt := time.Now()
 	slog.Info("translation requested", "event", "text_translation_requested", "source", "shortcut")
-	// A second press while the card is open is a second translation: what
-	// the user copied may have changed, and the card is about what they
-	// just selected.
+	// 卡片打开时再按一次是新的翻译：用户复制的可能已变化，卡片应反映最新选中内容。
 	settings, err := s.translate.Settings()
 	if err != nil {
-		// The card can only say "看不出来"; the log says which read failed.
+		// 卡片只能说「看不出来」；日志记录是哪次读取失败。
 		slog.Warn("the translation settings could not be read", "error", err)
 		s.showTranslation(at, translationState{status: translateFailed, failure: presentation.FriendlyError(err)})
 		return
@@ -190,10 +140,8 @@ func (s *State) startTranslation(at mygo.Point) {
 		ctx, cancel := context.WithTimeout(context.Background(), translationTimeout)
 		defer cancel()
 		text, err := service.Source(ctx)
-		// The read is done, and the card may take the keyboard. It takes it
-		// now rather than when the answer arrives so that it is a card the
-		// user can dismiss while they wait — Escape and the close the
-		// settings ask for are both about having the keyboard.
+		// 读取完成，卡片可以取得键盘了。此时取得而非等答案回来时才取得，
+		// 是为了等待期间用户能关闭卡片——Escape 和设置要求的关闭都依赖持有键盘。
 		s.onMain(func() { s.focusTranslation(window) })
 		var result translate.Result
 		if err == nil {
@@ -203,10 +151,7 @@ func (s *State) startTranslation(at mygo.Point) {
 			switch {
 			case err == nil:
 				slog.Info("translation completed", "event", "text_translation_completed", "provider", result.ProviderID, "sourceChars", len([]rune(text)), "duration", time.Since(startedAt))
-				// What the source is drawn from is the segments when there
-				// are any: the window shows the pieces the translator
-				// annotated, so that a reading sits over the word it
-				// belongs to.
+				// 原文取自分片（若有）：窗口显示翻译器标注的分片，以便读法对应到所属的词。
 				s.translation = translationState{
 					status:   translateReady,
 					source:   result.SourceText,
@@ -216,8 +161,7 @@ func (s *State) startTranslation(at mygo.Point) {
 					copiedAt: s.translation.copiedAt,
 				}
 			default:
-				// The card shows the user a shortened reason; the error
-				// itself is the one that says which way it failed.
+				// 卡片向用户显示简短原因；日志里的错误才说明具体失败方式。
 				slog.Warn("the translation failed", "event", "text_translation_failed", "sourceChars", len([]rune(text)), "duration", time.Since(startedAt), "error", err)
 				s.translation = translationState{
 					status:  translationFailureStatus(err),
@@ -226,18 +170,15 @@ func (s *State) startTranslation(at mygo.Point) {
 					pinned:  s.translation.pinned,
 				}
 			}
-			// The card's content is not what the last frame measured: the
-			// frames that measure it are owed. This is the answer arriving,
-			// which is the case the card grows or shrinks for.
+			// 卡片内容已不同于上一帧量到的，需要请求测量它的后续帧。
 			s.cardChanged()
 			s.fitTranslationWindow()
 		})
 	}()
 }
 
-// startScreenshotTranslation starts native region selection away from the UI
-// thread, then sends only the transient PNG to the selected image translator.
-// Both the flyout button and the global shortcut enter through this function.
+// startScreenshotTranslation 在 UI 线程之外启动原生选区选择，然后把临时 PNG 发给选定的图片翻译器。
+// 浮窗按钮和全局快捷键都从这里进入。
 func (s *State) startScreenshotTranslation() {
 	requestedAt := s.cursorPoint()
 	if s.translate == nil || s.screenshot == nil {
@@ -261,10 +202,8 @@ func (s *State) startScreenshotTranslation() {
 			preview, err = ui.DecodeBitmap(image)
 		}
 		if err == nil {
-			// The user has finished choosing a region. Only now does the card
-			// appear. Its anchor is read on the main thread after the selection,
-			// rather than at the time the button or shortcut launched the picker.
-			// The task keeps running after that card is closed.
+			// 用户选完区域，此时才显示卡片。锚点在选举结束后于主线程读取，
+			// 而不是在按钮或快捷键启动选择器时读取。卡片关闭后任务仍继续运行。
 			s.onMain(func() {
 				anchor := s.cursorPoint()
 				id, ok := s.startImageTranslationTask(service, image, preview, settings.Pinned)
@@ -276,9 +215,8 @@ func (s *State) startScreenshotTranslation() {
 			})
 			return
 		}
-		// Esc, a click without a usable rectangle, and replacing an in-flight
-		// picker are normal ways out of the app-owned selection UI. They are
-		// not translation failures and should leave no card behind.
+		// Esc、无有效矩形的点击、以及替换进行中的选择器，都是退出应用自管选区界面的正常方式；
+		// 它们不是翻译失败，不应留下卡片。
 		if errors.Is(err, context.Canceled) {
 			slog.Info("screenshot capture cancelled", "event", "screenshot_capture_cancelled", "duration", time.Since(startedAt))
 			return
@@ -290,15 +228,11 @@ func (s *State) startScreenshotTranslation() {
 	}()
 }
 
-// onMain runs a piece of work that changes the view state on the thread that
-// owns it: through an existing window when there is one — that is what asks
-// for the frame which shows the change — or through Application.WhenReady
-// when all windows are closed. The latter is essential for screenshot tasks:
-// their image can arrive after the tray flyout was dismissed, but creating a
-// translation card still has to happen on the UI thread.
+// onMain 在拥有它的线程上执行修改视图状态的工作：有窗口就经 window.Update 执行
+// （它会请求显示该变化的帧），所有窗口都关闭时则经 Application.WhenReady。
+// 后者对截图任务至关重要：其图片可能在托盘浮窗关闭后才到达，但创建翻译卡片仍必须发生在 UI 线程。
 //
-// A caller is a goroutine, so the update body may touch the state only inside
-// this call.
+// 调用方是 goroutine，因此更新体只能在此调用内部操作状态。
 func (s *State) onMain(update func()) {
 	if window := s.translateWindow; window != nil {
 		window.Update(update)
@@ -308,37 +242,27 @@ func (s *State) onMain(update func()) {
 		s.host.OnMain(update)
 		return
 	}
-	// A small state constructed by a unit test has no running application.
-	// Running synchronously is then the only meaningful way to exercise the
-	// state transition, and is never a production-thread escape hatch.
+	// 单测构造的小状态没有运行中的应用，同步执行是演练状态转移的唯一方式，绝不是生产线程的逃生口。
 	update()
 }
 
-// translationTimeout bounds one translation end to end. The HTTP client has
-// its own, shorter timeout; this is the ceiling for everything around it,
-// including the clipboard read.
+// translationTimeout 限定单次翻译的端到端时长。HTTP 客户端有自己更短的超时；
+// 这是包含剪贴板读取在内所有环节的上限。
 const translationTimeout = 20 * time.Second
 
 const (
-	// screenshotCaptureTimeout bounds an abandoned Boku region selector.
+	// screenshotCaptureTimeout 限定被放弃的 Boku 区域选择器。
 	screenshotCaptureTimeout = 45 * time.Second
-	// screenshotTranslationTimeout is deliberately independent of capture.
-	// Vision endpoints expose no task/progress API, so an open HTTP request
-	// cannot prove whether a model is queued, reasoning, or stuck. Two minutes
-	// is a user-cancellable upper bound for a background task, not a claim of
-	// server-side progress.
+	// screenshotTranslationTimeout 刻意独立于选区捕获。视觉端点不提供任务/进度 API，
+	// 因此一个打开的 HTTP 请求无法证明模型是排队、推理还是卡住。两分钟是后台任务可被用户取消的上限，
+	// 并不代表服务端进度。
 	screenshotTranslationTimeout = 2 * time.Minute
 )
 
-// translationFailureStatus maps an error to what the card shows. The four
-// answers the tool has are different things to the user, and each one is a
-// different sentence: the switch is off, there is nowhere to send the text,
-// there is nothing to translate, and something went wrong.
+// translationFailureStatus 把错误映射为卡片显示的状态。
 //
-// The switch is checked first and on its own error, because it is the one
-// answer that is not a problem: a user who turned the tool off asked for
-// exactly what they got, and telling them a service is down would send them
-// looking for a fault that is not there.
+// 先单独检查「已关闭」错误，因为这是唯一不是问题的答案：关掉工具的用户得到的正是所要的，
+// 若告诉他们服务挂了，会让他们去找并不存在的故障。
 func translationFailureStatus(err error) translateStatus {
 	switch {
 	case errors.Is(err, domain.ErrTranslateDisabled):
@@ -356,26 +280,20 @@ func translationFailureStatus(err error) translateStatus {
 	}
 }
 
-// showTranslation puts the card where the pointer is, shows it and gives it the
-// keyboard.
+// showTranslation 把卡片放到指针处、显示并取得键盘。
 func (s *State) showTranslation(at mygo.Point, state translationState) {
 	s.showTranslationInactive(at, state)
 	s.focusTranslation(s.translateWindow)
 }
 
-// showTranslationInactive puts the card where the pointer is and shows it
-// without taking the keyboard.
+// showTranslationInactive 把卡片放到指针处并显示，但不取得键盘。
 //
-// It is what the shortcut asks for, and the card keeps the keyboard out of it
-// only until the text to translate has been read: the read is what the
-// application the user was working in still answers, and this call is the one
-// that would stop it answering (§2.2 of the tool design). focusTranslation is the
-// other half, and the two are always a pair — the card is on screen the moment
-// the shortcut is pressed, the keyboard follows the read.
+// 这是快捷键调用的方式：在待翻译文本读取前保持不夺键盘，因为读取依赖用户所在的应用，
+// 而取得键盘会使其无法应答（工具设计 §2.2）。focusTranslation 是另一半，
+// 二者总成对出现——快捷键一按下卡片即出现，键盘随读取完成而取得。
 func (s *State) showTranslationInactive(at mygo.Point, state translationState) {
 	s.translation = state
-	// Whatever the card drew last is not what it draws now, so the frames
-	// that measure the change are owed.
+	// 卡片内容已变，需要请求测量变化的帧。
 	s.cardChanged()
 	window := s.translateWindow
 	if window == nil {
@@ -388,8 +306,7 @@ func (s *State) showTranslationInactive(at mygo.Point, state translationState) {
 				s.cancelTranslationClose()
 			},
 			func() {
-				// The keyboard went elsewhere: whatever the user was
-				// dragging with it, and the close it may have started.
+				// 键盘转走了：结束正在进行的拖动，以及可能已启动的关闭。
 				s.endCardDrag()
 				s.scheduleTranslationClose(window)
 			},
@@ -403,13 +320,11 @@ func (s *State) showTranslationInactive(at mygo.Point, state translationState) {
 	s.translationVisible = true
 }
 
-// focusTranslation gives the card the keyboard: it is the second half of
-// showTranslationInactive, called when the text the card is about has been
-// read.
+// focusTranslation 让卡片取得键盘：它是 showTranslationInactive 的另一半，
+// 在读取完卡片对应的文本后调用。
 //
-// The card a caller read for may be gone by then — closed while the read ran,
-// or replaced by a newer one — and a request that is over must not put an old
-// card back in front of the user.
+// 届时调用方读取的那张卡片可能已消失——读取期间被关闭或被新卡片替换——
+// 已结束的请求不能把旧卡片重新推到用户面前。
 func (s *State) focusTranslation(window CardWindow) {
 	if window == nil || window != s.translateWindow {
 		return
@@ -417,30 +332,18 @@ func (s *State) focusTranslation(window CardWindow) {
 	window.Focus()
 }
 
-// CardWindow is the translation card as the state machine drives it: show it,
-// take the keyboard, hide it, and hear about the three things that happen to
-// it.
+// CardWindow 是状态机驱动的翻译卡片接口：显示、取得键盘、隐藏，并接收三种事件。
 //
-// It is an interface rather than the framework's window so that what the card
-// does — its states, its pin, its delayed close — can be exercised where no
-// window can exist. Creating one before App.Run does not fail; it waits for
-// the event loop, which is a test that never returns.
+// 用接口而非框架窗口，是为了在没有窗口的环境下演练卡片的行为（状态、固定、延迟关闭）。
+// 在 App.Run 之前创建并不会失败，而是等待事件循环，那将是一个永不返回的测试。
 //
-// Geometry is the *content* rectangle, not the window's outer one: what the
-// card measures is what it draws in, and a window that carries a frame draws
-// in something smaller than what it was given. On Windows a window that can be
-// resized keeps an 8-point frame even with no title bar — measured with
-// `DisableResize: false`, a window set to 478×222 draws in 462×214 — and a
-// card sized by its outer rectangle would have its last eight points cut off,
-// which is exactly where its foot is.
+// Geometry 是内容矩形而非窗口外框：卡片量的是它绘制到的区域，而带边框的窗口绘制区小于给定尺寸。
+// Windows 上可调整大小的窗口即使无标题栏也保留 8 点边框（实测 DisableResize: false 时
+// 设为 478×222 只绘制 462×214），按外框定尺寸的卡片会裁掉最后 8 点，而脚部恰在那里。
 type CardWindow interface {
-	// ShowInactive puts the window on screen without taking the keyboard,
-	// and Focus gives it the keyboard. They are separate because the text
-	// a translation is about is read out of the application the user is
-	// working in, and the card must not take that application's keyboard
-	// until the read is done (§2.2 of the tool design). The framework's own
-	// Show is not part of this: it shows and focuses in one step, which is
-	// the pair this is meant to keep apart.
+	// ShowInactive 把窗口显示但不夺键盘，Focus 取得键盘。二者分离是因为待翻译文本从用户所在
+	// 应用中读取，卡片在读取完成前不能夺走该应用的键盘（工具设计 §2.2）。
+	// 框架自带的 Show 一步完成显示和聚焦，正是这里要拆开的两种行为，故不使用。
 	ShowInactive()
 	Focus()
 	Hide()
@@ -452,8 +355,7 @@ type CardWindow interface {
 	OnFocus(func()) func()
 }
 
-// newCardWindow builds the real card. A state that was given a factory uses
-// that instead, which is what a test does.
+// newCardWindow 构建真实的卡片。若状态被给了工厂则用它，测试即如此。
 func (s *State) newCardWindow(onClosed, onBlur, onFocus func()) CardWindow {
 	if s.cardWindows != nil {
 		return s.cardWindows(onClosed, onBlur, onFocus)
@@ -464,44 +366,23 @@ func (s *State) newCardWindow(onClosed, onBlur, onFocus func()) CardWindow {
 		Height:    translateHeight,
 		MinWidth:  translateWidth,
 		MinHeight: translateMinHeight,
-		// The window is created hidden and shown by the state machine. A
-		// window created without this is shown *and focused* by the
-		// framework as it is built, which is the keyboard taken before the
-		// selection has been read — the card would be shown by the very
-		// call that makes it unreadable (§2.2 of the tool design).
+		// 窗口以隐藏状态创建，由状态机显示。不加此项时框架在构建时就会显示并聚焦，
+		// 即在读取选区前就夺走键盘，使卡片无法读取（工具设计 §2.2）。
 		Hidden:    true,
 		Frameless: true,
-		// No resize: the card is exactly as tall as what is in it — measured
-		// every frame — so a dragged edge would be undone immediately. What
-		// it would leave behind is a frame: a resizable window keeps one even
-		// without a title bar, and a frame is eight points of the card's
-		// bottom that never get drawn.
+		// 不可调整大小：卡片高度随内容逐帧测量，拖边缘会被立即还原；
+		// 而可调整大小的窗口即使无标题栏也保留边框，会占掉卡片底部 8 点不被绘制。
 		DisableResize: true,
 		Transparent:   true,
 		AlwaysOnTop:   true,
 		SkipTaskbar:   true,
-		// On macOS a Panel is a non-activating NSPanel: it floats on every
-		// Space and over full-screen apps, and taking its keyboard does not
-		// activate Boku, so the application the user was working in stays
-		// active. A regular window would pull the foreground away when the
-		// card takes the keyboard, which is exactly the wrong behaviour for a
-		// card about the user's selection. Windows keeps the regular window:
-		// its ShowInactive/Focus pair already has the wanted meaning there.
+		// macOS 上用 Panel（非激活 NSPanel）：浮于所有 Space 和全屏应用之上，
+		// 取得键盘也不会激活 Boku，用户所在应用保持活跃。普通窗口会在卡片取得键盘时抢占前台，
+		// 对一张关于用户选区内容的卡片而言是错的。Windows 保留普通窗口，其 ShowInactive/Focus 已具所需语义。
 		Panel: runtime.GOOS == "darwin",
-		// The platform's own window shadow, which is what the design's
-		// shadow-xl is the design-system spelling of (`bg-white rounded-xl
-		// border border-stone-200/80 shadow-xl`). It is deliberately not
-		// drawn in the view: a shadow drawn here needs the window to be
-		// larger than the card to have room, and that transparent margin
-		// takes clicks — measured, a click thirty points outside the card
-		// still lands in its window — so clicking beside the card would no
-		// longer dismiss it. The window's own shadow is drawn outside the
-		// window: nothing is taken from the card, and nothing from the
-		// desktop's clicks. MyGo asks the platform for it with
-		// `DwmExtendFrameIntoClientArea` and one point of frame, which its
-		// own source calls "a frame the size of a pixel brings the shadow
-		// back"; the drawn area stays exactly the card's (measured: outer
-		// 478×150 and drawn 478×150).
+		// 使用平台自身的窗口阴影，而非在视图里绘制：视图里画阴影需要窗口比卡片大以留出空间，
+		// 那圈透明边距会吞掉点击（实测卡片外 30 点的点击仍落在窗口内），点击卡片旁边就无法关闭它。
+		// 平台阴影画在窗口外，不占卡片、不占桌面点击。实测绘制区仍恰为卡片大小（外框 478×150，绘制 478×150）。
 		DisableShadow: false,
 		Content:       ui.View(s.translateView),
 	})
@@ -511,26 +392,18 @@ func (s *State) newCardWindow(onClosed, onBlur, onFocus func()) CardWindow {
 	return window
 }
 
-// placeTranslation puts the card near the pointer: below and to the right of
-// it, then flipped or slid back when there is no room, as a menu does.
+// placeTranslation 把卡片放到指针附近：先放下方偏右，没空间时再像菜单一样翻转或滑回。
 func (s *State) placeTranslation(window CardWindow, at mygo.Point) {
 	s.translationHeight = translateHeight
 	window.SetContentBounds(cardBounds(at, s.screenNear(at), s.translationHeight))
 }
 
-// cardBounds is where the card goes, as arithmetic: a rectangle the size the
-// content wants, next to the pointer and inside the room it has.
+// cardBounds 以算术方式给出卡片位置：按内容尺寸的矩形，贴近指针且落在可用范围内。
 //
-// It is a function of its arguments rather than of the screen, so that the
-// flipping and the sliding can be tested without one.
+// 它只依赖参数而不依赖屏幕，因此翻转与滑动无需屏幕即可测试。
 //
-// Everything here is in the points the window API takes, which is the same unit
-// the design's sizes are written in. There is deliberately no scale factor:
-// `SetContentBounds` and `ContentBounds` are DIP already, and multiplying by the
-// display's scale — which is what this did until 2026-10-15 — asked for a window
-// `scale` times too wide (478 points became 717 on a 150% display), because the
-// scale was applied on the way in and the value compared on the way out was the
-// unscaled one.
+// 全部使用窗口 API 接受的 point，与设计尺寸同单位，刻意不做缩放：
+// SetContentBounds/ContentBounds 已是 DIP，再乘显示器缩放会在 150% 显示器上把 478 点变成 717 点。
 func cardBounds(at mygo.Point, work mygo.Rectangle, height int) mygo.Rectangle {
 	x := at.X + translateGap
 	y := at.Y + translateGap
@@ -548,33 +421,22 @@ func cardBounds(at mygo.Point, work mygo.Rectangle, height int) mygo.Rectangle {
 	}
 }
 
-// screenNear is the room the card has to live in: every display's work area,
-// united.
+// screenNear 是卡片可用的空间：所有显示器工作区的并集。
 //
-// It used to be the work area of the display the pointer is on, and that is
-// where the other half of the 2026-10-15 bug was. MyGo reports each display's
-// rectangle in points converted by that display's *own* scale, so two displays
-// whose physical rectangles are merely side by side overlap once converted: on
-// the machine this was reported from, the primary display's right third (its
-// last 853 of 2560 points) lies inside the 150 % display's rectangle. A card
-// placed there was clamped into that other display's work area — it jumped to
-// its left edge and then did not move at all while the pointer kept travelling,
-// which is the "position changes unnaturally" the user saw.
-//
-// The union answers the same thing on a single display, and on several it only
-// means the card may sit across the seam — which is where the user put it.
+// 不能用指针所在显示器的工作区：MyGo 按各显示器自身缩放转换 point 报告其矩形，
+// 物理上并排的两块屏转换后会重叠（实测副屏矩形覆盖了主屏右侧一部分），
+// 卡片被夹进另一块屏的工作区，表现为「位置异常跳动」。用并集在单屏上结果相同，多屏时只意味着卡片可跨接缝，
+// 那正是用户放它的地方。
 func (s *State) screenNear(at mygo.Point) mygo.Rectangle {
 	if s.cursorSet {
-		// A state that was given a pointer in advance has no screen to ask —
-		// the screen module needs a running application — so it answers with
-		// a work area wide enough for the arithmetic to be exercised.
+		// 预先给定指针的状态没有屏幕可问（屏幕模块需要运行中的应用），
+		// 返回一个足够大的工作区以便演练算术。
 		return mygo.Rectangle{X: 0, Y: 0, Width: 1920, Height: 1080}
 	}
 	return workAreaOf(mygo.Screen.Displays())
 }
 
-// workAreaOf is every display's work area, united: the room the card may be
-// placed in, whichever display the framework attributes the pointer to.
+// workAreaOf 是所有显示器工作区的并集：无论框架把指针归属到哪块屏，卡片都可在其中放置。
 func workAreaOf(displays []mygo.Display) mygo.Rectangle {
 	if len(displays) == 0 {
 		return mygo.Rectangle{}
@@ -590,69 +452,49 @@ func workAreaOf(displays []mygo.Display) mygo.Rectangle {
 	return work
 }
 
-// measureCard is how the card comes to be as tall as what is in it.
+// measureCard 让卡片高度贴合内容。
 //
-// A frame builds the card and reads back how tall it turned out — the
-// framework lays a column out at its content height, and the card asks for
-// nothing more — and the window is then sized to that, inside its bounds. A
-// card taller than the tallest is cut off rather than scrolled: there is no
-// scrolling container in a card whose height is the thing being measured.
+// 一帧构建卡片并读回其高度，窗口随即在边界内缩放到该高度。超过最大高度的卡片被裁掉而非滚动：
+// 一张以高度为测量对象的卡片里没有滚动容器。
 //
-// What a frame can read is the box the frame *before* it laid out: MyGo's
-// Element.Bounds is the previous frame's rectangle, so the card is always
-// measured as it was. That is what makes the frames below necessary rather
-// than merely tidy. The answer arriving changes the card's content in frame
-// one; frame one therefore measures the card as it was — the loading card,
-// which is exactly the height the window already has — nothing resizes, and
-// with nothing to show it the window never asks for another frame. The card
-// would stay at its old height until something else moved it, which is what a
-// click on it did.
-//
-// So the card asks for the frames its own measurement needs: one after its
-// content changes, so that the frame which drew the change is measured, and
-// one after the window has been given a new size, so that the card is laid
-// out at it. Both are paid out of cardSettle, which is how many frames the
-// card owes itself, and every request is made from inside a frame — so it
-// schedules the frame after this one rather than being folded into this one.
+// 一帧能读到的是上一帧布局出的框（MyGo 的 Element.Bounds 是上一帧的矩形），
+// 所以卡片总是按旧状态被测量。这就是下面这些帧的必要性：答案到达在第 1 帧改变内容，
+// 第 1 帧量到的却是旧的加载卡片（恰是窗口现有高度），于是什么都不缩放、不再请求下一帧，
+// 卡片会停在旧高度直到别的东西推动它。因此卡片主动请求自己测量所需的帧：
+// 内容变化后一帧（量到画出的变化），窗口给出新尺寸后一帧（按新尺寸重新布局）。
+// 两者由 cardSettle 计数，且都是从帧内部请求，所以是排在本帧之后而非并入本帧。
 func (s *State) measureCard(c *ui.Context, card ui.Element) {
 	if s.cardMeasuring || s.translation.dragging {
 		return
 	}
 	if s.translateWindow == nil {
-		// The card is being drawn somewhere other than its window — a test's
-		// frame, an offscreen render — and there is nothing to resize.
+		// 卡片画在窗口之外（测试帧、离屏渲染），没有可缩放的窗口。
 		return
 	}
 	if c.Vibrancy() {
-		// A popover's material draws its own shape, and a card that changes
-		// size under it is a card that flickers.
+		// 弹出框材质自带形状，卡片在其下改变大小会闪烁。
 		return
 	}
 	box := card.Bounds()
 	if box.H <= 0 {
-		// The card was not in the frame before this one: there is nothing to
-		// measure yet. It is in this one.
+		// 上一帧中卡片尚不存在，暂无可测量的内容，它存在于本帧。
 		s.nextCardFrame(c)
 		return
 	}
 	work := s.screenNear(s.cursorPoint())
-	// A window is a whole number of points and the card is not: rounding up
-	// is what keeps the card inside the window, and never adds more than the
-	// fraction it has to. Adding a point outright would leave a strip of
-	// window under the foot — the card's own bottom edge with a hairline of
-	// whatever is behind it.
+	// 窗口是整数点而卡片不是：向上取整使卡片留在窗口内，且从不超出其应有的零头。
+	// 直接加一点会在脚下留一条窗口——卡片底边与背后内容间的一道细线。
 	measured := int(math.Ceil(float64(box.H)))
 	s.cardHeight = measured
 	if s.fitCard(work, measured) {
-		// The window has just been given a size: the next frame is the one
-		// that lays the card out at it.
+		// 窗口刚被赋予新尺寸：下一帧按它重新布局卡片。
 		s.nextCardFrame(c)
 		return
 	}
 	s.nextCardFrame(c)
 }
 
-// nextCardFrame asks for one more frame while the card owes itself one.
+// nextCardFrame 在卡片还欠自己帧时再请求一帧。
 func (s *State) nextCardFrame(c *ui.Context) {
 	if s.cardSettle <= 0 {
 		return
@@ -661,19 +503,12 @@ func (s *State) nextCardFrame(c *ui.Context) {
 	c.Invalidate()
 }
 
-// cardChanged says the card now holds what the last frame did not draw, so
-// the frame that draws it has to be followed by one that measures it.
-//
-// Two frames are owed: the one that draws the change, and the one that lays
-// the card out at the size that measurement asked for.
+// cardChanged 表示卡片内容已不同于上一帧绘制的内容，因此绘制它的帧之后必须跟一帧来测量它。
+// 欠两帧：一帧绘制变化，一帧按测量出的尺寸重新布局。
 func (s *State) cardChanged() { s.cardSettle = 2 }
 
-// fitCard sizes the window to what the card drew, keeping it where it is and
-// inside the room it has. It reports whether the window was actually given a new
-// size.
-//
-// Both sizes are in points, like everything else here: see cardBounds for why
-// nothing is multiplied by a scale factor.
+// fitCard 把窗口缩放到卡片绘制出的大小，保持位置并留在可用范围内，返回窗口是否真的被赋予了新尺寸。
+// 尺寸均为 point，与其他处一致；不做缩放的理由见 cardBounds。
 func (s *State) fitCard(work mygo.Rectangle, measured int) bool {
 	window := s.translateWindow
 	if window == nil || measured <= 0 {
@@ -688,9 +523,7 @@ func (s *State) fitCard(work mygo.Rectangle, measured int) bool {
 	if bounds.Width == translateWidth && bounds.Height == height {
 		return false
 	}
-	// The card keeps its top-left corner and grows downwards, unless that
-	// would run it off the screen: then it slides up, as the menu it looks
-	// like would.
+	// 卡片保持左上角向下增长；若会越出屏幕则像菜单一样上滑。
 	y := clampInt(bounds.Y, work.Y, max(work.Y+work.Height-height, work.Y))
 	window.SetContentBounds(mygo.Rectangle{
 		X:      clampInt(bounds.X, work.X, max(work.X+work.Width-translateWidth, work.X)),
@@ -701,13 +534,9 @@ func (s *State) fitCard(work mygo.Rectangle, measured int) bool {
 	return true
 }
 
-// translationHeight is the room the card wants right now: what it measured,
-// or what it starts at before the first frame.
+// translationHeight 是卡片此刻想要的高度：测得的高度，或首帧之前的初始高度。
 
-// fitTranslationWindow sizes the card the way it was placed: the width is the
-// design's, the height is what the card measured. It is what a card that has
-// not drawn a frame yet is given — a new answer, a new pin — rather than a
-// height chosen for the state.
+// fitTranslationWindow 按摆放方式缩放卡片：宽度用设计值，高度用卡片测得值。
 func (s *State) fitTranslationWindow() {
 	window := s.translateWindow
 	if window == nil {
@@ -717,13 +546,10 @@ func (s *State) fitTranslationWindow() {
 	s.fitCard(work, s.translationHeight)
 }
 
-// scheduleTranslationClose closes the card once it has been ignored for as
-// long as the setting says.
+// scheduleTranslationClose 在卡片被忽略达到设置时长后关闭它。
 //
-// The wait is why the card has a delay at all: a translation is read, and a
-// user who clicks the page behind it to read on may still want the card. A
-// pinned card never closes itself, and neither does one that has been pinned
-// while the timer was running.
+// 延迟的意义：用户看译文时可能点击背后页面继续阅读但仍想保留卡片。固定卡片不会自动关闭，
+// 计时期间才被固定的卡片也不会。
 func (s *State) scheduleTranslationClose(window CardWindow) {
 	if s.translation.pinned {
 		return
@@ -735,8 +561,7 @@ func (s *State) scheduleTranslationClose(window CardWindow) {
 		}
 	}
 	s.cancelTranslationClose()
-	// The timer only asks for the close; the state it reads is touched on
-	// the main thread, inside Update, like every other piece of view state.
+	// 计时器只请求关闭；它读的状态在 Update 内于主线程操作，与其他视图状态一样。
 	timer := time.AfterFunc(delay, func() {
 		window.Update(func() {
 			if s.translateWindow != window || s.translation.pinned {
@@ -748,8 +573,7 @@ func (s *State) scheduleTranslationClose(window CardWindow) {
 	s.translateCloseTimer = timer
 }
 
-// cancelTranslationClose forgets a close that was asked for: the user came
-// back to the card, or dismissed it themselves.
+// cancelTranslationClose 取消已请求的关闭：用户回到了卡片，或自行关闭了它。
 func (s *State) cancelTranslationClose() {
 	if s.translateCloseTimer != nil {
 		s.translateCloseTimer.Stop()
@@ -757,12 +581,9 @@ func (s *State) cancelTranslationClose() {
 	}
 }
 
-// closeTranslation hides the card. It is hidden rather than destroyed: the
-// next press reuses it, and a window that was never created costs nothing.
+// closeTranslation 隐藏卡片（而非销毁）：下次按键复用，从未创建的窗口不花代价。
 //
-// Hiding also ends whatever drag was in progress. A card that is off screen
-// and still thinks the pointer is holding it would jump the next time the
-// pointer crossed where it used to be.
+// 隐藏同时结束进行中的拖动；否则离屏却仍以为指针在拖它的卡片，会在指针再次经过时跳动。
 func (s *State) closeTranslation() {
 	s.cancelTranslationClose()
 	s.endCardDrag()
@@ -772,8 +593,7 @@ func (s *State) closeTranslation() {
 	}
 }
 
-// toggleTranslationPin flips whether the card closes itself, and asks for the
-// frame that draws the pin in its new state.
+// toggleTranslationPin 翻转卡片是否自动关闭，并请求绘制新固定状态的那一帧。
 func (s *State) toggleTranslationPin() {
 	s.translation.pinned = !s.translation.pinned
 	slog.Info("translation card pin changed", "event", "translation_card_pin_changed", "pinned", s.translation.pinned, "image", s.translation.image)
@@ -791,13 +611,8 @@ func (s *State) toggleTranslationPin() {
 	}
 }
 
-// toggleReadings opens and closes the annotation under the translation, and
-// asks for the frames that draw the card at its new height: what it opens is
-// taller than what it replaces, so the frame that draws it has to be measured
-// and followed by one that sizes the window to it.
-//
-// Opening it the first time is what asks the translator for the words: the
-// translation did not wait for them, and neither does the card.
+// toggleReadings 展开或收起译文下的注音，并请求按新高度绘制卡片的帧。
+// 首次展开才向翻译器请求词读法：翻译没有等待它，卡片也不等。
 func (s *State) toggleReadings() {
 	s.translation.readings = !s.translation.readings
 	if s.translation.readings && s.translation.annotation.status == annotationIdle {
@@ -810,14 +625,10 @@ func (s *State) toggleReadings() {
 	}
 }
 
-// requestAnnotation asks the translator for the words of the source and how
-// they are read.
+// requestAnnotation 向翻译器请求原文的词及其读法。
 //
-// It is a request of its own, made when the user opens the annotation, and it
-// is why the annotation costs nothing until then: the translation goes out
-// asking for a paragraph, and the pieces behind it — which are the slow part —
-// are asked for by the person who wants them. It runs on a goroutine, like the
-// translation, and comes back through onMain.
+// 这是独立请求，在用户展开注音时发出，所以注音在此之前不花代价：翻译只请求一段文字，
+// 而背后的分片（慢的部分）由需要的人主动请求。它在 goroutine 中运行，经 onMain 回来。
 func (s *State) requestAnnotation() {
 	service := s.translate
 	text := s.translation.source
@@ -837,8 +648,7 @@ func (s *State) requestAnnotation() {
 		result, err := service.Translate(ctx, request)
 		s.onMain(func() {
 			if s.translation.source != text {
-				// The card is about something else now: this answer is for a
-				// translation that is gone.
+				// 卡片已换成别的内容：这个答案属于一张已消失的翻译。
 				return
 			}
 			switch {
@@ -849,28 +659,22 @@ func (s *State) requestAnnotation() {
 					failure:  result.Note,
 				}
 			default:
-				// The readings are a second request, and it can fail on its
-				// own after the translation itself worked.
+				// 注音是第二个请求，可能在翻译本身成功后单独失败。
 				slog.Warn("the readings could not be fetched", "error", err)
 				s.translation.annotation = annotationState{
 					status:  annotationFailed,
 					failure: presentation.FriendlyError(err),
 				}
 			}
-			// The annotation changed how tall the card is: the frames that
-			// measure it are owed, as they are for a translation.
+			// 注音改变了卡片高度，需要请求测量它的帧，与翻译一样。
 			s.cardChanged()
 			s.fitTranslationWindow()
 		})
 	}()
 }
 
-// readingsAvailable is whether the card offers the annotation at all: a source
-// in a language whose words carry readings or loanword glosses, under a
-// setting that asks for one of the two.
-//
-// It is what decides whether the card shows the row that opens them: a control
-// that opens nothing is worse than no control.
+// readingsAvailable 决定卡片是否提供注音：原文为带读法或外来词释义的语言，
+// 且设置中开启了二者之一。这决定是否显示打开注音的行——打开不了任何东西的控件比没有更糟。
 func (s *State) readingsAvailable() bool {
 	if s.translation.status != translateReady ||
 		s.translation.result.SourceLang != domain.LangJapanese ||
@@ -884,19 +688,10 @@ func (s *State) readingsAvailable() bool {
 	return settings.Furigana || settings.LoanwordGloss
 }
 
-// annotatedWords is what the open annotation shows: one entry per word that
-// carries something — a reading for the ones written with kanji, the word it
-// came from for the loanwords — in the order they appear.
+// annotatedWords 是展开注音时显示的内容：每个有内容的词一条（汉字词给读法，外来词给原词），按出现顺序。
 //
-// It is not the sentence. A reader who opens this wants the words they cannot
-// read, and the sentence is already above them; what a piece in kana has to
-// show is nothing at all.
-//
-// A word the source uses twice is one entry, not two: this is a list of the
-// words the sentence is made of, and the same word twice in it tells a reader
-// nothing they did not already know. A word that says two different things —
-// the same kanji read two ways in one text — is two entries, because those are
-// two words that happen to be written alike.
+// 不是整句：读者打开它要的是读不出的词。同一个词出现两次合并为一条；写法相同但读法不同（同一汉字两种读法）
+// 则是两条。
 func (s *State) annotatedWords() []domain.Segment {
 	showReading, showGloss := true, true
 	if settings, err := s.translateSettings(); err == nil {
@@ -920,40 +715,23 @@ func (s *State) annotatedWords() []domain.Segment {
 	return words
 }
 
-// annotationNote is what a word has to say about itself, and whether it is a
-// loanword's own word — which is the one note the design writes in the brand
-// green.
-//
-// It is one function because the chip and the list have to agree: what the
-// list counts as a word's note is what the chip puts over it, and what it
-// dedupes on is that same thing.
+// annotationNote 是某个词要说明的内容，以及它是否外来词自身的原词（设计中唯一用品牌绿写的注记）。
+// 单一函数是为了让 chip 与列表一致：列表计为词注记的就是 chip 显示在上方的，去重依据也相同。
 func annotationNote(segment domain.Segment, showReading, showGloss bool) (string, bool) {
 	return presentation.AnnotationNote(segment, showReading, showGloss)
 }
 
-// dragCard is the foot of the card, as the handle that moves it.
+// dragCard 是卡片脚部的拖动把手。
 //
-// The pointer events come from the framework: the element under the press
-// takes the moves until the button comes up, so a press that began on the
-// foot keeps moving the card even when the pointer leaves it — which is what
-// makes a drag feel like a drag rather than like a chase.
+// 指针事件来自框架：按下的元素会持续接收移动直到松开，因此从脚部开始的按下即使指针移出也继续拖动——
+// 这才像拖动而非追着跑。
 //
-// What moves the card is the pointer's travel since the press, not the
-// pointer's position: the press remembers where the pointer was and where the
-// window was, and every move puts the window that far from where it started.
-// An event's own X and Y are where the pointer is inside a box that moves
-// with the card, so adding them — or adding their differences — makes the
-// card jump to the pointer and then chase it; the distance travelled is the
-// one number that does not depend on the card having already moved.
+// 移动量是指针自按下以来的位移，而非指针位置：按下时记住指针和窗口位置，每次移动都把窗口放在起点加位移处。
+// 事件自身的 X/Y 是指针在随卡片移动的框内的位置，加减它会使卡片跳到指针再追着跑；只有位移这个数不依赖卡片已移动。
 //
-// A move is only a drag while the button is held: the foot sees the pointer
-// pass over it without a press too, and a card on its way out after losing
-// the keyboard must not be moved by the pointer merely crossing it.
+// 只有按住时才拖动：脚部也会在无按下时看到指针经过，失去键盘后正在退出的卡片不能被指针经过而移动。
 //
-// A pinned card is dragged like any other: the pin is about the card staying
-// open when the keyboard goes elsewhere, not about it staying where it was put
-// — a card the user has pinned is one they are working with, and moving it out
-// of the way is part of that.
+// 固定卡片也照常可拖：固定关乎失焦时保持打开，而非保持位置。
 func (s *State) dragCard(ev ui.InputEvent) bool {
 	switch ev.Kind {
 	case ui.InputPointerDown:
@@ -994,23 +772,17 @@ func (s *State) dragCard(ev ui.InputEvent) bool {
 	return false
 }
 
-// endCardDrag forgets a drag that was never released.
-//
-// A press whose release never arrives — the card was hidden, or the keyboard
-// went somewhere else and the platform never told the foot about it — would
-// otherwise leave the card following the pointer for as long as it lives.
+// endCardDrag 清除未释放的拖动：卡片被隐藏，或键盘转走而平台未通知脚部，
+// 否则卡片会终生跟随指针。
 func (s *State) endCardDrag() {
 	s.translation.dragging = false
 }
 
-// copyTranslation puts one side of the card back on the clipboard.
+// copyTranslation 把卡片的一侧写回剪贴板。
 //
-// It goes through the clipboard tool rather than the platform directly, so
-// that the write is suppressed from the history exactly as any other write
-// the application makes is: the poll must not read the translation back and
-// record it as a new copy. The entry itself is the text that was copied, with
-// the hash the clipboard tool computes for it, so a translation the user
-// copies is an ordinary clipboard entry like any other.
+// 走剪贴板工具而非直接调用平台，使这次写入与应用的其它写入一样被排除在历史之外：
+// 轮询不能把译文读回来记成新的复制。条目本身就是被复制的文本，带剪贴板工具计算的哈希，
+// 因此用户复制的译文就是一条普通剪贴板条目。
 func (s *State) copyTranslation(which string) {
 	if s.clipboard == nil {
 		return
@@ -1027,8 +799,7 @@ func (s *State) copyTranslation(which string) {
 	s.translation.copiedAt = time.Now()
 	window := s.translateWindow
 	if window != nil {
-		// The mark that says what was copied takes the room of an action:
-		// that is a change the card has to measure again.
+		// 复制反馈标记占了一个操作的位置，是需要重新测量的变化。
 		s.cardChanged()
 		window.Update(func() {})
 	}
@@ -1040,13 +811,10 @@ func (s *State) copyTranslation(which string) {
 		ContentHash: kit.ClipContentHash(value),
 		CopiedAt:    time.Now().UTC(),
 	}
-	// The write runs off the main thread, and the mark is taken back when
-	// it is done with: a copy is a platform call, and the frame the click
-	// was in must not wait for it.
+	// 写入在主线程之外运行，完成后收回标记：复制是平台调用，点击所在帧不能等它。
 	s.clipboard.CopyAsync(entry, func(err error) {
 		if err != nil {
-			// A copy the platform refused is invisible in the card: the
-			// mark goes back and nothing is said.
+			// 平台拒绝的复制在卡片中不可见：标记收回，什么也不说。
 			slog.Warn("the translation could not be copied to the clipboard", "error", err)
 		}
 		if window == nil {
@@ -1056,8 +824,7 @@ func (s *State) copyTranslation(which string) {
 			window.Update(func() {
 				if s.translation.copied == which && time.Since(s.translation.copiedAt) >= copiedMarkDuration {
 					s.translation.copied = ""
-					// The mark is gone: the card is a little different
-					// again.
+					// 标记消失，卡片又略有变化。
 					s.cardChanged()
 				}
 			})
@@ -1065,27 +832,22 @@ func (s *State) copyTranslation(which string) {
 	})
 }
 
-// copiedLabel is what a copy action says while it is saying it.
+// copiedLabel 是复制操作在反馈期间显示的文案。
 func (s *State) copiedLabel(which string) bool {
 	return s.translation.copied == which && time.Since(s.translation.copiedAt) < 2*copiedMarkDuration
 }
 
-// cursorPoint is where the pointer is, in screen coordinates, which is where
-// the card goes. It is read on the main thread, where the shortcut callback
-// already runs.
+// cursorPoint 是指针的屏幕坐标，卡片据此定位。它在主线程读取，快捷键回调也在此运行。
 //
-// A test has no pointer and no running application — asking the platform for
-// one before App.Run is a programming error — so a point may be given in
-// advance, and the platform is asked only when none was.
+// 测试没有指针也没有运行中的应用（在 App.Run 前问平台是编程错误），所以可预先给定一个点，
+// 仅在未给定时才问平台。
 func (s *State) cursorPoint() mygo.Point {
 	if s.cursorSet {
 		return s.cursor
 	}
 	point := mygo.Screen.CursorScreenPoint()
 	if point.X == 0 && point.Y == 0 {
-		// A platform that does not answer gives the middle of the primary
-		// screen rather than the top-left corner, which is where a card
-		// nobody can see would go.
+		// 平台不应答时取主屏中心，而非左上角——那是无人看得见的卡片会去的地方。
 		display := mygo.Screen.PrimaryDisplay()
 		return mygo.Point{
 			X: display.WorkArea.X + display.WorkArea.Width/2,
@@ -1095,7 +857,7 @@ func (s *State) cursorPoint() mygo.Point {
 	return point
 }
 
-// clampInt keeps a value inside a range, whichever end it fell off.
+// clampInt 把值限制在范围内，无论从哪端越界。
 func clampInt(value, low, high int) int {
 	if high < low {
 		high = low

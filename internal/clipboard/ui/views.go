@@ -9,20 +9,7 @@ import (
 	"time"
 )
 
-// clipboardRegion is the row under the blocks: the mark, the content, and the
-// way to the history. It is one row high, so that the quick window stays a
-// glance rather than becoming a list.
-//
-// The design draws it as a field of its own rather than as another block: 12
-// from each side of the window, 14 points high inside, on a stone face with a
-// stone s.design.Hairline — it is a value the desktop handed over, not a panel, and the
-// two are told apart by their shape as well as by their place.
-//
-// With nothing read yet — monitoring is off, or nothing has been copied — the
-// row is not drawn at all, not even the field.
-//
-// The mark and the way in do not shrink: a long value loses its own tail to
-// the ellipsis, and what the row is and what it offers stay readable.
+// QuickView 绘制快捷窗口底部的一行剪贴板内容。有实际内容时才绘制。
 func (s *State) QuickView(c *ui.Context, design presentation.ClipboardDesign) {
 	s.design = design
 	content, ok := s.clipboardLatest()
@@ -42,8 +29,6 @@ func (s *State) QuickView(c *ui.Context, design presentation.ClipboardDesign) {
 				AlignItems(ui.Center).
 				Gap(float32(8)).
 				Children(func() {
-					// The mark wears the field's own ink: it is a label, and
-					// the word it replaced was drawn in the same place.
 					ui.Icon(c, s.design.Mark).Size(float32(14), float32(14)).Shrink(0).TextColor(s.design.PanelFaint)
 					ui.Text(c, content.Display).FontSize(s.design.SizeSmall).TextColor(s.design.PanelBody).SingleLine()
 					ui.Spacer(c)
@@ -54,13 +39,12 @@ func (s *State) QuickView(c *ui.Context, design presentation.ClipboardDesign) {
 		})
 }
 
-// historyButton is the way from the clipboard row to the history: a word,
-// because the row it sits on is about a value rather than about actions.
+// quickHistoryButton 是从剪贴板行进入历史的入口。
 func (s *State) quickHistoryButton(c *ui.Context) ui.Element {
 	return s.design.WordButton(c, "历史")
 }
 
-// clipboardLatest is what the tool last saw, and whether it saw anything.
+// clipboardLatest 返回最近一次观测到的记录，以及是否有内容。
 func (s *State) clipboardLatest() (domain.ClipRecord, bool) {
 	if s.clipboard == nil {
 		return domain.ClipRecord{}, false
@@ -68,8 +52,7 @@ func (s *State) clipboardLatest() (domain.ClipRecord, bool) {
 	return s.clipboard.Latest()
 }
 
-// clipboardHistorySize is the record range the user chose: the history keeps
-// that many entries, so it is also all the page has to list.
+// clipboardHistorySize 返回用户选择的记录范围。
 func (s *State) clipboardHistorySize() int {
 	if s.clipboard == nil {
 		return clipboard.DefaultHistorySize
@@ -77,8 +60,7 @@ func (s *State) clipboardHistorySize() int {
 	return s.clipboard.Settings().KeepsHistory()
 }
 
-// clipboardHistory is the recorded copies, newest first, at most the record
-// range the user chose.
+// clipboardHistory 返回记录中的复制内容，新的在前，最多为用户选择的条数。
 func (s *State) clipboardHistory() []domain.ClipboardEntry {
 	if s.clipboard == nil {
 		return nil
@@ -86,8 +68,7 @@ func (s *State) clipboardHistory() []domain.ClipboardEntry {
 	return s.clipboard.History(s.clipboardHistorySize())
 }
 
-// clipboardHistoryError is why the stored history could not be read, if it
-// could not.
+// clipboardHistoryError 返回读取历史失败的原因（若有）。
 func (s *State) clipboardHistoryError() error {
 	if s.clipboard == nil {
 		return nil
@@ -95,25 +76,14 @@ func (s *State) clipboardHistoryError() error {
 	return s.clipboard.HistoryError()
 }
 
-// openHistory shows the history window, creating it the first time. It reads
-// the clipboard once as it opens: the user asked to see the clipboard, and
-// that is a read the monitoring switch was never about.
+// HistoryView 列出记录中的复制内容。它读取的是工具已持有的数据，
+// 绘制时不复制任何内容。
 //
-// Nothing here waits. The window is created and shown, and the reading it
-// asks for happens on its own goroutine: a clipboard read can wait on
-// whatever else is holding the clipboard, and that wait must not be spent
-// with the window drawn but empty. When the reading is done it asks for a
-// frame, so the list appears as soon as there is something to put in it.
-// historyView lists the recorded copies: the line that says what the list is
-// and what a click does, and the list itself.
-//
-// It reads what the tool already holds, and copies nothing while drawing.
+// 打开时会异步读一次剪贴板：剪贴板读取可能被他方占用而阻塞，不能
+// 在窗口显示后空等；读完再请求一帧刷新，避免窗口已绘制但仍是空的。
 func (s *State) HistoryView(c *ui.Context, design presentation.ClipboardDesign) {
 	s.design = design
 	s.design.WindowFrame(c).Children(func() {
-		// What the list is, and what a click does, on its own line above it:
-		// the list scrolls under this, so it stays where it is. The window's
-		// own title bar names the window, so this does not say it again.
 		ui.Row(c).FillWidth().Shrink(0).
 			Padding(s.design.PageEdge/2, s.design.PageEdge).
 			AlignItems(ui.Center).
@@ -152,9 +122,6 @@ func (s *State) HistoryView(c *ui.Context, design presentation.ClipboardDesign) 
 
 		list := ui.Scroll(c).FillWidth().Grow(1)
 		list.Children(func() {
-			// The rows keep the page's margin and the room between two of
-			// them, the same margin and the same line the sections of any
-			// other window use: a list is a list wherever it is drawn.
 			ui.Column(c).FillWidth().Children(func() {
 				for index, entry := range entries {
 					if index > 0 {
@@ -167,17 +134,8 @@ func (s *State) HistoryView(c *ui.Context, design presentation.ClipboardDesign) 
 	})
 }
 
-// historyRow is one recorded copy: the tile that says what it is, the copy
-// itself, how long ago it was taken, and — for a copy whose kind is worth a
-// word — the kind's own badge in the kind's own color.
-//
-// The whole row is the button: a list of ten copies is a list of ten things
-// to click, not a list with a small target at the end of each line.
-//
-// The row shows what it is doing: a face under the pointer, a deeper one
-// while the press is held, and the pressed face kept for a moment after the
-// copy, so that a click is answered on the row itself rather than only on
-// the clipboard.
+// historyRow 绘制一条记录：整行都是按钮（扩大点击区域）；按下时与
+// 复制后短暂保留按下态，让点击反馈落在行本身。
 func (s *State) historyRow(c *ui.Context, entry domain.ClipboardEntry) {
 	tile, ink, mark := s.historyKind(entry)
 	label := historyLabel(entry)
@@ -186,10 +144,7 @@ func (s *State) historyRow(c *ui.Context, entry domain.ClipboardEntry) {
 		AlignItems(ui.Center).
 		Gap(float32(12))
 	justCopied := entry.ID == s.copiedEntry
-	// The kind's own ink washed over the row. Ten percent reads as a tint on
-	// a white page; on a dark one it needs a little more to be seen at all,
-	// and this is the one state the row keeps after the click rather than one
-	// the pointer explains.
+	// 复制后行会保留淡色高亮：浅色页面上 10% 足够，深色页面需更浓才看得出。
 	wash := float32(0.10)
 	if s.design.Dark {
 		wash = 0.20
@@ -213,9 +168,7 @@ func (s *State) historyRow(c *ui.Context, entry domain.ClipboardEntry) {
 			MinWidth(0)
 		ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(6)).Children(func() {
 			if entry.Note != "" {
-				// What the reading noticed about itself: the copy is still
-				// usable, and the interface should not pretend it was
-				// complete. It is the copy's own words, drawn as stored.
+				// 这条记录的读取本身注意到的信息（如内容不完整），照存储原样展示。
 				s.design.Notice(c, true, entry.Note)
 			}
 			if label != "" {
@@ -232,8 +185,7 @@ func (s *State) historyRow(c *ui.Context, entry domain.ClipboardEntry) {
 	}
 }
 
-// inkText is the color a copy's own text is drawn in: a link is drawn in the
-// color of a link, and everything else in the list's body color.
+// inkText 返回记录文本的颜色：链接用链接色，其余用正文色。
 func (s *State) inkText(entry domain.ClipboardEntry) ui.Color {
 	if entry.Kind == domain.ClipKindURL {
 		return s.design.ColorBlueInk
@@ -241,9 +193,7 @@ func (s *State) inkText(entry domain.ClipboardEntry) ui.Color {
 	return s.design.ColorTextBody
 }
 
-// fontOf is the family a copy's own text is drawn in: a copy that is code or a
-// color value is read character by character, and a monospace face is what
-// makes that possible.
+// fontOf 返回记录文本的字体：代码用等宽字体以便逐字符辨认。
 func fontOf(entry domain.ClipboardEntry) string {
 	if entry.Kind == domain.ClipKindCode {
 		return "monospace"
@@ -251,9 +201,7 @@ func fontOf(entry domain.ClipboardEntry) string {
 	return ""
 }
 
-// historyKind is the tile and the ink a copy is drawn with — and, for a copy
-// that is an image, the same tile with the picture mark — so a list of ten
-// copies is read by shape and color before it is read word by word.
+// historyKind 返回记录所用的底色、墨色与图标（图片用图片图标）。
 func (s *State) historyKind(entry domain.ClipboardEntry) (tile, ink ui.Color, mark *ui.SVG) {
 	switch entry.Kind {
 	case domain.ClipKindImage:
@@ -271,13 +219,10 @@ func (s *State) historyKind(entry domain.ClipboardEntry) (tile, ink ui.Color, ma
 	}
 }
 
-// historyLabel is the one word a list shows beside a copy: what it is, and for
-// an image how much of it there is — an image is the kind whose copying
-// depends on what the platform handed over.
+// historyLabel 返回列表旁显示的一个词：类型；图片则还带大小。
 func historyLabel(entry domain.ClipboardEntry) string { return Label(entry) }
 
-// copiedClock is when a copy happened, as a list shows it: the time for
-// today, the date for anything older.
+// copiedClock 返回用于列表显示的时间：今天显示时刻，更早显示日期。
 func copiedClock(at time.Time) string {
 	if at.IsZero() {
 		return ""

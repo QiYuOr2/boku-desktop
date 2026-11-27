@@ -1,7 +1,5 @@
-// Clipboard helpers: everything about a copied value that can be decided
-// without a screen, a clipboard or a clock. The use case classifies and
-// shortens content with these; the interface only draws what they return.
-
+// 剪贴板纯函数：不依赖屏幕、剪贴板或时钟即可完成的判断。
+// 用例层用它们分类与截断内容，界面只负责绘制结果。
 package kit
 
 import (
@@ -16,42 +14,32 @@ import (
 )
 
 const (
-	// ClipDisplayLimit is how much of one copied value the quick window's
-	// clipboard line shows, in runes. A line is all there is room for; the
-	// whole value is one click away in the history.
+	// ClipDisplayLimit 是快捷窗口一行最多显示的字符数（按 rune 计）。
 	ClipDisplayLimit = 120
-	// ClipEllipsis marks a value that was shortened.
+	// ClipEllipsis 标记被截短的值。
 	ClipEllipsis = "…"
-	// ClipHashPrefix names the digest, the way §7 of the domain model writes
-	// a content hash.
+	// ClipHashPrefix 是内容哈希的前缀，与领域模型 §7 的写法一致。
 	ClipHashPrefix = "sha256:"
 )
 
-// ClipContentHash is the digest that identifies a copied value: two copies
-// with the same text are the same entry.
+// ClipContentHash 是标识一条复制内容的摘要：文本相同的两次复制视为同一条目。
 func ClipContentHash(text string) string {
 	sum := sha256.Sum256([]byte(text))
 	return ClipHashPrefix + hex.EncodeToString(sum[:])
 }
 
-// ClipImageRef is the digest that identifies a copied picture: the hash of the
-// bitmap's bytes, and the name it is kept under.
-//
-// The picture itself is not in the history file — a screenshot is megabytes and
-// the file is written whole on every copy — so what identifies it has to be
-// cheap to store and impossible to confuse with another picture. Two
-// screenshots of the same size are two pictures; only their bytes say so.
+// ClipImageRef 是标识一张复制图片的摘要：点位图字节的哈希，也用作存储名。
+// 图片本身不进历史文件（截图有数兆字节，且每次复制都会重写整份文件），
+// 故标识必须存储成本低、且不会与另一张图片混淆：同为相同尺寸的两张截图，
+// 只有字节能区分。
 func ClipImageRef(png []byte) string {
 	sum := sha256.Sum256(png)
 	return ClipHashPrefix + hex.EncodeToString(sum[:])
 }
 
-// ClipDisplay is the one line the interface shows for a copied value:
-// whitespace folded into single spaces, then shortened to ClipDisplayLimit
-// runes with an ellipsis.
-//
-// Folding first is what keeps a pasted file, a stack trace or a minified
-// document from drawing a line wider than the window.
+// ClipDisplay 返回界面为一条复制内容显示的单独一行：先把空白折叠为单个空格，
+// 再截到 ClipDisplayLimit 个 rune 并加省略号。
+// 先折叠是为了避免粘贴的文件、堆栈或压缩文档把一行撑得比窗口还宽。
 func ClipDisplay(text string) string {
 	folded := strings.Join(strings.Fields(text), " ")
 	if folded == "" {
@@ -64,10 +52,8 @@ func ClipDisplay(text string) string {
 	return string(runes[:ClipDisplayLimit]) + ClipEllipsis
 }
 
-// ClipFileDisplay is the line for a list of copied files: the name of the
-// first, and how many others came with it. The paths themselves are not
-// shown — one line cannot hold them, and a path is not what the user
-// recognizes.
+// ClipFileDisplay 返回一列复制文件的展示行：第一个文件名加其余文件数量。
+// 不显示完整路径——一行放不下，且路径不是用户辨认的依据。
 func ClipFileDisplay(paths []string) string {
 	names := make([]string, 0, len(paths))
 	for _, path := range paths {
@@ -87,15 +73,14 @@ func ClipFileDisplay(paths []string) string {
 	}
 }
 
-// ClipFileName is what a path is called, without the directories: the name
-// is what a person recognizes, and it is all one line has room for.
+// ClipFileName 返回路径中的文件名（不含目录）：文件名才是用户辨认的依据，
+// 也是一行放得下的部分。
 func ClipFileName(path string) string {
 	cleaned := strings.TrimSpace(path)
 	if cleaned == "" {
 		return ""
 	}
-	// Accept both separators: a path copied on Windows may be read on a
-	// machine that only knows the other one.
+	// 同时接受两种分隔符：在 Windows 复制的路径可能被只认识另一种的机器读取。
 	cleaned = strings.ReplaceAll(cleaned, `\`, "/")
 	cleaned = strings.TrimRight(cleaned, "/")
 	if cleaned == "" {
@@ -107,8 +92,7 @@ func ClipFileName(path string) string {
 	return strings.TrimSpace(cleaned)
 }
 
-// ClipImageName is the line for an image: its file name when the platform
-// knows one, and a plain label when it does not.
+// ClipImageName 返回图片的展示行：平台知道文件名时用文件名，否则用普通标签。
 func ClipImageName(name string) string {
 	cleaned := ClipFileName(name)
 	if cleaned == "" {
@@ -117,9 +101,8 @@ func ClipImageName(name string) string {
 	return cleaned
 }
 
-// ClipText is a copied text as the history keeps it: whole, unless it is
-// longer than MaxClipTextBytes, in which case the beginning is kept. The
-// cut lands on a rune boundary so that no entry holds half a character.
+// ClipText 返回历史中保存的复制文本：完整保留，除非长于 MaxClipTextBytes，
+// 此时只留开头。切割落在 rune 边界上，任何条目都不会存半个字符。
 func ClipText(text string) string {
 	if len(text) <= domain.MaxClipTextBytes {
 		return text
@@ -131,12 +114,9 @@ func ClipText(text string) string {
 	return text[:cut]
 }
 
-// ClassifyClip is the kind of a copied text: what the history says it is,
-// which is what lets a URL be recognized among a hundred copies.
-//
-// Code is looked for first, because a snippet is several lines and may well
-// open with a URL in a comment or a string; a one-line value never counts
-// as code. JSON is only claimed when the whole value parses.
+// ClassifyClip 返回一条复制文本的类型，历史据此在大量条目中认出 URL。
+// 先判断代码：代码片段常有多行，且可能以注释或字符串里的 URL 开头；
+// 单行值永远不算代码。JSON 只在整段可解析时才认定。
 func ClassifyClip(text string) domain.ClipKind {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
@@ -154,9 +134,8 @@ func ClassifyClip(text string) domain.ClipKind {
 	return domain.ClipKindText
 }
 
-// looksLikeURL accepts a single line that is one absolute http(s) address:
-// nothing before the scheme, nothing after the address that belongs to
-// another word, and a host to go to.
+// looksLikeURL 接受单独一行、且是一个完整 http(s) 地址的文本：
+// scheme 前无内容、地址后没有属于别的词的字符、且存在主机名。
 func looksLikeURL(text string) bool {
 	if strings.ContainsAny(text, " \t\n\r") {
 		return false
@@ -170,7 +149,7 @@ func looksLikeURL(text string) bool {
 		return false
 	}
 	if strings.ContainsAny(rest, "<>\"'") {
-		return false // markup around a URL is not a URL
+		return false // URL 周围的标记说明它不是纯 URL
 	}
 	host := rest
 	if index := strings.IndexAny(host, "/?#"); index >= 0 {
@@ -179,8 +158,7 @@ func looksLikeURL(text string) bool {
 	return host != ""
 }
 
-// looksLikeJSON accepts text that parses as a JSON document or value, and
-// that is not merely a number or a bare word — those are text.
+// looksLikeJSON 接受能解析为 JSON 文档或值的文本，但不包括纯数字或裸词——那些算文本。
 func looksLikeJSON(text string) bool {
 	first := text[0]
 	if first != '{' && first != '[' && first != '"' {
@@ -193,25 +171,20 @@ func looksLikeJSON(text string) bool {
 	return true
 }
 
-// codeMarkers are the signs of a source snippet. They are deliberately
-// crude: the kind is a label in a list, not a language detector, and a wrong
-// label costs nothing.
-//
-// Only markers that prose does not use are here: a sentence may well end on
-// a semicolon, and Chinese prose is punctuated with full-width ones, which
-// are different characters.
+// codeMarkers 是源码片段的特征标记。判断刻意粗糙：类型只是列表里的一个标签，
+// 不是语言检测器，标错也无妨。
+// 这里只放散文不会用的标记：句子可能以分号结尾，而中文散文用的是全角标点，
+// 那是不同的字符。
 var codeMarkers = []string{
 	"func ", "def ", "class ", "import ", "package ", "const ", "let ", "var ",
 	"return ", "if (", "if(", "for (", "for(", "while (", "while(", "pub fn ",
 	"#include", "<?php", "</", "/>", "=>", "::", "!=", "===", "&&", "||",
 	"{}", "];", "});", "):", " = ", " := ",
-	// Markup: a tag that closes on its own line, and the two attributes
-	// that show up in almost every pasted document.
+	// 标记：独占一行闭合的标签，以及几乎每个粘贴文档里都会出现的两个属性。
 	">\n<", "class=\"", "class='",
 }
 
-// looksLikeCode accepts a multi-line value that reads like source: several
-// lines, and several of the markers above in them.
+// looksLikeCode 接受看起来像源码的多行值：至少两行，且命中上面多个标记。
 func looksLikeCode(text string) bool {
 	if !strings.Contains(text, "\n") {
 		return false

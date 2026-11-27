@@ -9,8 +9,7 @@ import (
 	"github.com/egoist/mygo"
 )
 
-// GDI reads physical virtual-desktop pixels, so each display's origin and the
-// selection are scaled by that display's factor.
+// GDI 按物理虚拟桌面像素寻址，显示器原点和选区均须按其缩放因子换算。
 func TestNativeRegionRectScalesPhysicalPixels(t *testing.T) {
 	display := mygo.Display{Bounds: mygo.Rectangle{X: 1707, Y: -337, Width: 853, Height: 1369}, ScaleFactor: 1.5}
 	got := nativeRegionRect(display, image.Rect(20, 30, 120, 230))

@@ -8,10 +8,8 @@ import (
 	"unsafe"
 )
 
-// Windows keeps the proxy its own network dialog sets in the registry, in the
-// same key the dialog writes. It is read here through advapi32 directly: there
-// is no cgo in this build, and reading four values of one key does not need a
-// library.
+// Windows 把系统网络对话框设置的代理存在注册表的同一键下。此处经 advapi32 直接读取：
+// 本构建不能用 cgo，而读一个键的四个值也不需要额外库。
 const (
 	internetSettingsKey = `Software\Microsoft\Windows\CurrentVersion\Internet Settings`
 	hkeyCurrentUser     = 0x80000001
@@ -30,9 +28,7 @@ var (
 	errProxyUnreadable = errors.New("httpx: the system proxy setting could not be read")
 )
 
-// platformProxy reads the proxy Windows is configured with. A key or a value
-// that is not there is not an error worth failing a request over: the answer is
-// then simply that there is no proxy to use.
+// platformProxy 读取 Windows 配置的代理。键或值不存在不值得让请求失败：此时只是没有可用的代理。
 func platformProxy() (proxySettings, error) {
 	name, err := syscall.UTF16PtrFromString(internetSettingsKey)
 	if err != nil {
@@ -60,7 +56,7 @@ func platformProxy() (proxySettings, error) {
 	}, nil
 }
 
-// readDWORD reads one 32-bit value of a key.
+// readDWORD 读取键的一个 32 位值。
 func readDWORD(key syscall.Handle, name string) (uint32, error) {
 	value, err := syscall.UTF16PtrFromString(name)
 	if err != nil {
@@ -81,8 +77,7 @@ func readDWORD(key syscall.Handle, name string) (uint32, error) {
 	return data, nil
 }
 
-// readString reads one string value of a key. The buffer is sized from the
-// value itself, because a bypass list is as long as the user made it.
+// readString 读取键的一个字符串值。缓冲区大小取自值本身，因为绕过列表可能很长。
 func readString(key syscall.Handle, name string) (string, error) {
 	value, err := syscall.UTF16PtrFromString(name)
 	if err != nil {
@@ -102,8 +97,7 @@ func readString(key syscall.Handle, name string) (string, error) {
 	if size == 0 {
 		return "", nil
 	}
-	// size counts bytes, and the value ends with a NUL: one more unit than
-	// the value needs is room for both.
+	// size 以字节计，且值以 NUL 结尾：多留一个单位同时容纳两者。
 	buffer := make([]uint16, size/2+1)
 	if rc, _, _ := regQueryValueExW.Call(uintptr(key), uintptr(unsafe.Pointer(value)), 0,
 		uintptr(unsafe.Pointer(&kind)), uintptr(unsafe.Pointer(&buffer[0])), uintptr(unsafe.Pointer(&size))); rc != 0 {

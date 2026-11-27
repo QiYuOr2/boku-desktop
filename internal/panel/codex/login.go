@@ -1,11 +1,9 @@
-// This file reads the ChatGPT login the Codex CLI already made, and exchanges
-// its refresh token for a new access token when that login has expired.
+// 本文件读取 Codex CLI 已经建立的 ChatGPT 登录，并在该登录过期时用它的 refresh
+// token 换取新的 access token。
 //
-// It is the one place in the application that opens another tool's
-// credential file. Nothing is copied into Boku's own store, nothing is
-// written back to the CLI's file, and the token only ever leaves this process
-// for ChatGPT (§9 of the security design). It is a domain.CredentialSource, which
-// is how the panel feature is handed a credential Boku does not keep.
+// 它是应用里唯一打开另一个工具凭据文件的地方：不会复制进 Boku 自己的存储，也不会写回
+// CLI 的文件，token 只在发往 ChatGPT 时离开本进程（见安全设计 §9）。它实现
+// domain.CredentialSource，面板由此拿到一份 Boku 并不保存的凭据。
 package codex
 
 import (
@@ -26,43 +24,36 @@ import (
 )
 
 const (
-	// authFileName is the file the Codex CLI writes its login to.
+	// authFileName 是 Codex CLI 写入其登录的文件名。
 	authFileName = "auth.json"
-	// codexHomeEnv is the CLI's own override for where that file lives.
+	// codexHomeEnv 是 CLI 自己用来覆盖该文件位置的变量。
 	codexHomeEnv = "CODEX_HOME"
-	// staleLogin is how old the file's own "last refresh" may be before the
-	// login is refreshed even when its token still looks alive. It is the
-	// same eight days the CLI works to.
+	// staleLogin 是文件自身「上次刷新」可容许的最大时长；超过后即使 token 看似有效
+	// 也会刷新。它与 CLI 采用的八天一致。
 	staleLogin = 8 * 24 * time.Hour
-	// refreshSkew is how long before its expiry a token is replaced: an
-	// answer that arrives late must not be answered with a token that died
-	// on the way.
+	// refreshSkew 是提前多久替换 token：迟到的回答不能用一个已经死在路上的 token 去回。
 	refreshSkew = 5 * time.Minute
 )
 
-// LoginCommand is what the user would type themselves. It is here so that
-// the message the interface shows and the documentation say the same thing.
+// LoginCommand 是用户自己会敲的命令，放在这里使界面提示与文档说同一件事。
 const LoginCommand = "codex login"
 
-// LoginOptions configures a Login. The zero value is usable: the real home
-// directory, the real environment, and Codex's own token endpoint.
+// LoginOptions 配置 Login。零值可用：真实主目录、真实环境与 Codex 自己的 token 端点。
 type LoginOptions struct {
-	// Client makes the one request a refresh needs. The zero value is a
-	// client of the application's own defaults.
+	// Client 执行刷新所需的那一次请求。零值是采用应用默认值的 client。
 	Client *httpc.Client
-	// Home overrides the user's home directory: a test points it at a
-	// directory of its own, and nothing else reads it.
+	// Home 覆盖用户主目录：测试指向自己的目录，其它地方不读它。
 	Home string
-	// CodexHome overrides CODEX_HOME, which the CLI itself honours.
+	// CodexHome 覆盖 CODEX_HOME，CLI 自身会遵守它。
 	CodexHome string
-	// TokenEndpoint overrides where a refresh is sent.
+	// TokenEndpoint 覆盖刷新请求发往的地址。
 	TokenEndpoint string
-	// Now overrides the clock.
+	// Now 覆盖时钟。
 	Now func() time.Time
 }
 
-// Login is the credential source for the Codex panel. It is safe to use from
-// several goroutines: the panels ask it off the main thread.
+// Login 是 Codex 面板的凭据来源。可被多个 goroutine 同时使用：面板在主线程之外
+// 向它查询。
 type Login struct {
 	client        *httpc.Client
 	home          string
@@ -71,22 +62,19 @@ type Login struct {
 	now           func() time.Time
 
 	mu sync.Mutex
-	// remembered is a token this process exchanged for the one in the file.
-	// Without it every refresh cycle would exchange the same refresh token
-	// again, because the file it comes from is the CLI's and is never
-	// updated by Boku.
+	// remembered 是本进程为文件里那个 token 换取来的新 token。没有它，每一轮刷新都会
+	// 重复使用同一个 refresh token，因为来源文件属于 CLI，Boku 从不更新它。
 	remembered remembered
 }
 
 type remembered struct {
-	// from is the access token the file held when this one was exchanged
-	// for it: a user who logs in again has a different token, and that one
-	// wins.
+	// from 是换取该 token 时文件持有的 access token：用户重新登录后 token 会变，
+	// 那个新的应当优先。
 	from  string
 	token Token
 }
 
-// NewLogin returns the login source.
+// NewLogin 返回登录来源。
 func NewLogin(opts LoginOptions) *Login {
 	client := opts.Client
 	if client == nil {
@@ -119,13 +107,13 @@ func NewLogin(opts LoginOptions) *Login {
 	}
 }
 
-// ProviderID is the provider this source supplies.
+// ProviderID 是本来源提供的 provider。
 func (l *Login) ProviderID() string { return ProviderID }
 
-// authFile is the CLI's own login file, as it is on disk.
+// authFile 是 CLI 自己的登录文件在磁盘上的样子。
 type authFile struct {
-	// APIKey is the CLI's other login mode. It is read only to say which
-	// mode the user is in: an API key cannot read a ChatGPT plan's quota.
+	// APIKey 是 CLI 的另一种登录方式。读它只是为了说明用户处于哪种模式：API key
+	// 无法读取 ChatGPT 套餐配额。
 	APIKey *string `json:"OPENAI_API_KEY"`
 	Tokens struct {
 		AccessToken  string `json:"access_token"`
@@ -136,8 +124,7 @@ type authFile struct {
 	LastRefresh string `json:"last_refresh"`
 }
 
-// Credentials returns what the Codex provider needs: the token the CLI is
-// logged in with, and the account it belongs to.
+// Credentials 返回 Codex provider 所需的内容：CLI 登录所用的 token 及其所属账户。
 func (l *Login) Credentials(ctx context.Context) (domain.Credentials, error) {
 	file, _, err := l.read()
 	if err != nil {
@@ -160,9 +147,8 @@ func (l *Login) Credentials(ctx context.Context) (domain.Credentials, error) {
 	}, nil
 }
 
-// StartLogin starts the CLI's own login flow in a terminal window. The flow
-// is the CLI's, not Boku's: this only saves the user finding a terminal, and
-// the next reading picks the login up.
+// StartLogin 在终端窗口里启动 CLI 自己的登录流程。这个流程属于 CLI 而非 Boku：
+// 这里只是省去用户自己找终端，下一次读取就会拿到该登录。
 func (l *Login) StartLogin() error {
 	command, err := lookupLoginCommand("codex")
 	if err != nil {
@@ -171,22 +157,19 @@ func (l *Login) StartLogin() error {
 	return startLogin(command)
 }
 
-// lookupLoginCommand finds the CLI before the terminal is opened. Finding it
-// is platform work: a GUI-launched macOS app does not have the PATH a terminal
-// has, so it asks the user's login shell and the usual install locations as
-// well as looking on PATH. The lookup is a variable only so that a test can
-// stand in for the machine's own tools.
+// lookupLoginCommand 在打开终端前找到 CLI。查找是平台相关的：从 GUI 启动的 macOS
+// 应用没有终端的 PATH，因此除了 PATH 还会询问用户的登录 shell 与常见安装位置。它是
+// 变量只是为了测试能替身机器的真实工具。
 var lookupLoginCommand = findLoginCommand
 
-// ensure the ports are satisfied where they are defined, not at the call
-// site.
+// 在端口接口定义处满足它们，而不是在调用点。
 var (
 	_ domain.CredentialSource = (*Login)(nil)
 	_ domain.LoginStarter     = (*Login)(nil)
 )
 
-// paths returns where the CLI's login may be, in the order it is looked for:
-// the CLI's own override first, then the two places it uses by default.
+// paths 返回 CLI 登录可能所在的路径，按查找顺序：CLI 自己的覆盖优先，然后是它默认
+// 使用的两个位置。
 func (l *Login) paths() []string {
 	if l.codexHome != "" {
 		return []string{filepath.Join(l.codexHome, authFileName)}
@@ -200,9 +183,8 @@ func (l *Login) paths() []string {
 	}
 }
 
-// read returns the first login it finds, and where it was. A machine with no
-// Codex login at all is ErrCredentialMissing: it is the state before the user
-// logs in, not a failure of a service.
+// read 返回它找到的第一个登录及其位置。机器上完全没有 Codex 登录属于
+// ErrCredentialMissing：这是用户登录前的状态，不是服务故障。
 func (l *Login) read() (authFile, string, error) {
 	paths := l.paths()
 	if len(paths) == 0 {
@@ -226,20 +208,16 @@ func (l *Login) read() (authFile, string, error) {
 		domain.ErrCredentialMissing, strings.Join(paths, ", "), LoginCommand)
 }
 
-// token returns a token worth sending: the file's own while it is good, one
-// this process already exchanged for it, or a new one.
+// token 返回一个值得发送的 token：文件自身的（仍有效时）、本进程已换来的，或全新的。
 //
-// Nothing is written back to the file: it belongs to the CLI, and a Boku that
-// rewrote it could only make the CLI's own state wrong.
+// 绝不写回文件：它属于 CLI，Boku 若改写它只会让 CLI 自己的状态变错。
 func (l *Login) token(ctx context.Context, file authFile) (Token, error) {
 	access := strings.TrimSpace(file.Tokens.AccessToken)
 	refresh := strings.TrimSpace(file.Tokens.RefreshToken)
 	expiry := ExpiresAt(access)
-	// A timestamp the CLI wrote that cannot be read is treated as "not
-	// written": the token is sent as it is rather than refreshed on a
-	// schedule nobody can vouch for. It is still worth a line — a file that
-	// is not what this reader expects is the reason a stale token keeps being
-	// sent, and nothing else would say so.
+	// CLI 写入的时间戳若无法解析，按「未写入」处理：token 照原样发送，而不是按
+	// 无人担保的计划去刷新。仍值得记一行日志——文件不符预期正是旧 token 一直被发送
+	// 的原因，没有别处会说明这点。
 	lastRefresh, lastRefreshErr := time.Parse(time.RFC3339, strings.TrimSpace(file.LastRefresh))
 	if lastRefreshErr != nil && strings.TrimSpace(file.LastRefresh) != "" {
 		slog.Warn("the Codex login's last refresh time could not be read", "event", "codex_login_timestamp_unreadable", "error", lastRefreshErr)
@@ -259,8 +237,7 @@ func (l *Login) token(ctx context.Context, file authFile) (Token, error) {
 	case !expiry.IsZero():
 		needsRefresh = !now.Before(expiry.Add(-refreshSkew))
 	case !lastRefresh.IsZero():
-		// A token that does not say when it expires is replaced on the
-		// CLI's own rule: eight days after the login was last refreshed.
+		// 不声明过期时间的 token 按 CLI 自己的规则替换：距上次刷新超过八天。
 		needsRefresh = now.Sub(lastRefresh) > staleLogin
 	}
 	if !needsRefresh {
@@ -288,9 +265,8 @@ func (l *Login) token(ctx context.Context, file authFile) (Token, error) {
 	return fresh, nil
 }
 
-// loginRefused turns what the token endpoint said into the one thing the
-// user can act on: the login is no longer good, so log in again. A network
-// failure is not that, and is passed on as it is.
+// loginRefused 把 token 端点的话转成用户唯一能采取的行动：登录已失效，请重新登录。
+// 网络故障不属于此列，原样传出。
 func loginRefused(err error) error {
 	var bad *domain.BadResponseError
 	switch {

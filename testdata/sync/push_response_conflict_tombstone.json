@@ -1,0 +1,16 @@
+{
+  "results": [
+    {
+      "mutationId": "0198b000-0000-7000-8000-000000000004",
+      "status": "conflict",
+      "current": {
+        "cursor": "c-43",
+        "entityType": "diary_entry",
+        "entityId": "0198b000-0000-7000-8000-0000000000e3",
+        "version": 5,
+        "operation": "delete",
+        "payload": null
+      }
+    }
+  ]
+}

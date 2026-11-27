@@ -13,29 +13,17 @@ import (
 	"boku/internal/translate"
 )
 
-// A global shortcut is what starts a translation while another application
-// has the keyboard. It is registered through an interface rather than called
-// directly, for one reason: registering one needs a running application and
-// a graphical session, and the rules around it — a callback that returns at
-// once, a failure that is shown rather than swallowed, an unregistration on
-// the way out — are worth testing where neither exists.
 type ShortcutRegistrar interface {
-	// Register binds an accelerator, such as "Ctrl+Shift+T", to fn. It
-	// returns an error when the accelerator is malformed or another
-	// application already holds it.
+	// Register 把诸如 "Ctrl+Shift+T" 的快捷键绑定到 fn。快捷键格式错误或已被其他应用占用时返回错误。
 	Register(accelerator string, fn func()) error
-	// UnregisterAll releases every binding this application holds.
+	// UnregisterAll 释放本应用持有的所有绑定。
 	UnregisterAll()
 }
 
-// mygoShortcuts is the real thing: the framework's own global shortcut
-// module. Its callbacks run on the main thread, so nothing bound through it
-// may wait on anything.
+// mygoShortcuts 是真实实现：框架自带的全局快捷键模块。其回调在主线程运行，
+// 所以通过它绑定的任何东西都不能等待。
 type mygoShortcuts struct{}
 
-// MyGoShortcuts returns the registrar the assembled application uses. It is
-// named here rather than in main so that the framework's module is reached
-// from one place, and so that a test can stand in for it.
 func MyGoShortcuts() ShortcutRegistrar { return mygoShortcuts{} }
 
 func (mygoShortcuts) Register(accelerator string, fn func()) error {
@@ -44,47 +32,24 @@ func (mygoShortcuts) Register(accelerator string, fn func()) error {
 
 func (mygoShortcuts) UnregisterAll() { mygo.GlobalShortcut.UnregisterAll() }
 
-// RegisterShortcuts binds the translation shortcut. main.go calls it once the
-// application is ready: a global shortcut needs a running application.
+// 应用就绪后注册全局快捷键。
 func (s *State) RegisterShortcuts() { s.registerShortcuts() }
 
-// UnregisterShortcuts releases it. main.go calls it on the way out.
 func (s *State) UnregisterShortcuts() { s.unregisterShortcuts() }
 
-// shortcutBinding is the one global shortcut the tool has, as something that
-// can be registered: a combination to bind and what to run.
-//
-// There is exactly one binding in this build — 划词后弹出翻译. The design's
-// other keys (朗读原文、固定浮窗、关闭浮窗) are not implemented, so they are
-// not registered and the settings window does not offer to record them. It is
-// a struct rather than two variables so that "a binding nobody could take" is
-// a value that can be stored and shown.
 type shortcutBinding struct {
 	accelerator string
 	fn          func()
 }
 
-// shortcutState is what became of the translation shortcut. It is what the
-// settings window reads to say either the binding or why there is none:
-// §6 of the tool design requires a registration failure to be visible rather than
-// silent.
 type shortcutState struct {
-	// accelerator is the binding the platform holds, which is what the
-	// settings window's button shows.
 	accelerator string
-	// registered is whether the platform took it.
-	registered bool
-	// err is why it did not, in the platform's own words.
-	err error
-	// recording is whether the window is waiting for the next key
-	// combination. Nothing is registered or released until one is complete:
-	// a user who is halfway through pressing keys has not asked for
-	// anything yet.
+	registered  bool
+	err         error
+	// recording 表示窗口正在等待下一个组合键。未组成完整组合前不注册也不释放：
+	// 用户还没按完键就不算提出了任何请求。
 	recording bool
-	// note is why the last change could not be made, or what the recorder
-	// still needs. An accepted change says nothing: the button already shows
-	// the new binding.
-	note string
+	note      string
 }
 
 type shortcutKind uint8
@@ -94,14 +59,7 @@ const (
 	shortcutScreenshot
 )
 
-// registerShortcuts binds the translation shortcut and remembers what
-// happened. It runs once, from WhenReady: a shortcut needs the running
-// application, and a tray application that cannot bind one still starts.
-//
-// A tool that is switched off gets no binding at all. The switch is what the
-// user turned off, and a combination that is still held by this process is a
-// combination every other application is still denied: "off" has to mean the
-// key is free again, not merely that pressing it draws an apology.
+// 关闭工具必须释放全局快捷键，避免继续占用其它应用可用的组合。
 func (s *State) registerShortcuts() {
 	accelerator := s.translateSettingsOr().AcceleratorOr()
 	s.shortcut = shortcutState{accelerator: accelerator}
@@ -109,8 +67,6 @@ func (s *State) registerShortcuts() {
 	s.bindShortcutForSwitch()
 }
 
-// bindShortcutForSwitch takes or releases the translation binding, following
-// the tool's switch. It is what the launch and the switch itself both call.
 func (s *State) bindShortcutForSwitch() {
 	if !s.translateSettingsOr().Enabled {
 		s.unregisterShortcuts()
@@ -133,18 +89,11 @@ func (s *State) bindShortcutForSwitch() {
 	s.shortcut.err = nil
 }
 
-// bindShortcut takes a binding, releasing what is held first.
-//
-// The framework has no call that releases one shortcut: it has one that
-// releases them all. Re-binding therefore goes back to nothing and forwards
-// again, and because that leaves a moment with no shortcut, a combination the
-// platform refuses is answered by putting the previous one back.
+// MyGo 只能一次释放全部绑定；新组合注册失败时须恢复旧组合。
 func (s *State) bindShortcut(binding shortcutBinding) error {
 	return s.bindShortcutSet(binding.accelerator, s.translateSettingsOr().ScreenshotAcceleratorOr())
 }
 
-// bindShortcutSet registers the two independent shortcuts as one operation:
-// MyGo can release all bindings but not a single binding.
 func (s *State) bindShortcutSet(text, screenshot string) error {
 	if s.shortcuts == nil {
 		return fmt.Errorf("没有可用的全局快捷键实现")
@@ -171,8 +120,7 @@ func (s *State) bindShortcutSet(text, screenshot string) error {
 	return nil
 }
 
-// SetExtraRebind is how the shell puts another global shortcut back in the
-// same pass that rebinds translation. nil leaves translation on its own.
+// SetExtraRebind 让外壳在重绑翻译的同一趟里放回另一个全局快捷键。nil 表示不额外处理。
 func (s *State) SetExtraRebind(rebind func(register func(string, func()) error, text, screenshot string)) {
 	s.extraRebind = rebind
 }
@@ -184,21 +132,17 @@ func (s *State) finishExtras(text, screenshot string) {
 	s.extraRebind(s.shortcuts.Register, text, screenshot)
 }
 
-// unregisterShortcuts releases the binding. The application calls it on the
-// way out: a shortcut left bound belongs to a process that no longer exists,
-// and the next launch would find it taken by itself.
+// unregisterShortcuts 释放绑定。应用在退出时调用：遗留的绑定属于一个已不存在的进程，
+// 下次启动会发现自己想用的键被自己占着。
 func (s *State) unregisterShortcuts() {
 	if s.shortcuts != nil {
 		s.shortcuts.UnregisterAll()
 	}
 }
 
-// onTranslateShortcut is what the key press runs.
-//
-// It runs on the main thread, with the whole application waiting on it, so
-// it does nothing but look at where the pointer is and hand the work to a
-// goroutine: a translation is a network request, and a request must never be
-// waited out on the thread that draws.
+// onTranslateShortcut 是按键触发时执行的逻辑。它运行在主线程、整个应用都在等它，
+// 所以只做一件事：看点在哪，然后把活交给 goroutine——翻译是网络请求，
+// 决不能在绘制线程上等它完成。
 func (s *State) onTranslateShortcut() {
 	slog.Info("translation shortcut invoked", "event", "text_translation_shortcut_invoked")
 	s.startTranslation(s.cursorPoint())
@@ -209,14 +153,9 @@ func (s *State) onScreenshotShortcut() {
 	s.startScreenshotTranslation()
 }
 
-// clearScreenshotShortcut persists the explicit disabled state and releases
-// both bindings before restoring the text shortcut alone.
-//
-// A write that fails is logged rather than swallowed: the window has already
-// said the shortcut is cleared, and a setting that did not reach the file
-// comes back at the next launch with nobody told why. The binding itself is
-// released either way — this run is what the user asked about, and the
-// remembered value is only about the next one.
+// clearScreenshotShortcut 持久化显式的禁用状态，并先释放两个绑定、再只恢复文字快捷键。
+// 写入失败要记日志而非吞掉：窗口已说快捷键已清除，没写进文件的设置会在下次启动时复活，
+// 却没人知道原因。绑定本身无论如何都释放——用户关心的是这一次运行，记住的值只关乎下一次。
 func (s *State) clearScreenshotShortcut() {
 	slog.Info("screenshot shortcut cleared", "event", "screenshot_shortcut_cleared")
 	if s.translate != nil {
@@ -231,7 +170,6 @@ func (s *State) clearScreenshotShortcut() {
 	s.Refresh()
 }
 
-// beginShortcutCapture starts recording the next key combination.
 func (s *State) beginShortcutCapture(kinds ...shortcutKind) {
 	kind := shortcutText
 	if len(kinds) > 0 {
@@ -245,7 +183,6 @@ func (s *State) beginShortcutCapture(kinds ...shortcutKind) {
 	s.Refresh()
 }
 
-// cancelShortcutCapture stops recording without changing anything.
 func (s *State) cancelShortcutCapture() {
 	s.shortcut.recording = false
 	s.screenshotShortcut.recording = false
@@ -253,16 +190,10 @@ func (s *State) cancelShortcutCapture() {
 	s.Refresh()
 }
 
-// captureShortcut is what the recording button is given: every key that
-// arrives while it has the keyboard.
-//
-// It waits for a complete combination — a key that types something, or a
-// function key, with at least one of Ctrl, Alt or Super — and binds it. A
-// modifier pressed on its own is not a combination, and a key with no
-// modifier at all would take that key from every application on the machine:
-// both are refused with a word rather than registered. The event is taken
-// either way, so that what the user presses while recording does not also act
-// on the window behind the button.
+// captureShortcut 是录制按钮接收的输入：持有键盘期间到达的每个按键。
+// 它等待一个完整组合（一个有实际字符的按键或功能键，且带至少一个 Ctrl、Alt 或 Super）再绑定。
+// 单独按下的修饰键不是组合；完全没有修饰键的按键会从机器上每个应用手里夺走那个键：
+// 两者都给出说明而不是注册。无论接受与否都要吃掉事件，以免录制时按的键又作用到按钮后面的窗口。
 func (s *State) captureShortcut(ev ui.InputEvent) bool {
 	kind := shortcutText
 	if s.screenshotShortcut.recording {
@@ -332,12 +263,8 @@ func (s *State) applyScreenshotShortcut(accelerator string) {
 	s.Refresh()
 }
 
-// applyShortcut binds a combination and says what happened.
-//
-// A combination another application holds is the case this is written for:
-// the binding that was there is put back, and the window says which one is
-// still in use. A user who tries a combination has not asked to lose the
-// shortcut they had.
+// applyShortcut 绑定组合并交代结果。重点处理被其他应用占用的组合：放回原有绑定，
+// 窗口说明哪个仍在使用。用户尝试一个组合，不等于想丢掉原来的快捷键。
 func (s *State) applyShortcut(accelerator string) {
 	previous := s.shortcut.accelerator
 	if previous == "" {
@@ -362,10 +289,8 @@ func (s *State) applyShortcut(accelerator string) {
 	}
 	slog.Info("translation shortcut changed", "event", "text_translation_shortcut_changed", "accelerator", accelerator)
 	if s.translate != nil {
-		// The binding is remembered, so that the next launch registers the
-		// same one. Failing to write it does not take the working binding
-		// away: what is bound is bound — but the next launch will come back
-		// with the old one, which is worth saying.
+		// 绑定要被记住，供下次启动注册同一个。写失败不会拿走当前可用的绑定——
+		// 已绑的就是已绑的——但下次启动会回到旧的，这点值得说出来。
 		if err := s.translate.SetAccelerator(backgroundContext(), accelerator); err != nil {
 			slog.Warn("the shortcut could not be remembered for the next launch",
 				"accelerator", accelerator, "error", err)
@@ -374,13 +299,10 @@ func (s *State) applyShortcut(accelerator string) {
 	s.Refresh()
 }
 
-// resetShortcut puts the default combination back.
 func (s *State) resetShortcut() {
 	s.applyShortcut(translate.DefaultAccelerator)
 }
 
-// shortcutLine is what the settings window writes beside the shortcut: the
-// binding, or why there is none.
 func (s *State) shortcutLine() (string, presentation.NoteKind) {
 	accelerator := s.shortcut.accelerator
 	if accelerator == "" {
@@ -399,7 +321,6 @@ func (s *State) shortcutLine() (string, presentation.NoteKind) {
 	}
 }
 
-// shortcutNote is the last thing a change said, or nothing.
 func (s *State) shortcutNote() (string, presentation.NoteKind) {
 	if strings.TrimSpace(s.shortcut.note) == "" {
 		return "", presentation.NotePlain
@@ -407,10 +328,8 @@ func (s *State) shortcutNote() (string, presentation.NoteKind) {
 	return s.shortcut.note, presentation.NoteWarning
 }
 
-// selectionPlatformNote is what the settings window says about reading the
-// selection on this platform. macOS needs a permission for it, and a user who
-// is not told will see the tool fall back to the clipboard without knowing
-// why.
+// selectionPlatformNote 是设置窗口关于本平台取词的说明。macOS 取词需要权限，
+// 不告知用户，就会看到工具静默改为读取剪贴板而不知原因。
 func selectionPlatformNote() string {
 	if runtime.GOOS == "darwin" {
 		return "macOS 取词需要在「系统设置 > 隐私与安全性 > 辅助功能」中允许 Boku；点下方按钮可让系统列出 Boku 并弹出授权窗口。未授权时会改为读取剪贴板。"

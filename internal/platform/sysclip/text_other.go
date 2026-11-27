@@ -4,6 +4,6 @@ package sysclip
 
 import "github.com/egoist/mygo"
 
-// readClipboardText is the text flavour of the platforms that have no
-// special case: the legacy helper is what this build has always used.
+// readClipboardText 是无需特殊处理的平台上的文本实现：旧版 helper 一直是这些
+// 构建所用的。
 func readClipboardText() string { return mygo.Clipboard.ReadText() }

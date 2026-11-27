@@ -12,12 +12,9 @@ import (
 	"unsafe"
 )
 
-// The selector is a native Win32 popup instead of a MyGo window. MyGo's
-// display bounds are DIPs whose origin is scaled per monitor; a virtual
-// desktop containing mixed-DPI displays has no one DIP coordinate space.
-// Win32 mouse coordinates, window regions, and GDI capture rectangles are all
-// physical virtual-desktop pixels, which is the coordinate system a screenshot
-// selector needs.
+// 选择器用原生 Win32 弹窗而非 MyGo 窗口。MyGo 的显示边界是以各显示器缩放的 DIP，
+// 含混合 DPI 显示器的虚拟桌面没有统一的 DIP 坐标系；而 Win32 鼠标坐标、窗口区域与
+// GDI 截取矩形都是物理虚拟桌面像素，正是截图选择器需要的坐标系。
 const (
 	wmDestroy      = 0x0002
 	wmClose        = 0x0010
@@ -97,8 +94,8 @@ type selectorMessage struct {
 	Private uint32
 }
 
-// selectorPaint is PAINTSTRUCT. Its explicit layout matters here because a
-// native overlay has no framework renderer to paint its background for us.
+// selectorPaint 即 PAINTSTRUCT。必须显式定义其内存布局：原生浮层没有框架渲染器
+// 替我们绘制背景。
 type selectorPaint struct {
 	DC        uintptr
 	Erase     int32
@@ -136,9 +133,8 @@ type selectorSession struct {
 	err    error
 }
 
-// Select provides the Snipaste-style interaction: one dimmed virtual desktop,
-// a live rectangular hole during the drag, and a GDI capture only after the
-// window is hidden. It never reads or writes the clipboard.
+// Select 提供 Snipaste 式交互：整块变暗的虚拟桌面、拖动时的实时矩形镂空，
+// 且只在窗口隐藏后才做 GDI 截取。全程不读写剪贴板。
 func (d *Device) Select(ctx context.Context) ([]byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -236,9 +232,8 @@ func ensureSelectorClass() error {
 	return selectorClassErr
 }
 
-// selectorArrowCursor keeps selection mode recognisable. A class without an
-// explicit cursor inherits whatever the foreground application last chose,
-// which can be the system waiting cursor while screenshot translation starts.
+// selectorArrowCursor 让选择模式保持可识别：未指定光标的光标类会继承前台应用
+// 最后选定的光标，截图翻译启动时可能正是系统等待光标。
 func selectorArrowCursor() uintptr {
 	cursor, _, _ := loadCursor.Call(0, idcArrow)
 	return cursor
@@ -265,9 +260,8 @@ func selectorWindowProc(hwnd uintptr, message uint32, wparam, lparam uintptr) ui
 		var paint selectorPaint
 		dc, _, _ := beginPaint.Call(hwnd, uintptr(unsafe.Pointer(&paint)))
 		if dc != 0 {
-			// A layered popup has no automatic background. Fill the visible
-			// window region black; SetLayeredWindowAttributes supplies the
-			// 62%% opacity and SetWindowRgn excludes the live selection hole.
+			// 分层弹窗没有自动背景：把可见窗口区域填黑，由 SetLayeredWindowAttributes
+			// 提供 62% 不透明度，SetWindowRgn 排除实时选择镂空。
 			fillRect.Call(dc, uintptr(unsafe.Pointer(&paint.Rect)), stockBlackBrush())
 			endPaint.Call(hwnd, uintptr(unsafe.Pointer(&paint)))
 		}
@@ -340,7 +334,7 @@ func setSelectorRegion(session *selectorSession, chosen image.Rectangle) {
 			deleteObjectR.Call(hole)
 		}
 	}
-	// SetWindowRgn takes ownership of region on success.
+	// SetWindowRgn 成功后会接管 region 的所有权。
 	if ok, _, _ := setWindowRgn.Call(session.hwnd, region, 1); ok == 0 {
 		deleteObjectR.Call(region)
 	}

@@ -7,19 +7,18 @@ import (
 	"strings"
 )
 
-// installed is one game directory the Steam libraries named.
+// installed 是 Steam 库中命名的一个游戏目录。
 type installed struct {
 	appID  string
 	name   string
 	prefix string
 }
 
-// Library matches an executable path to the Steam game installed there.
+// Library 把可执行文件路径匹配到安装在此的 Steam 游戏。
 type Library struct{ games []installed }
 
-// LoadLibrary reads Steam's library folders and the manifest of each
-// installed game. root is the Steam installation, the directory that
-// contains steamapps.
+// LoadLibrary 读取 Steam 的库文件夹以及每个已安装游戏的 manifest。
+// root 是 Steam 安装目录，即包含 steamapps 的目录。
 func LoadLibrary(root string) (Library, error) {
 	root = filepath.Clean(root)
 	folders := []string{root}
@@ -49,9 +48,8 @@ func LoadLibrary(root string) (Library, error) {
 	return Library{games: games}, nil
 }
 
-// Identify returns the game whose install directory contains exe.
-// The longest directory wins, so one install cannot claim a game that
-// lives inside another.
+// Identify 返回安装目录包含 exe 的游戏。最长目录优先，
+// 这样外层安装不会认领内层安装的游戏。
 func (l Library) Identify(exe string) (appID, name string, ok bool) {
 	exe = normalizePath(exe)
 	var best installed

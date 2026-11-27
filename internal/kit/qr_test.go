@@ -7,10 +7,8 @@ import (
 	"testing"
 )
 
-// The fixtures were made once with a QR encoder and are kept as pixels:
-// generating them at test time would make the package depend on an encoder,
-// and the point of the test is what this decoder reads from an image, not
-// what another library can write.
+// fixtures 是用二维码编码器一次性生成的像素图并保留下来：测试时重新生成会让包依赖
+// 编码器，而本测试关心的是解码器从图片里读出了什么，不是另一个库能写出什么。
 const fixtureText = "https://example.com/hello?name=测试&x=1"
 
 func fixture(t *testing.T, name string) []byte {

@@ -61,8 +61,7 @@ func releases(subjectID int64, subjectName, coverURL string, payload []byte, sta
 			}
 			return nil, bad("episode airdate is invalid", payload)
 		}
-		// The provider only gives a calendar date. Treat it as a Shanghai
-		// calendar day; do not invent an unavailable release clock time.
+		// 厂商只给出日历日期，按上海日历日处理；不要臆造并不存在的播出时刻。
 		if date.Before(start) || !date.Before(end) {
 			continue
 		}
@@ -70,8 +69,7 @@ func releases(subjectID int64, subjectName, coverURL string, payload []byte, sta
 		if name == "" {
 			name = strings.TrimSpace(ep.Name)
 		}
-		// An announced episode may not have a title yet. Keep its schedule;
-		// presentation can identify it by its episode number alone.
+		// 已预告的剧集可能还没有标题：保留其档期，展示端可仅靠集数识别。
 		items = append(items, domain.EpisodeRelease{SubjectID: subjectID, SubjectName: subjectName, CoverURL: coverURL, EpisodeID: ep.ID, EpisodeName: name, EpisodeSort: ep.Sort, AirDate: date.UTC()})
 	}
 	sort.Slice(items, func(i, j int) bool {

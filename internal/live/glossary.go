@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	// GlossaryFileName is the terminology file in the user-data directory.
+	// GlossaryFileName 是用户数据目录下的术语文件名。
 	GlossaryFileName = "live_glossary.json"
 
 	glossaryVersion = 1
@@ -22,15 +22,14 @@ const (
 	promptTermLimit = 32
 )
 
-// Entry is one Japanese to Chinese pair.
 type Entry struct {
 	ID     string `json:"id"`
 	Source string `json:"source"`
 	Target string `json:"target"`
 }
 
-// Glossary is the terminology file. A file that cannot be parsed is kept as
-// an empty table in memory and is not overwritten.
+// Glossary 是术语文件。解析失败的文件在内存中当作空表，
+// 并且不会被覆盖写回。
 type Glossary struct {
 	path    string
 	entries []Entry
@@ -153,9 +152,8 @@ func (g *Glossary) Delete(id string) error {
 	return nil
 }
 
-// Import reads lines of `日语 => 中文`. Blank lines and comments are ignored.
-// A bad line or a source that already exists is skipped and counted. Existing
-// entries stay.
+// Import 读取形如 `日语 => 中文` 的行，空行与以 # 开头的注释忽略。
+// 格式错误的行或已存在的源文会被跳过并计数，已有条目保持不变。
 func (g *Glossary) Import(text string) (int, error) {
 	if g.broken {
 		return 0, errors.New("术语文件读不了，没有改它")
@@ -239,9 +237,8 @@ type matchSpan struct {
 	length int
 }
 
-// Match returns the entries whose source is a substring of sentence.
-// Overlapping spans keep the longer source. Equal lengths keep the earlier
-// file entry. The result follows file order and stops at 32.
+// Match 返回源文是 sentence 子串的条目。重叠时保留更长的源文；
+// 长度相同时保留文件中靠前的条目。结果按文件顺序排列，最多 32 条。
 func Match(sentence string, entries []Entry) []Entry {
 	sentence = strings.TrimSpace(sentence)
 	var spans []matchSpan

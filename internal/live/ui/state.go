@@ -10,7 +10,7 @@ import (
 	"boku/internal/presentation"
 )
 
-// Config is what the shell hands the float window and the settings section.
+// Config 是 shell 交给浮动窗口与设置区的内容。
 type Config struct {
 	Service      *live.Service
 	Host         presentation.Host
@@ -18,14 +18,13 @@ type Config struct {
 	OpenSettings func()
 	Mark         *ui.SVG
 	CloseMark    *ui.SVG
-	// Tray is read when the caption opens. The shell creates the icon
-	// after this state, and Windows needs it to composite the bar.
+	// Tray 在字幕打开时才读取：shell 在这个 state 之后才创建图标，
+	// Windows 合成窗口栏时需要它。
 	Tray func() *mygo.Tray
 }
 
-// State is the float window and the settings section. The window is not the
-// translation card: it stays up when it loses focus, and it does not edit
-// the glossary.
+// State 持有浮动窗口与设置区。窗口不是翻译卡片：失焦后仍保持显示，
+// 也不编辑术语。
 type State struct {
 	live         *live.Service
 	host         presentation.Host
@@ -36,7 +35,7 @@ type State struct {
 	tray         func() *mygo.Tray
 
 	window *mygo.Window
-	// clipped is the last Windows region height in DIPs, or -1 before paint.
+	// clipped 是最近一次 Windows 区域高度（DIP），绘制前为 -1。
 	clipped int
 
 	modelDetailsOpen bool
@@ -75,7 +74,7 @@ func (s *State) useDesign(c *ui.Context) {
 	c.SetTheme(presentation.Theme(s.dark()))
 }
 
-// Repaint redraws the float window, if it exists.
+// Repaint 在窗口存在时重绘浮动窗口。
 func (s *State) Repaint(after func()) bool {
 	if s == nil || s.window == nil {
 		return false

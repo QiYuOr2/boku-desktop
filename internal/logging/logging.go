@@ -1,14 +1,10 @@
-// Package logging writes the application's log to a file per day under the
-// user data directory and keeps the last RetentionDays of them.
+// Package logging 把应用日志按天写到用户数据目录下的文件，并保留最近 RetentionDays 份。
 //
-// It exists because Boku is a tray icon with no console: an error the user
-// cannot see is an error nobody can act on, and the known-issues notes ask for
-// facts before a guess. The log is that record.
+// Boku 是常驻托盘的图标应用，没有控制台：用户看不到的错误就等于无人能处理的错误，
+// 已知问题排查需要事实依据而非猜测。日志就是这个记录。
 //
-// Only main.go uses this package, and it uses it once. Everything else logs
-// through the standard library's log/slog, which Install points here: the log
-// is one process-wide facility, so no layer has to take a logger as an
-// argument to get one — and no layer gains a dependency it did not have.
+// 只有 main.go 使用本包，且只用一次。其它部分都通过标准库 log/slog 打日志，由 Install
+// 指向这里：日志是进程级设施，各层无需把 logger 当参数传递，也不会因此多出依赖。
 package logging
 
 import (
@@ -25,60 +21,45 @@ import (
 )
 
 const (
-	// RetentionDays is how many days of logs are kept: today, and the 29
-	// days before it. It is the number the user asked for — "keep about a
-	// month" — and not a size: a day of this application's records is a few
-	// kilobytes, while a size ceiling would silently drop the oldest hours
-	// of the day a problem started in.
+	// RetentionDays 是保留的天数：今天加之前 29 天。选择按天数而非按体积上限，
+	// 因为本应用一天的记录只有几 KB，而体积上限会在问题发生当天悄悄丢掉最早的时段。
 	RetentionDays = 30
 
-	// filePrefix and fileSuffix make a file this package's own: the name
-	// says which day it holds, and scanning the directory tells the
-	// retention which files to consider at all.
+	// filePrefix 与 fileSuffix 使文件归本包所有：名字标明其日期，扫描目录即可
+	// 判断保留策略要处理哪些文件。
 	filePrefix = "boku-"
 	fileSuffix = ".log"
-	// dateLayout is the day in a file name. It is the local date, because
-	// the person reading the file is sitting in that time zone.
+	// dateLayout 是文件名中的日期格式。用本地日期，因为阅读者正处于该时区。
 	dateLayout = "2006-01-02"
 
 	fileMode = 0o600
 	dirMode  = 0o700
 
-	// LevelEnv names the variable that decides how much is written. It is
-	// how a user or a developer turns on the details for one run without a
-	// rebuild and without a settings page.
+	// LevelEnv 指定日志级别，用户或开发者无需重新构建、也无需设置页即可为某次运行打开详细日志。
 	LevelEnv = "BOKU_LOG_LEVEL"
-	// DirEnv names the variable that moves the logs elsewhere than the user
-	// data directory, which is what a support run wants: the file is then
-	// somewhere that can be handed over whole.
+	// DirEnv 把日志移到用户数据目录之外，便于支持排查时整体交出文件。
 	DirEnv = "BOKU_LOG_DIR"
 )
 
-// Options configures a Log. The zero value is usable: stderr alone, Info and
-// above, no file.
+// Options 配置 Log。零值可用：仅输出到 stderr、Info 及以上、无文件。
 type Options struct {
-	// Dir is where the daily files are written. An empty Dir means there is
-	// nowhere to write one — a test, or an assembly without a user
-	// directory — and the log is then the Sink alone.
+	// Dir 是每日文件的写入目录。为空表示无处可写（测试或无用户目录的装配），此时日志只有 Sink。
 	Dir string
-	// Level is the lowest level that is written.
+	// Level 是写入的最低级别。
 	Level slog.Level
-	// Retention is how many days are kept. Zero means RetentionDays.
+	// Retention 是保留天数。零表示 RetentionDays。
 	Retention int
-	// Sink also receives every record, next to the file. It is what keeps
-	// `go tool mygo dev`'s terminal as informative as it was before there
-	// was a file. Nil is the process's stderr; io.Discard turns the copy off.
+	// Sink 在文件之外同时接收每条记录，使 dev 终端输出与有文件之前一样详尽。
+	// 为 nil 时用进程 stderr；io.Discard 关闭这份副本。
 	Sink io.Writer
-	// Now is the clock, so that a test can decide what day it is.
+	// Now 是时钟，便于测试决定当天日期。
 	Now func() time.Time
 }
 
-// Log is the application's log: a file per day, pruned to the retention
-// window, plus a copy to the sink.
+// Log 是应用日志：每日一个文件、剪枝到保留窗口，并复制一份到 sink。
 //
-// It is an io.Writer so that slog's own handlers can write to it, and it is
-// safe for use from several goroutines: every record goes through one lock,
-// which also keeps a rotation from happening in the middle of a line.
+// 它实现 io.Writer，供 slog 处理器写入；可被多个 goroutine 并发使用：每条记录经同一把锁，
+// 也保证轮转不会发生在一行中间。
 type Log struct {
 	dir       string
 	level     slog.Level
@@ -93,13 +74,10 @@ type Log struct {
 	closed bool
 }
 
-// Open prepares the log: it creates the directory, opens the day's file and
-// deletes the files that have fallen out of the window.
+// Open 准备日志：创建目录、打开当天文件、删除已出窗口的文件。
 //
-// It reports an error only when there is a directory to write to and that
-// directory cannot be used. A caller that gets one should say so and carry on
-// without a file: not being able to write a log is one way fewer to diagnose
-// the application, not a reason for it not to start.
+// 只有当有可写目录且该目录无法使用时才返回错误。调用方应报告错误并继续以无文件方式运行：
+// 写不了日志只是少一种诊断手段，不是阻止应用启动的理由。
 func Open(opts Options) (*Log, error) {
 	l := &Log{
 		dir:       strings.TrimSpace(opts.Dir),
@@ -131,29 +109,24 @@ func Open(opts Options) (*Log, error) {
 	return l, nil
 }
 
-// Handler is the handler this log writes through: records below the level are
-// dropped, and everything that is written is scrubbed first (redact.go).
+// Handler 是本日志写入所用的处理器：低于级别的记录被丢弃，写出的内容先经脱敏（见 redact.go）。
 func (l *Log) Handler() slog.Handler {
 	return &redacting{next: slog.NewTextHandler(l, &slog.HandlerOptions{
 		Level: l.level,
-		// The source is the one attribute that turns "something failed" into
-		// a place to look. A record that came through the standard library
-		// logger points at the shim, not at its caller.
+		// 来源信息是把「出错了」变成「去这里查」的唯一属性。经标准库日志器产生的记录
+		// 指向 shim，而非其调用方。
 		AddSource: true,
 	})}
 }
 
-// Logger is a logger that writes here.
+// Logger 返回一个写入本日志的日志器。
 func (l *Log) Logger() *slog.Logger { return slog.New(l.Handler()) }
 
-// Install makes this log the process's own: slog's default logger and the
-// standard library's log both write here. main.go calls it once, right after
-// Open, which is what puts `log.Fatalf` and the tray's debug line in the file
-// with everything else.
+// Install 使本日志成为进程自身的日志：slog 默认日志器与标准库 log 都写入这里。
+// main.go 在 Open 之后调用一次，使 log.Fatalf 与托盘的调试输出也和其它内容一起进入文件。
 func (l *Log) Install() {
 	slog.SetDefault(l.Logger())
-	// The standard logger's own timestamp and prefix would be a second one
-	// on a record that already has both.
+	// 标准库日志器自带的时间戳与前缀会与记录已有的重复。
 	shim := slog.NewLogLogger(l.Handler(), slog.LevelInfo)
 	shim.SetFlags(0)
 	shim.SetPrefix("")
@@ -162,16 +135,14 @@ func (l *Log) Install() {
 	log.SetPrefix("")
 }
 
-// File is the path of the day's file, or "" when there is nowhere to write
-// one. It is what tells the user which file to look at.
+// File 返回当天文件的路径，无处可写时为空。用户据此知道该看哪个文件。
 func (l *Log) File() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.path
 }
 
-// Close flushes and closes the day's file. Records after it are dropped
-// rather than written to a closed file, and closing twice is not an error.
+// Close 刷新并关闭当天文件。之后的记录被丢弃而非写入已关闭的文件，重复关闭不报错。
 func (l *Log) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -181,17 +152,13 @@ func (l *Log) Close() error {
 	}
 	file := l.file
 	l.file = nil
-	// Flushing before closing is what makes the last lines of a run — the
-	// ones a crash is about — survive the process.
+	// 先刷新再关闭，才能让崩溃前最后几行——正是排查关心的那几行——存活下来。
 	return errors.Join(file.Sync(), file.Close())
 }
 
-// Write takes one record from a slog handler. It rotates the file when the
-// day has changed, and copies the record to the sink.
+// Write 接收 slog 处理器的一条记录：日期变化时轮转文件，并把记录复制到 sink。
 //
-// It never reports an error: a handler that returns one has nothing better to
-// do with it, and the failure has already been written to the sink, which is
-// the place a person can still see it.
+// 它从不返回错误：处理器拿到错误也做不了什么，而失败已写入 sink——人还能看到的地方。
 func (l *Log) Write(record []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -212,13 +179,11 @@ func (l *Log) Write(record []byte) (int, error) {
 	return len(record), nil
 }
 
-// openFileLocked points the log at the file of the day it is now, opening it
-// when that is not the file already open, and prunes the window whenever a
-// file is opened — at startup, and at the first record after midnight.
+// openFileLocked 把日志指向当前日期对应的文件，若与已打开的文件不同则打开，并在每次打开文件时
+// （启动时、午夜后第一条记录时）剪枝保留窗口。
 //
-// The caller holds the lock. A failure leaves the log without a file, and the
-// next record tries again, so a directory that was not writable at midnight
-// (a syncing cloud folder, a full disk) is not fatal for the rest of the day.
+// 调用方持有锁。失败会让日志暂时没有文件，下一条记录会重试，因此午夜时不可写的目录
+// （如同步中的云盘、磁盘已满）不至于让全天都写不了日志。
 func (l *Log) openFileLocked() error {
 	if l.dir == "" {
 		return nil
@@ -241,8 +206,7 @@ func (l *Log) openFileLocked() error {
 	return nil
 }
 
-// reportLocked says what went wrong on the sink, which is the only place left
-// once the file is the thing that failed. The caller holds the lock.
+// reportLocked 在 sink 上报告错误——当文件本身出错时，这是唯一剩下的地方。调用方持有锁。
 func (l *Log) reportLocked(err error) {
 	if l.sink == nil || err == nil {
 		return
@@ -250,9 +214,8 @@ func (l *Log) reportLocked(err error) {
 	_, _ = fmt.Fprintf(l.sink, "%s: %v\n", time.Now().Format(time.RFC3339), err)
 }
 
-// LevelFromEnv reads LevelEnv: debug, info, warn or error, in any case.
-// Anything else — an empty variable, a typo — is Info, which is what a log
-// nobody configured should be.
+// LevelFromEnv 读取 LevelEnv：debug、info、warn 或 error，大小写不敏感。
+// 其它值（空变量、笔误）一律为 Info，即未配置时的默认值。
 func LevelFromEnv() slog.Level {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(LevelEnv))) {
 	case "debug":

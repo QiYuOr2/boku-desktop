@@ -8,19 +8,18 @@ import (
 	"time"
 )
 
-// audioSource is what loopback.Stream already is.
 type audioSource interface {
 	PCM() <-chan []byte
 	Close() error
 }
 
-// translator is the local llama-server. Ready is one probe, not a wait.
+// translator 是本地 llama-server。Ready 只探测一次，不等待。
 type translator interface {
 	Ready(ctx context.Context) error
 	Translate(ctx context.Context, prompt string) (string, error)
 }
 
-// lineState is one change from the pipeline. Unset fields are left as they were.
+// lineState 是流水线的一次变更；未设置的字段保持原值。
 type lineState struct {
 	setDraft       bool
 	draft          string
@@ -36,9 +35,8 @@ type lineState struct {
 	ready          bool
 }
 
-// runListen starts both processes, drops audio until the recognizer has gone
-// quiet and the translator answers /health, and translates only a non-empty
-// final, one completed sentence at a time. Each process is restarted at most once.
+// runListen 启动两个进程；在识别器静默且翻译器响应 /health 之前丢弃音频；
+// 只翻译非空的 final，逐句完成。每个进程最多重启一次。
 func runListen(ctx context.Context, asrSpec, mtSpec processSpec, audio audioSource, tr translator, entries func() []Entry, publish func(lineState)) error {
 	if publish == nil {
 		publish = func(lineState) {}

@@ -1,21 +1,8 @@
-// Package free holds the free translation engines: public endpoints that need
-// no API key, no account and no configuration.
+// Package free 提供免费翻译引擎：无需 API key、账号与配置的公开端点。
 //
-// There are two of them, and each one is a domain.Translator of its own:
-//
-//	free.microsoft   Edge's own translate endpoint (§3.1 of the free-translate research)
-//	free.bilibili    B 站 Index-Translate (§3.2)
-//
-// They are separate translators rather than one translator with a pool behind
-// it, because the interface offers them as separate choices: the translation
-// section draws one option per engine, the user picks the one they want, and
-// that engine is the one asked. An engine that fails reports its failure and
-// does not quietly hand the text to the other — "I picked 微软, why did my text
-// go to B 站" is not a question a settings page should raise.
-//
-// What the two share is here: the descriptor they carry, the discipline around
-// one request, and the result they build. What each one asks, and what counts
-// as an answer, is its own file.
+// 两个引擎各自是独立的 domain.Translator，而非一个带后备池的翻译器：界面把它们
+// 作为独立选项呈现，用户选哪个就只问哪个；某个引擎失败只报自身错误，不会悄悄把
+// 文本转给另一个。
 package free
 
 import (
@@ -27,25 +14,15 @@ import (
 	"boku/internal/translate/openai"
 )
 
-// DefaultMaxChars is the most one request carries, taken from the protocol the
-// paid backends share: a selection is a sentence or a paragraph, and the
-// ceiling is the same wherever the text goes.
+// DefaultMaxChars 是单次请求的最大字符数，与付费后端共用的协议一致。
 const DefaultMaxChars = openai.DefaultMaxChars
 
 func truncationNote(cut bool) string { return openai.TruncationNote(cut) }
 
-// noReadingsNote is what an engine that cannot annotate says about a request
-// for readings. It is openai.AnnotationNote's own words for the same
-// situation — an answer that came back without pieces — because the user
-// should not be able to tell which engine told them.
+// noReadingsNote 是不能标注的引擎对读音请求的提示。措辞与 openai.AnnotationNote
+// 在同样情形（答复未分段）下一致，让用户无法分辨是哪个引擎给出的提示。
 const noReadingsNote = "翻译服务没有逐词分段，这次没有读音与外来语标注。"
 
-// prepared is what one request sends: the text cut to the ceiling, the source
-// language decided from the text itself when the caller did not know it, and
-// whether the text had to be cut.
-//
-// Both engines need the same three answers before they can build a request, and
-// the note about a shortened text is the same note in both.
 type prepared struct {
 	text   string
 	source domain.Language
@@ -61,15 +38,12 @@ func prepare(req domain.TranslationRequest) prepared {
 	return prepared{text: text, source: source, cut: cut}
 }
 
-// annotatedResult turns an OpenAI-compatible answer into a result: the
-// annotation when it was asked for, the paragraph otherwise, and the note that
-// says what the answer did not have.
+// annotatedResult 把 OpenAI-compatible 答复转成结果：请求标注时给标注，否则给
+// 段落，并附上说明答复缺少内容的提示。
 //
-// A model that answers a plain translation when pieces were asked for is not a
-// failure: the window draws the paragraph and says there are no readings,
-// which is openai.AnnotationNote's own semantics — the same thing the paid
-// backends already do. It is only the B 站 engine that can reach this path,
-// because it is the only free engine that is asked for readings.
+// 模型在请求分段时只给译文不算失败：窗口画段落并提示没有读音，这与付费后端
+// openai.AnnotationNote 的语义相同。只有 B 站引擎会走到这条路径，因为它是唯一被
+// 请求标注的免费引擎。
 func annotatedResult(content string, req domain.TranslationRequest, source domain.Language, text string, at time.Time) domain.TranslationResult {
 	result := domain.TranslationResult{
 		SourceText: text,
@@ -94,12 +68,10 @@ func annotatedResult(content string, req domain.TranslationRequest, source domai
 	return result
 }
 
-// plainResult turns a sentence-level answer into a result.
+// plainResult 把句级答复转成结果。
 //
-// An engine that answers one sentence per text — the Edge endpoint does — has
-// nothing to say about the words in it. A request that asked for readings
-// therefore gets the translation and the note that says there are none, which
-// is the same note a model's unsegmented answer produces.
+// 每次只答一句的引擎（如 Edge）无法提供词内信息，请求读音时因此只给译文与
+// 「没有读音」的提示，与模型未分段答复产生的提示相同。
 func plainResult(translated string, req domain.TranslationRequest, source domain.Language, text string, at time.Time) domain.TranslationResult {
 	result := domain.TranslationResult{
 		SourceText:     text,
@@ -114,6 +86,5 @@ func plainResult(translated string, req domain.TranslationRequest, source domain
 	return result
 }
 
-// ensure the interface is satisfied where it is defined, not at the call site.
 var _ domain.Translator = (*Microsoft)(nil)
 var _ domain.Translator = (*Bilibili)(nil)

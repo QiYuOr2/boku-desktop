@@ -9,59 +9,33 @@ import (
 	"log/slog"
 )
 
-// NoticeID is the notice's ID. A fixed one is deliberate: a second
-// notice about the same version replaces the one already in Notification
-// Center rather than piling up beside it.
+// 同一版本通知复用固定 ID，避免重复。
 const NoticeID = "boku-update-ready"
 
-// downloadingLine says what is coming down and how far along it is: the
-// version, and the share once the total is known.
 func downloadingLine(state domain.UpdateState) string {
 	return DownloadingLine(state)
 }
 
-// updateMenuLabel is the line the tray menu gains while an update is ready,
-// and whether it is there at all. Only a ready update earns one: any other
-// Status would be an item that cannot do anything.
 func updateMenuLabel(state domain.UpdateState) (label string, show bool) {
 	return MenuLabel(state)
 }
 
-// updateNotice is what the desktop notice says about a ready update.
 func updateNotice(state domain.UpdateState) (title, body string) {
 	return Notice(state)
 }
 
-// updateVersion is a version as the interface writes it: a release's tag has
-// a "v" that belongs to the repository rather than to the number, and a row
-// that said "新版本 v0.1.0" would be one "v" too many.
 func updateVersion(version string) string {
 	return Version(version)
 }
 
-// onUpdateChanged is the service saying that its state changed. It is called
-// on whatever goroutine the service answers on, so it reads nothing and
-// decides nothing: the repaint below carries both to the main thread, which
-// is where the state may be touched and where a notice may be shown.
-//
-// The work travels with the repaint rather than after it, so that a change
-// arriving while no window is open still announces itself: with nothing to
-// repaint there is nothing to carry it, and the next frame's own check takes
-// it. See refreshReadyUpdate and noteReadyUpdate for why both paths are the
-// same decision.
+// 服务可从任意 goroutine 回调；状态和通知仅在主线程处理。
 func (s *State) onUpdateChanged() { s.host.OnMain(s.RefreshReadyUpdate) }
 
-// refreshReadyUpdate is the half of the update check that runs on the main
-// thread: it reads what the service reports, and shows the notice once for a
-// version that has just become ready.
 func (s *State) RefreshReadyUpdate() {
 	state := s.UpdateState()
 	s.NoteReadyUpdate(state)
 }
 
-// updateState is what the views draw: the service's answer, or a Status of
-// its own when there is no service. It is read once per frame and waits for
-// nothing.
 func (s *State) UpdateState() domain.UpdateState {
 	if s.updates == nil {
 		return domain.UpdateState{Status: domain.UpdateUnsupported}
@@ -69,12 +43,7 @@ func (s *State) UpdateState() domain.UpdateState {
 	return s.updates.State()
 }
 
-// startUpdateCheck asks the service for a check, off the main thread.
-//
-// It is what a click and the launch call, both of which run on the main
-// thread and neither of which may wait for a feed: the call returns at once,
-// and the answer arrives through OnChange, which is the repaint. A check
-// already running is the service's to make a no-op.
+// 更新检查不得阻塞主线程。
 func (s *State) StartUpdateCheck() {
 	updates := s.updates
 	if updates == nil {
@@ -83,25 +52,15 @@ func (s *State) StartUpdateCheck() {
 	go func() {
 		if err := updates.Check(context.Background()); err != nil {
 			if errors.Is(err, domain.ErrUpdateUnsupported) {
-				// Development and package-managed builds are expected not to
-				// update themselves. The dialog renders that settled state; a
-				// log line would only make normal local development look broken.
+				// 开发版和包管理构建不支持自更新，无需记录。
 				return
 			}
-			// The service has already written the state the dialog renders.
-			// What the dialog cannot say is which call it was, and that is the
-			// log's.
 			slog.Info("the update check did not finish", "error", err)
 		}
 	}()
 }
 
-// installUpdate puts a ready update in place and restarts into it.
-//
-// Like the check, it leaves the main thread at once: the swap writes files
-// and the restart ends the process, and neither belongs in a frame. That it
-// could not be started is written down, because the row has nothing else to
-// say about it.
+// 安装会写入文件并重启，必须异步执行。
 func (s *State) InstallUpdate() {
 	updates := s.updates
 	if updates == nil {
@@ -115,32 +74,14 @@ func (s *State) InstallUpdate() {
 	}()
 }
 
-// noteReadyUpdate shows the desktop notice the first time an update becomes
-// ready in this run, and not again for that version.
-//
-// It runs on the main thread, and it has two callers for one decision: the
-// quick window's frame, and the state change the service reports. Either can
-// be the first to see a version become ready — an update finishes downloading
-// whether or not the user ever opens the quick window — and the version it
-// remembers makes the second caller a no-op. That it runs on one thread is
-// what lets that memory be a plain field with no lock.
-//
-// Showing a notice is not drawing: MyGo posts the request to the main thread
-// and returns, so a frame is a place it can be asked for from. The version is
-// recorded before the request, so a desktop that refuses the notice does not
-// get asked again on every frame.
-//
-// The notice is skipped silently where the desktop cannot show one, and where
-// there is no service at all: the check dialog is the place that says what
-// happened.
+// 仅通知本次运行中首次就绪的版本；该方法只在主线程调用，无需加锁。
 func (s *State) NoteReadyUpdate(state domain.UpdateState) {
 	if s.updates == nil || state.Status != domain.UpdateReady {
 		return
 	}
 	version := updateVersion(state.Version)
-	// Each version is told once. A ready update with no version at all can
-	// be told once and no more, since there is then nothing to tell a
-	// second notice apart from the first.
+	// 每个版本只通知一次。无名版本的就绪更新也只能通知一次，因为此时没有别的
+	// 东西能把它与第一次通知区分开。
 	notified := version
 	if notified == "" {
 		notified = updateNotifiedWithoutVersion
@@ -156,14 +97,12 @@ func (s *State) NoteReadyUpdate(state domain.UpdateState) {
 	s.notifier.Notify(NoticeID, title, body, s.openSettings)
 }
 
-// updateNotifiedWithoutVersion stands in updateNotified for a notice about a
-// ready update that named no version. It cannot collide with a real one: the
-// version goes through updateVersion, which trims and never invents this.
+// updateNotifiedWithoutVersion 在 updateNotified 中代表一条无名版本的就绪更新
+// 通知。它不会与真实版本冲突：版本经 updateVersion 处理，会裁剪且不会生成此值。
 const updateNotifiedWithoutVersion = "\x00"
 
-// updateCheckButton draws the about box's standing action: a check on
-// demand, which is how the user asks again without waiting for the next one
-// the application makes on its own.
+// UpdateCheckButton 绘制关于框的常驻操作：按需检查，让用户无需等应用自行发起
+// 的下一次检查即可再次询问。
 func (s *State) UpdateCheckButton(c *ui.Context) {
 	if s.updates == nil {
 		return
@@ -173,9 +112,8 @@ func (s *State) UpdateCheckButton(c *ui.Context) {
 	}
 }
 
-// openUpdateCheckDialog opens the result of a check before asking for it.
-// Check itself stays asynchronous: a button callback is on the main thread,
-// while the dialog reads the service's state on subsequent frames.
+// OpenUpdateCheckDialog 先打开对话框再请求检查。Check 本身保持异步：按钮回调
+// 在主线程，而对话框在后续帧读取服务状态。
 func (s *State) OpenUpdateCheckDialog() {
 	if s.updates == nil {
 		return
@@ -184,9 +122,8 @@ func (s *State) OpenUpdateCheckDialog() {
 	s.StartUpdateCheck()
 }
 
-// DialogInfo is the small, presentation-only summary in the explicit
-// check dialog. Keeping the words out of the view makes the version mapping
-// testable without testing pixels or a MyGo window.
+// DialogInfo 是显式检查对话框里的纯展示摘要。把文案移出视图，使版本映射可测试，
+// 而无需测像素或 MyGo 窗口。
 type DialogInfo struct {
 	Latest  string
 	Status  string
@@ -226,10 +163,8 @@ func DialogState(state domain.UpdateState, current string) DialogInfo {
 	}
 }
 
-// updateCheckDialogView draws the dialog opened by the About section's
-// "检查更新" button. It is deliberately separate from updateRow: the row is
-// passive Status for scheduled checks, whereas this dialog is an answer to a
-// request the user just made.
+// UpdateCheckDialogView 绘制关于区「检查更新」按钮打开的对话框。它与 updateRow
+// 有意分开：行是被动状态，用于定时检查；而此对话框是对用户刚发起请求的回应。
 func (s *State) UpdateCheckDialogView(c *ui.Context) {
 	ui.Modal(c, &s.updateCheckDialog, func() {
 		state := s.UpdateState()

@@ -1,4 +1,4 @@
-// Package ui contains presentation-specific helpers for panels.
+// Package ui 提供面板相关的展示辅助。
 package ui
 
 import (
@@ -32,9 +32,8 @@ func read(view panel.View) quota {
 	return windows[0]
 }
 
-// Each percentage metric starts a window; its following durations supply
-// the reset countdown and then the period. Optional observations retain
-// their own slots when absent.
+// 每个百分比指标开启一个窗口，其后紧跟的时长依次提供重置倒计时和周期；
+// 缺失的可选观测仍占据自己的槽位。
 func readWindows(view panel.View) []quota {
 	var windows []quota
 	var plan string
@@ -43,8 +42,7 @@ func readWindows(view panel.View) []quota {
 			windows = append(windows, quota{label: metric.Label, extra: len(windows) > 0})
 		}
 		observation, ok := view.Snapshot.Observation(metric.Key)
-		// An absent duration still occupies its slot. Otherwise a missing
-		// reset would make the following period look like a countdown.
+		// 缺失的时长仍需占位，否则缺少重置时间时，后面的周期会被误当成倒计时。
 		if metric.ValueType == domain.ValueTypeDuration && len(windows) > 0 {
 			found := &windows[len(windows)-1]
 			switch {
@@ -81,8 +79,7 @@ func readWindows(view panel.View) []quota {
 	for i := range windows {
 		windows[i].plan = plan
 	}
-	// A later bar with no countdown of its own, such as on-demand usage that
-	// resets with the subscription window, shows that earlier countdown.
+	// 后面没有独立倒计时的进度条（如随订阅窗口重置的按需用量）沿用前面窗口的倒计时。
 	if len(windows) > 0 && windows[0].hasReset {
 		for i := 1; i < len(windows); i++ {
 			if windows[i].hasLeft && !windows[i].hasReset {

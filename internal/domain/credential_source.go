@@ -2,56 +2,48 @@ package domain
 
 import "context"
 
-// CredentialSource hands a provider what it needs when the credential is not
-// Boku's to keep: the Codex quota reads the ChatGPT login the Codex CLI
-// already made, and copying that token into Boku's own store would be both
-// pointless and worse (§9 of the security design).
+// CredentialSource 在凭据不属于 Boku 时，向 provider 提供它所需的东西：
+// Codex 配额读取的是 Codex CLI 已建立的 ChatGPT 登录，把该 token 复制进
+// Boku 自己的存储既无意义又更糟（见安全设计 §9）。
 //
-// A source is registered by the assembly for one provider id. It is what the
-// use case asks instead of the secret store, and it is the only other place a
-// provider's credentials may come from: the alternative is not "look it up
-// yourself", it is "ask for a source".
+// 一个 source 由装配代码按某个 provider id 注册。用例向它而非 secret store
+// 索取凭据，并且它是 provider 凭据唯一可能的另一来源：替代做法不是
+// 「自己去查」，而是「请求一个 source」。
 type CredentialSource interface {
-	// ProviderID is the provider this source supplies.
+	// ProviderID 是本 source 所供给的 provider。
 	ProviderID() string
-	// Credentials returns what that provider needs, in memory, for one
-	// request. A credential that is not there is ErrCredentialMissing — the
-	// provider is then never called, and the interface says why rather than
-	// showing a number.
+	// Credentials 返回该 provider 一次请求所需的内容，保存在内存中。
+	// 凭据不存在时为 ErrCredentialMissing——此时 provider 不会被调用，
+	// 界面说明原因而非显示一个数字。
 	Credentials(ctx context.Context) (Credentials, error)
 }
 
-// LoginStarter is a CredentialSource whose credential comes from a tool the
-// user has to log into, and whose login can be started from here.
+// LoginStarter 是一个凭据来自用户必须登录的工具、且其登录可从这里启动的
+// CredentialSource。
 //
-// It is a capability rather than a method on every source: a source that is
-// already logged in has no login to start, and the interface then offers no
-// button for one.
+// 它是可选能力而非每个 source 都有的方法：已登录的 source 没有可启动的登录，
+// 界面便不为它提供按钮。
 type LoginStarter interface {
 	CredentialSource
-	// StartLogin starts that tool's own login. Boku does not implement the
-	// flow — the login is the tool's — so all this saves is finding a
-	// terminal. ErrLoginCommandMissing and ErrLoginUnsupported say when it
-	// could not be started.
+	// StartLogin 启动该工具自身的登录。Boku 不实现该流程——登录属于工具——
+	// 因此这里只负责找到一个终端。无法启动时返回 ErrLoginCommandMissing
+	// 或 ErrLoginUnsupported。
 	StartLogin() error
 }
 
-// CredentialRefresher is a source that can replace a token the endpoint has
-// just refused. The panel tries it once; a source that cannot refresh is
-// left to surface the refusal.
+// CredentialRefresher 是能替换被端点刚刚拒绝的 token 的 source。
+// 面板只尝试一次；无法刷新的 source 则由其把拒绝暴露出来。
 type CredentialRefresher interface {
 	RefreshCredentials(ctx context.Context) (Credentials, error)
 }
 
-// DevicePrompt is what the user has to type or open. The device code that
-// exchanges it stays with the source.
+// DevicePrompt 是用户需要输入或打开的内容。用于交换它的设备码留在 source 中。
 type DevicePrompt struct {
 	UserCode        string
 	VerificationURL string
 }
 
-// DeviceLogin is a source whose credential comes from a device-code login
-// this application performs itself.
+// DeviceLogin 是凭据来自本应用自行执行的设备码登录的 source。
 type DeviceLogin interface {
 	BeginDeviceLogin(ctx context.Context) (DevicePrompt, error)
 	FinishDeviceLogin(ctx context.Context) error

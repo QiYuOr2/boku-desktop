@@ -11,19 +11,16 @@ import (
 	"boku/internal/kit"
 )
 
-// The doubles the clipboard feature is tested over, shared by more than one
-// test file in this package: the device, the history store, the settings
-// store, and a clock the test drives.
+// 剪贴板功能测试所用的替身，由本包多个测试文件共享：设备、历史存储、
+// 设置存储，以及一个由测试驱动的时钟。
 
-// fakeDevice is a domain.ClipboardDevice whose content the test decides.
+// fakeDevice 是内容由测试决定的 domain.ClipboardDevice。
 type fakeDevice struct {
-	// now stamps what the device hands back, so that a test's own clock
-	// decides when a copy happened rather than the wall clock.
+	// now 为设备交回的内容打时间戳，使测试自己的时钟而非墙钟决定复制发生的时间。
 	now func() time.Time
 
-	// readDelay and writeDelay stand in for a platform clipboard that is
-	// being held by something else: the call takes that long to come back.
-	// They are set before the device is used, never while it is.
+	// readDelay 与 writeDelay 模拟被其它程序占用的平台剪贴板：
+	// 调用要等这么久才返回。它们在设备使用前设定，从不在使用中设定。
 	readDelay  time.Duration
 	writeDelay time.Duration
 
@@ -37,8 +34,7 @@ type fakeDevice struct {
 	writeEr error
 }
 
-// failWrite makes the next write fail, the way a platform that refuses the
-// format does.
+// failWrite 使下一次写入失败，模拟平台拒收该格式。
 func (d *fakeDevice) failWrite(err error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -107,8 +103,7 @@ func (d *fakeDevice) WriteFiles(_ context.Context, paths []string) error {
 	return nil
 }
 
-// WriteImage puts a picture on the clipboard, which is what a click on an
-// image in the history does.
+// WriteImage 把图片放到剪贴板，即点击历史中一张图片时的行为。
 func (d *fakeDevice) WriteImage(_ context.Context, png []byte) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -151,15 +146,14 @@ func (d *fakeDevice) writtenImages() [][]byte {
 	return out
 }
 
-// fakeStore is the history, in memory.
+// fakeStore 是内存中的历史。
 type fakeStore struct {
 	mu      sync.Mutex
 	entries []domain.ClipboardEntry
 	saves   int
 	loadErr error
 	saveErr error
-	// images is the image store beside the history: the bytes of a copied
-	// picture, under the reference its entry keeps.
+	// images 是历史旁的图片存储：复制图片的字节，以其条目保留的引用为键。
 	images map[string][]byte
 }
 
@@ -172,8 +166,7 @@ func (s *fakeStore) LoadEntries(context.Context) ([]domain.ClipboardEntry, error
 	return append([]domain.ClipboardEntry(nil), s.entries...), nil
 }
 
-// SaveImage is the image store: the same reference saved twice is the same
-// picture, which is what the real store does too.
+// SaveImage 是图片存储：同一引用保存两次是同一张图片，真实存储也如此。
 func (s *fakeStore) SaveImage(_ context.Context, ref string, png []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -207,7 +200,7 @@ func (s *fakeStore) DeleteImage(_ context.Context, ref string) error {
 	return nil
 }
 
-// keptImages is what the image store holds, for a test to look at.
+// keptImages 是图片存储当前持有的内容，供测试查看。
 func (s *fakeStore) keptImages() map[string][]byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -235,14 +228,11 @@ func (s *fakeStore) stored() []domain.ClipboardEntry {
 	return append([]domain.ClipboardEntry(nil), s.entries...)
 }
 
-// fakeTools is the settings store, in memory: this feature's section, with the
-// file replaced by the section itself.
+// fakeTools 是内存中的设置存储：本功能的 section，用 section 本身代替文件。
 //
-// The section is the real one, so a switch changed through it is changed the
-// way the shipped code changes it; what is faked is only the file underneath.
-// loadErr and saveErr are separate because a test needs to name which of the
-// two failed: a file that cannot be read stops the application starting, and a
-// file that cannot be written must not take the switch the user just flipped.
+// section 是真实的那个，因此通过它改变的开关与正式代码改变的方式一致；被伪造的
+// 只是底下的文件。loadErr 与 saveErr 分开，因为测试需要指明两者中哪个失败：
+// 读不出的文件会阻止应用启动，写不出的文件不得连累用户刚拨的开关。
 type fakeTools struct {
 	mu      sync.Mutex
 	section *Section
@@ -261,8 +251,8 @@ func (f *fakeTools) Load(context.Context) error {
 	return f.loadErr
 }
 
-// Update is the store's read-modify-write, in one critical section: it is what
-// a feature uses to change a setting without overwriting anybody else's.
+// Update 是存储的读-改-写，在一个临界区里完成：功能用它修改设置，
+// 而不会覆盖别人的改动。
 func (f *fakeTools) Update(_ context.Context, _ string, change func() error) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -273,7 +263,7 @@ func (f *fakeTools) Update(_ context.Context, _ string, change func() error) err
 	return change()
 }
 
-// testClock is a clock the test moves by hand.
+// testClock 是由测试手动拨动的时钟。
 type testClock struct {
 	mu  sync.Mutex
 	now time.Time
@@ -295,7 +285,7 @@ func (c *testClock) advance(d time.Duration) {
 	c.now = c.now.Add(d)
 }
 
-// newTestClipboard assembles the tool over the fakes.
+// newTestClipboard 在替身之上装配工具。
 func newTestClipboard(t *testing.T, opts ClipboardOptions) (*Clipboard, *fakeDevice, *fakeStore, *fakeTools) {
 	t.Helper()
 	device := &fakeDevice{}
@@ -312,8 +302,7 @@ func newTestClipboard(t *testing.T, opts ClipboardOptions) (*Clipboard, *fakeDev
 	if opts.Clock == nil {
 		opts.Clock = newTestClock()
 	}
-	// The device stamps what it hands back with the same clock the service
-	// reads, so a test compares one timeline rather than two.
+	// 设备用它交回内容时使用与服务相同的时钟，使测试只比较一条时间线而非两条。
 	if clock, ok := opts.Clock.(*testClock); ok {
 		device.now = clock.Now
 	}
@@ -325,12 +314,10 @@ func newTestClipboard(t *testing.T, opts ClipboardOptions) (*Clipboard, *fakeDev
 	return clipboard, device, store, tools
 }
 
-// read polls the clipboard the way the history window does, one tick of the
-// test clock later: two copies are never the same instant, so the order the
-// history keeps is the order they happened in.
+// read 按历史窗口的方式轮询剪贴板，晚测试时钟一拍：两次复制从不是同一瞬间，
+// 因此历史保留的顺序就是它们发生的顺序。
 //
-// It uses Read rather than Open: Open is the interface's non-blocking
-// request, and a test wants the reading to have happened by the next line.
+// 它用 Read 而非 Open：Open 是界面的非阻塞请求，而测试希望下一行时读取已经发生。
 func read(clipboard *Clipboard, clock *testClock, device *fakeDevice, text string) {
 	clock.advance(time.Second)
 	device.set(textReading(text))
@@ -341,7 +328,7 @@ func textReading(text string) domain.ClipContent {
 	return domain.ClipContent{Kind: domain.ClipKindText, Text: text, Display: text}
 }
 
-// textEntry is a recorded copy of some text, as the history holds one.
+// textEntry 是某段文本的已记录复制，即历史持有的形式。
 func textEntry(content string) domain.ClipboardEntry {
 	return domain.ClipboardEntry{
 		ID:          "entry-" + content,
@@ -354,8 +341,8 @@ func textEntry(content string) domain.ClipboardEntry {
 	}
 }
 
-// waitFor polls a condition until it holds, and fails the test if it never
-// does: waiting on a goroutine is the one place a test may sleep.
+// waitFor 轮询条件直至成立，若始终不成立则令测试失败：等待 goroutine 是测试
+// 唯一可以 sleep 的地方。
 func waitFor(t *testing.T, what string, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)

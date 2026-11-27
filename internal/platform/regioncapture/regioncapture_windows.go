@@ -85,8 +85,7 @@ func (*Device) Capture(ctx context.Context, rect image.Rectangle) ([]byte, error
 	return encodeBGRA(rect.Dx(), rect.Dy(), raw)
 }
 
-// encodeBGRA is deliberately separate from GDI so the native byte order and
-// PNG conversion can be verified without reading a user's desktop.
+// encodeBGRA 与 GDI 拆开，是为了在不读取用户桌面像素的情况下测试原生字节序与 PNG 转换。
 func encodeBGRA(width, height int, raw []byte) ([]byte, error) {
 	if width <= 0 || height <= 0 || len(raw) < width*height*4 {
 		return nil, fmt.Errorf("region capture: invalid bitmap pixels")

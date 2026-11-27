@@ -2,6 +2,6 @@
 
 package sysclip
 
-// clipboardChangeCount answers zero: this build has no clipboard write
-// counter, so the picture cache falls back to its time window.
+// clipboardChangeCount 返回 0：本构建没有剪贴板写计数器，
+// 图片缓存退化为依赖时间窗口判断。
 func clipboardChangeCount() uint32 { return 0 }

@@ -1,13 +1,6 @@
-// Package custom translates text with a service of the user's own choosing,
-// as long as it speaks the OpenAI chat-completions protocol — which is what
-// most compatible services do, from a hosted gateway to a model the user
-// runs on their own machine.
+// Package custom 用用户自选的服务翻译文本，前提是它兼容 OpenAI chat-completions 协议。
 //
-// The address is a setting rather than a constant, because there is no one
-// address to write down: the translator's endpoint is whatever the user
-// typed. The key is optional too: a service on localhost needs none.
-//
-// It does HTTP and error translation, and it knows nothing about windows.
+// 地址是设置而非常量，因为不存在固定地址；密钥也是可选的，本地服务不需要密钥。
 package custom
 
 import (
@@ -22,50 +15,35 @@ import (
 )
 
 const (
-	// ProviderID is the first of the translator ids a user's own services are
-	// registered under: the bare "custom", which is what a file written before
-	// there could be several services holds. The ones after it are numbered
-	// ("custom-2", "custom-3" …), and which id a service has is the
-	// translation feature's decision, not this package's.
+	// ProviderID 是用户自有服务注册的第一个翻译器 id，即裸 "custom"；
+	// 多服务时依次为 "custom-2"、"custom-3" 等，具体 id 由翻译功能决定。
 	ProviderID = "custom"
-	// DefaultDisplayName is what a service the user has not named is called.
-	// It is this feature's own word, and it is only used until the user gives
-	// the service a name of their own.
+	// DefaultDisplayName 是用户未命名服务时的显示名。
 	DefaultDisplayName = "自定义"
-	// DefaultModel preserves existing configuration files written before a
-	// custom service stored its model. New services must name their model in
-	// the settings window.
+	// DefaultModel 兼容在自定义服务存储模型之前写下的旧配置文件，
+	// 新服务须在设置窗口里指定模型。
 	DefaultModel = "gpt-4o-mini"
-	// APIKeyCredential is the name the key is stored under, without the
-	// provider prefix.
+	// APIKeyCredential 是密钥的存储键名，不含 provider 前缀。
 	APIKeyCredential = "apiKey"
-	// docsURL is where a user of a hosted gateway gets a key. A local
-	// service needs none, and the window says so.
+	// docsURL 是托管网关用户获取密钥的地址；本地服务不需要密钥。
 	docsURL = "https://platform.openai.com/api-keys"
 )
 
-// Translator asks one of the user's own services to translate.
+// Translator 请求用户自有服务进行翻译。
 //
-// It is built per service rather than once for the feature: the user may keep
-// several — a model on their own machine, a gateway somewhere else — and each
-// one has its own id, its own address and its own name. What they share is this
-// type and the protocol behind it.
+// 每个服务各建一个实例（可能同时有多个，各有自己的 id、地址和名称）。
 type Translator struct {
 	client *httpc.Client
-	// id is the translator id this one is registered under: "custom",
-	// "custom-2", … It is also the key its settings are stored under, so the
-	// address and the name it reads are its own.
+	// id 是本实例注册的翻译器 id（"custom"、"custom-2" …），
+	// 同时也是其设置的存储键，因此地址和名称互不干扰。
 	id string
-	// settings is what the application was configured with. The settings
-	// window reads it to show the address and the name; a translation uses
-	// whatever is stored at the moment the request is made.
+	// settings 使用时才读取，翻译采用请求发出那一刻的配置。
 	settings func() openai.CustomService
 	now      func() time.Time
 }
 
-// New returns the translator for one of the user's own services. Settings is a
-// function rather than a value because the user may change the address while
-// the application runs, and the next translation should use the new one.
+// New 返回某个用户自有服务的翻译器。settings 用函数而非值，因为运行中用户可能改地址，
+// 下次翻译应使用新地址。
 func New(client *httpc.Client, id string, settings func() openai.CustomService) *Translator {
 	return &Translator{
 		client:   client,
@@ -75,25 +53,20 @@ func New(client *httpc.Client, id string, settings func() openai.CustomService) 
 	}
 }
 
-// NewWithBaseURL returns a translator with an address of its own, whatever
-// the settings say. Tests use it to point at an httptest server.
+// NewWithBaseURL 返回使用固定地址的翻译器，忽略设置。测试用它指向 httptest 服务器。
 func NewWithBaseURL(client *httpc.Client, baseURL string) *Translator {
 	return New(client, ProviderID, func() openai.CustomService {
 		return openai.CustomService{BaseURL: baseURL}
 	})
 }
 
-// ID returns the translator's id: the one it was built for, not a constant.
+// ID 返回本实例构建时所指定的 id。
 func (t *Translator) ID() string { return t.id }
 
-// Descriptor says what the service is called and what it needs.
+// Descriptor 描述服务的名称与依赖。
 //
-// The name is the user's own when they gave one, and this feature's word for it
-// when they did not: the window draws it wherever the service is named, so a
-// service the user called "本地 Ollama" is called that and not "自定义".
-//
-// An address nobody typed yet leaves the endpoint empty: the interface shows
-// that there is nowhere to send anything, rather than an address it made up.
+// 名称优先用用户指定的；未填写地址时 endpoint 为空，界面据此显示无处可发，
+// 而不是编造一个地址。
 func (t *Translator) Descriptor() domain.TranslatorDescriptor {
 	current := t.current()
 	return domain.TranslatorDescriptor{
@@ -108,8 +81,7 @@ func (t *Translator) Descriptor() domain.TranslatorDescriptor {
 	}
 }
 
-// displayNameOf is what a service is called: the name the user gave it, or this
-// feature's own word for a service they have not named.
+// displayNameOf 返回服务的显示名，未命名时用默认名。
 func displayNameOf(service openai.CustomService) string {
 	if name := strings.TrimSpace(service.DisplayName); name != "" {
 		return name
@@ -117,10 +89,9 @@ func displayNameOf(service openai.CustomService) string {
 	return DefaultDisplayName
 }
 
-// current is what the user configured, as the settings hold it now.
+// current 返回当前设置中的配置。
 //
-// The address is cleaned the way this feature cleans it, so that what is asked
-// is what will be stored; the backend does not judge it further.
+// 地址按本功能的方式规范化，保证请求地址与存储一致，后端不再处理。
 func (t *Translator) current() openai.CustomService {
 	if t.settings == nil {
 		return openai.CustomService{}
@@ -138,15 +109,12 @@ func modelOrDefault(model string) string {
 	if value := strings.TrimSpace(model); value != "" {
 		return value
 	}
-	// Existing configuration files predate the model field. Keeping their
-	// original default avoids silently breaking a working text service.
+	// 旧配置文件早于模型字段，沿用原默认值以免静默破坏原本可用的文本服务。
 	return DefaultModel
 }
 
-// TranslateImage uses the same model and endpoint as the text translator. It
-// is intentionally available for the capability probe before Descriptor says
-// the service supports images; normal image translation remains gated by that
-// verified descriptor bit.
+// TranslateImage 使用与文本翻译相同的模型和端点。它故意在 Descriptor 声明支持图片之前
+// 就可供能力探测使用；常规图片翻译仍受已验证的 descriptor 标志位控制。
 func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credentials, image []byte, target domain.Language) (domain.TranslationResult, error) {
 	if len(image) == 0 {
 		return domain.TranslationResult{}, fmt.Errorf("%w: there is no image to translate", domain.ErrInvalidArgument)
@@ -173,13 +141,10 @@ func (t *Translator) TranslateImage(ctx context.Context, creds domain.Credential
 	return openai.ImageResult(answer, target, t.id, t.now())
 }
 
-// Translate asks for the translation.
+// Translate 请求翻译。
 //
-// A missing address is refused before anything is sent: there is nowhere to
-// send it, and that is a configuration problem rather than a service that
-// failed. A missing key is not refused: a service the user runs themselves
-// may need none, and one that does will say so with a 401, which the window
-// translates into "check the key".
+// 未填地址在发送前拒绝，视为配置问题而非服务失败；缺少密钥不拒绝——
+// 本地服务可能不需要，需要的会返回 401，界面译为“检查密钥”。
 func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, req domain.TranslationRequest) (domain.TranslationResult, error) {
 	if err := req.Validate(); err != nil {
 		return domain.TranslationResult{}, err
@@ -191,10 +156,7 @@ func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, re
 			Reason:     "这个自定义翻译服务还没有填写地址",
 		}
 	}
-	// The key is optional, and absent means absent: no Authorization header
-	// is sent at all, rather than one carrying an empty key. A service that
-	// needs a key answers 401, which the window translates into "check the
-	// key".
+	// 密钥可选，缺失即不发 Authorization 头，而不是带空值；需要密钥的服务返回 401。
 	key := strings.TrimSpace(creds.Secrets[APIKeyCredential])
 	text, source, cut := openai.Prepare(req)
 	options := openai.AnnotationOptions{Furigana: req.Annotation.Furigana, LoanwordGloss: req.Annotation.LoanwordGloss}
@@ -214,7 +176,6 @@ func (t *Translator) Translate(ctx context.Context, creds domain.Credentials, re
 	return openai.TextResult(content, text, source, req.TargetLang, t.id, t.now(), options, cut)
 }
 
-// ensure the interface is satisfied where it is defined, not at the call
-// site.
+// 在接口定义处确认实现，而非调用处。
 var _ domain.Translator = (*Translator)(nil)
 var _ domain.ImageTranslator = (*Translator)(nil)

@@ -11,10 +11,7 @@ import (
 	"testing"
 )
 
-// The update assembly is where the feed, the download directory and the
-// relaunch are wired together, and where a wrong target name would turn into
-// a release nobody can ever find. It is checked here without a desktop
-// session, the way services is.
+// 更新装配把源、下载目录与重启串在一起，也是错误的目标名会变成永远找不到的发布的地方。与 services 一样，无需桌面会话即可检查。
 func TestNewUpdatesAssemblesTheFeature(t *testing.T) {
 	previousTransport := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = previousTransport })
@@ -26,8 +23,7 @@ func TestNewUpdatesAssemblesTheFeature(t *testing.T) {
 	if svc == nil {
 		t.Fatal("newUpdates returned no service")
 	}
-	// Nothing has been asked yet: the state is Idle and the directory is the
-	// one under the user data the caller named.
+	// 尚未询问过：状态为 Idle，目录是调用者指定用户数据下的那个。
 	if state := svc.State(); state.Status != 0 {
 		t.Errorf("the fresh state = %v, want idle", state.Status)
 	}
@@ -40,9 +36,7 @@ func TestNewUpdatesAssemblesTheFeature(t *testing.T) {
 	}
 }
 
-// The manifest's URL is built from the platform, and the name is the one
-// `mygo build` uploads. A target that disagrees with the build's own is a
-// feed that answers 404 forever, which looks exactly like "up to date".
+// 清单 URL 由平台构造，名字是 `mygo build` 上传的那个。目标与构建自身不一致，就是永远返回 404 的源，看起来与「已是最新」一模一样。
 func TestReleaseFeedNamesThisBuildsManifest(t *testing.T) {
 	feed := releaseFeed()
 	want := githubReleasesURL
@@ -54,9 +48,7 @@ func TestReleaseFeedNamesThisBuildsManifest(t *testing.T) {
 	}
 }
 
-// assembling the service gives the presentation something it accepts: a
-// *update.Service satisfies app.UpdateService, and a nil one is what a build
-// without the feature passes.
+// 装配出的服务是 presentation 能接受的：*update.Service 满足 app.UpdateService，而 nil 是没有该功能的构建所传的。
 func TestUpdateServiceIsWhatThePresentationAccepts(t *testing.T) {
 	svc, err := newUpdates(t.TempDir(), "0.1.0")
 	if err != nil {
@@ -114,7 +106,7 @@ func TestLatestManifestUsesPrereleaseWhenNoStableReleaseExists(t *testing.T) {
 	}
 }
 
-// serveManifest answers with one signed manifest naming version.
+// serveManifest 返回一个签名清单，版本名为 version。
 func serveManifest(t *testing.T, version string) *httptest.Server {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -125,15 +117,13 @@ func serveManifest(t *testing.T, version string) *httptest.Server {
 	return server
 }
 
-// The bug this pins down: the newest published release is usually the version
-// the user already runs, and reading its manifest back used to be reported as
-// "an update is ready" for that same version. Being current is up to date.
+// 此用例固化的 bug：最新发布的版本通常就是用户正在跑的版本，读回它的清单曾被报告为「更新就绪」。已经是最新即是最新。
 func TestReleaseOfTheRunningVersionIsUpToDate(t *testing.T) {
 	for _, c := range []struct{ current, feed string }{
 		{"0.1.1", "0.1.1"},
 		{"0.1.1", "v0.1.1"},
 		{"0.1.0-beta.5", "0.1.0-beta.5"},
-		// A build ahead of the feed is not offered a downgrade.
+		// 领先于源的构建不会收到降级。
 		{"0.1.2", "0.1.1"},
 	} {
 		server := serveManifest(t, c.feed)
@@ -148,8 +138,7 @@ func TestReleaseOfTheRunningVersionIsUpToDate(t *testing.T) {
 	}
 }
 
-// A feed that is genuinely newer is still a release: the fix must not turn
-// every check into "up to date".
+// 确实更新的源仍是一个发布：修复不得把每次检查都变成「已是最新」。
 func TestReleaseOfANewerVersionIsOffered(t *testing.T) {
 	for _, c := range []struct{ current, feed string }{
 		{"0.1.0", "0.1.1"},
@@ -167,8 +156,7 @@ func TestReleaseOfANewerVersionIsOffered(t *testing.T) {
 		if got == nil {
 			t.Fatalf("running %s against feed %s offered no release", c.current, c.feed)
 		}
-		// The release carries the version without the tag's "v", because
-		// that is what the interface writes.
+		// 发布携带的版本去掉了标签的 "v"，界面写的就是这个。
 		if want := strings.TrimPrefix(c.feed, "v"); got.Version != want {
 			t.Errorf("the offered version = %q, want %q", got.Version, want)
 		}

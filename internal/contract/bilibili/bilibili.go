@@ -1,4 +1,4 @@
-// Package bilibili owns Bilibili's stable public API identity.
+// Package bilibili 定义 Bilibili 的稳定公开接口身份信息。
 package bilibili
 
 const (

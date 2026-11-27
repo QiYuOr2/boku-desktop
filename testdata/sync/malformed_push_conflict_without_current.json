@@ -1,0 +1,20 @@
+{
+  "results": [
+    {
+      "mutationId": "0198b000-0000-7000-8000-000000000001",
+      "status": "conflict"
+    },
+    {
+      "mutationId": "0198b000-0000-7000-8000-000000000002",
+      "status": "applied",
+      "version": 1,
+      "cursor": "c-42"
+    },
+    {
+      "mutationId": "0198b000-0000-7000-8000-000000000003",
+      "status": "duplicate",
+      "version": 5,
+      "cursor": "c-40"
+    }
+  ]
+}

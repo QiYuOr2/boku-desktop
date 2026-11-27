@@ -1,11 +1,7 @@
-// This file removes credentials from text on its way somewhere a person can
-// read it: an error message, a response fragment, a log record.
+// 本文件从将被人读取的文本中移除凭据：错误信息、响应片段、日志记录。
 //
-// It lives here, and not with the HTTP client that first needed it, because
-// the logger needs exactly the same rule and reaching into a network package
-// to get it would make the log depend on the network. What a credential looks
-// like is one rule in one place; AGENTS.md's Secrets Rules and the security
-// design §5 both point at this file.
+// 它放在这里而不是最初需要它的 HTTP 客户端旁，因为日志器需要完全相同的规则，
+// 而去网络包里取用会让日志依赖网络。凭据长什么样是同一处的一条规则。
 package kit
 
 import (
@@ -14,12 +10,10 @@ import (
 	"strings"
 )
 
-// sensitiveName reports whether a name carries a credential: a query
-// parameter, a JSON field, a log attribute.
+// sensitiveName 判断一个名字是否承载凭据：查询参数、JSON 字段、日志属性。
 //
-// The list is the whole of the recognition: a credential under a name nobody
-// would guess is not found here, which is why the caller must not put one
-// there in the first place.
+// 这份名单就是识别的全部范围：以无法猜测的名字出现的凭据不会被这里发现，
+// 因此调用方本就不应把凭据放在那种名字下。
 func sensitiveName(name string) bool {
 	switch strings.ToLower(name) {
 	case "key", "api_key", "apikey", "api-key", "access_token", "token",
@@ -30,9 +24,7 @@ func sensitiveName(name string) bool {
 	return false
 }
 
-// Redact removes what must never reach a log or an error message from a
-// URL: the user info, and the value of any parameter that looks like a
-// credential.
+// Redact 从 URL 中移除绝不应进入日志或错误信息的部分：用户信息，以及任何看似凭据的参数值。
 func Redact(endpoint string) string {
 	parsed, err := url.Parse(endpoint)
 	if err != nil || parsed.Scheme == "" {
@@ -57,26 +49,20 @@ func Redact(endpoint string) string {
 
 var secretAssignment = regexp.MustCompile(`(?i)\b(key|api_key|apikey|api-key|access_token|token|secret|password|passwd|auth|authorization|sig|signature|client_secret)=([^&\s"']+)`)
 
-// secretField is the same names as a JSON or query field: a service that
-// answers with its own error often echoes the credential back inside the
-// body, and a response fragment must not carry one into a log or a window.
+// secretField 以 JSON 或查询字段形式匹配同名项：服务返回自身错误时常会把凭据回显在
+// body 里，响应片段不得将其带入日志或窗口。
 var secretField = regexp.MustCompile(`(?i)("?(?:key|api_key|apikey|api-key|access_token|token|secret|password|passwd|auth|authorization|sig|signature|client_secret)"?\s*:\s*)("[^"]*"|[^,}\s]+)`)
 
-// RedactText removes credential values from arbitrary text, such as a
-// transport error message that quotes a URL, or a response fragment an error
-// carries.
+// RedactText 从任意文本中移除凭据值，例如引用了 URL 的传输错误信息，或错误携带的响应片段。
 func RedactText(text string) string {
 	redacted := secretAssignment.ReplaceAllString(text, "$1=redacted")
 	return secretField.ReplaceAllString(redacted, "$1\"redacted\"")
 }
 
-// RedactField removes a credential from a value written under a name, which
-// is how a log record prints an attribute (`apiKey=…`): the value on its own
-// may be a bare credential with nothing in it to recognize, and the name it
-// is logged under is what says what it is.
+// RedactField 移除以某名字写入的值中的凭据，对应日志记录中属性的打印方式（`apiKey=…`）：
+// 单独的值可能就是一个裸凭据、本身无可供识别的特征，是它被记录时所用的名字说明了它是什么。
 //
-// A value under any other name is still scrubbed as text, because a value can
-// carry a `key=…` pair of its own.
+// 其它名字下的值仍会按文本清洗，因为值自身也可能带有 `key=…` 这样的键值对。
 func RedactField(name, value string) string {
 	if value == "" {
 		return value

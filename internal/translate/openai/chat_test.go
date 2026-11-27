@@ -15,9 +15,7 @@ import (
 	"boku/internal/platform/httpc"
 )
 
-// The annotation parser is what turns a model's answer into segments, and
-// the promise it makes is that it never fails: whatever came back, the
-// window can draw it.
+// 标注解析器把模型回答转成片段，它承诺从不失败：无论返回什么，窗口都能画出。
 func TestParseAnnotation(t *testing.T) {
 	t.Run("one object per line", func(t *testing.T) {
 		content := `{"s":"機械語","r":"キカイゴ","t":"机器语言"}
@@ -44,10 +42,8 @@ func TestParseAnnotation(t *testing.T) {
 		}
 	})
 
-	// The three rules of the annotation, as the mock writes them: a katakana
-	// loanword carries the word it came from, a kanji word carries its
-	// reading, and everything written in kana carries nothing at all —
-	// whether or not the model filled a field in.
+	// 标注三条规则在 mock 里的写法：片假名外来语带原词，汉字词带读音，假名写的一律
+	// 不带任何标注——无论模型是否填了字段。
 	t.Run("an annotation only where it belongs", func(t *testing.T) {
 		content := strings.Join([]string{
 			`{"s":"は","r":"ハ","t":"是"}`,
@@ -61,19 +57,17 @@ func TestParseAnnotation(t *testing.T) {
 		if !got.Segmented || len(got.Segments) != 6 {
 			t.Fatalf("segments = %+v", got.Segments)
 		}
-		// A particle is not annotated, even when the model says it is.
+		// 助词不标注，即便模型说它该标注。
 		for _, index := range []int{0, 3, 4} {
 			if got.Segments[index].Reading != "" {
 				t.Errorf("%q carries a reading it should not: %+v", got.Segments[index].Text, got.Segments[index])
 			}
 		}
-		// A word with kanji keeps its reading, as one piece rather than one
-		// per character.
+		// 含汉字的词保留读音，且按词而非按字给。
 		if got.Segments[1].Reading != "キカイゴ" {
 			t.Errorf("機械語 lost its reading: %+v", got.Segments[1])
 		}
-		// A loanword keeps the word it came from, and drops the katakana the
-		// model wrote as its reading — its own katakana says nothing.
+		// 外来语保留原词，丢弃模型写成读音的片假名——它自身的片假名说明不了什么。
 		if got.Segments[2].Gloss != "mode" || got.Segments[2].Reading != "" {
 			t.Errorf("モード should carry its own word and no reading: %+v", got.Segments[2])
 		}
@@ -83,8 +77,7 @@ func TestParseAnnotation(t *testing.T) {
 	})
 
 	t.Run("a gloss on a piece that is not a loanword", func(t *testing.T) {
-		// A model that glosses everything: only a katakana piece has a word it
-		// came from, and the window draws what a piece can have.
+		// 什么都注音的模型：只有片假名片段有原词，窗口只画片段能有的标注。
 		got := ParseAnnotation(`{"s":"機械語","r":"キカイゴ","g":"machine language","t":"机器语言"}`)
 		if !got.Segmented || len(got.Segments) != 1 {
 			t.Fatalf("segments = %+v", got.Segments)
@@ -133,9 +126,8 @@ func TestParseAnnotation(t *testing.T) {
 	})
 
 	t.Run("a compact array on one line", func(t *testing.T) {
-		// A model that ignores "每行一个对象" and answers one array is still
-		// answering: read as lines, this whole answer is one unreadable line
-		// and the annotations the user asked for are lost.
+		// 无视「每行一个对象」、改用一个数组作答的模型仍算在回答：按行读时整个回答是
+		// 一行不可读内容，用户要的标注就会丢失。
 		content := `[{"s":"モード","r":"モード","g":"mode","t":"模式"},{"s":"完備","r":"カンビ","t":"完备"}]`
 		got := ParseAnnotation(content)
 		if !got.Segmented || len(got.Segments) != 2 {
@@ -164,9 +156,8 @@ func TestParseAnnotation(t *testing.T) {
 	})
 
 	t.Run("the service's own format is never shown", func(t *testing.T) {
-		// The user's own case: a model that answered prose and then broke its
-		// own format across the answer. What is readable is shown; the braces
-		// are not. The window shows a translation, not a wire format.
+		// 用户的真实用例：模型先答散文，随后把自身格式打散在回答里。可读的显示，花括号
+		// 不显示。窗口显示的是译文，不是线格式。
 		content := `独当一面的魅魔成为了、人界降临莉莉娅！
 {"s":"\n","t":"\n"}
 {"s":"n","t":"n"}主线任务把推进一边、N
@@ -186,9 +177,8 @@ func TestParseAnnotation(t *testing.T) {
 	})
 
 	t.Run("an answer that is only its own format", func(t *testing.T) {
-		// Nothing readable came back at all: the translation is left empty
-		// rather than filled with braces, and the caller turns that into what
-		// it says about an answer it could not use.
+		// 完全没读到可读内容：译文留空而非填以花括号，调用方把它转成「无法使用此回答」
+		// 的提示。
 		content := `{"s": "one", "t": "一",
 {"s":`
 		got := ParseAnnotation(content)
@@ -201,8 +191,7 @@ func TestParseAnnotation(t *testing.T) {
 	})
 
 	t.Run("a malformed line is kept as text", func(t *testing.T) {
-		// The parser never fails: a line it cannot read is text, and the
-		// window draws it rather than losing half the answer.
+		// 解析器从不失败：读不了的行当作文本，窗口画出来，而非丢掉半个回答。
 		content := "{\"s\":\"機械語\",\"r\":\"キカイゴ\",\"t\":\"机器语言\"}\n抱歉，我无法处理这一行\n{\"s\":\"です\",\"t\":\"是\"}"
 		got := ParseAnnotation(content)
 		if !got.Segmented || len(got.Segments) != 2 {
@@ -217,9 +206,7 @@ func TestParseAnnotation(t *testing.T) {
 	})
 
 	t.Run("an object with no source piece", func(t *testing.T) {
-		// A model that answers with the translation alone in an object: the
-		// translation survives, and there is no segment to draw a reading
-		// under.
+		// 只在对象里给出译文的模型：译文保留，但没有片段可承载读音。
 		content := "{\"t\":\"编译器\"}\n{\"s\":\"機械語\",\"t\":\"机器语言\"}"
 		got := ParseAnnotation(content)
 		if !got.Segmented || len(got.Segments) != 1 {
@@ -270,9 +257,8 @@ func TestParseAnnotation(t *testing.T) {
 	})
 }
 
-// A request for readings that comes back without any is said out loud: the
-// window draws a plain translation, and a user who asked for annotations has
-// to be able to tell "the model did not send them" from "there are none".
+// 要求了读音却一条都没回来的情况要说出来：窗口画纯译文，要标注的用户得能分辨「模型没发」
+// 与「本来就没有」。
 func TestAnnotationNote(t *testing.T) {
 	wanting := AnnotationOptions{Furigana: true, LoanwordGloss: true}
 	plain := Annotation{TranslatedText: "完备回想模式"}
@@ -300,8 +286,7 @@ func TestSystemPrompt(t *testing.T) {
 	if !strings.Contains(plain, "中文") || !strings.Contains(plain, "English") {
 		t.Errorf("the plain prompt does not name the languages:\n%s", plain)
 	}
-	// A plain answer keeps the source's marks as well: the user asked for the
-	// brackets of 【…】 to survive into the translation.
+	// 纯回答同样保留原文标点：用户要求【…】的括号保留到译文里。
 	for _, want := range []string{"括号", "【】", "标点"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("the plain prompt does not ask for %s:\n%s", want, plain)
@@ -314,12 +299,8 @@ func TestSystemPrompt(t *testing.T) {
 			t.Errorf("the annotated prompt does not mention %s:\n%s", want, annotated)
 		}
 	}
-	// The two things the user asked for, as the model is told them: a
-	// katakana loanword carries the word it came from, and the punctuation
-	// gets pieces of its own so the translation keeps the source's brackets.
-	// The third is the rule the mock draws: a reading belongs to a word with
-	// kanji in it, per word and not per character, and nothing belongs above
-	// a particle.
+	// 用户对模型提出的两件事：片假名外来语带原词，标点单独成片段以使译文保留原文括号。
+	// 第三件是 mock 画出的规则：读音属于含汉字的词、按词而非按字给，助词上方什么都没有。
 	for _, want := range []string{
 		`"s":"モード"`,
 		`"g":"mode"`,
@@ -334,8 +315,7 @@ func TestSystemPrompt(t *testing.T) {
 			t.Errorf("the annotated prompt does not say %s:\n%s", want, annotated)
 		}
 	}
-	// A loanword is annotated with the word it came from, not with its own
-	// katakana: the example must not put a reading above モード.
+	// 外来语以原词标注，而非它自身的片假名：示例不得在 モード 上方给读音。
 	if strings.Contains(annotated, `{"s":"モード","r"`) {
 		t.Errorf("the example gives a loanword a reading of its own:\n%s", annotated)
 	}
@@ -357,8 +337,7 @@ func TestTruncate(t *testing.T) {
 	if cut || short != "hello" {
 		t.Errorf("Truncate(%q, 10) = %q, %v", "  hello  ", short, cut)
 	}
-	// The cut is on a character boundary: half a multi-byte character is a
-	// broken request.
+	// 截断在字符边界上：半个多字节字符是一个坏请求。
 	long, cut := Truncate("日本語のテキストです", 4)
 	if !cut {
 		t.Error("a text longer than the limit was not reported as cut")
@@ -366,8 +345,7 @@ func TestTruncate(t *testing.T) {
 	if long != "日本語の" {
 		t.Errorf("Truncate = %q, want four characters", long)
 	}
-	// A limit of zero characters cuts everything and says so: the caller is
-	// told to send nothing rather than half a request.
+	// 上限为 0 时全部截掉并报告：调用方被告知不要发送，而非发半个请求。
 	empty, cut := Truncate("原文", 0)
 	if !cut || empty != "" {
 		t.Errorf("Truncate(text, 0) = %q, %v, want it cut to nothing", empty, cut)
@@ -391,9 +369,8 @@ func TestEndpointOf(t *testing.T) {
 	}
 }
 
-// The HTTP half is what every translation goes through: one request in the
-// documented shape, one answer read out of it, and every way it can go wrong
-// turned into a domain error.
+// HTTP 这一半是所有翻译必经之路：一次按文档形状的请求、从中读出一个回答，把每种出错
+// 都转成域错误。
 func TestTranslateReadsTheAnswer(t *testing.T) {
 	var (
 		gotPath   string
@@ -443,8 +420,7 @@ func TestTranslateReadsTheAnswer(t *testing.T) {
 		t.Errorf("messages = %v, want a system and a user message", gotBody["messages"])
 	}
 
-	// A response that is the right shape but carries nothing is a bad
-	// response, not an empty translation.
+	// 形状正确却内容为空的响应是坏响应，而非空译文。
 	responder = func(w http.ResponseWriter) {
 		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"   "}}]}`))
 	}
@@ -452,8 +428,7 @@ func TestTranslateReadsTheAnswer(t *testing.T) {
 		t.Errorf("an empty answer = %v, want ErrProviderBadResponse", err)
 	}
 
-	// A response that is not the documented shape at all is the same error,
-	// and it carries the endpoint rather than the key.
+	// 完全不是文档形状的响应是同一错误，且错误带端点而非密钥。
 	responder = func(w http.ResponseWriter) {
 		_, _ = w.Write([]byte(`{"result":"你好","apiKey":"sk-secret-value"}`))
 	}
@@ -472,7 +447,7 @@ func TestTranslateReadsTheAnswer(t *testing.T) {
 		t.Errorf("the snippet is %d bytes", len(bad.Snippet))
 	}
 
-	// No choices at all.
+	// 一个 choice 都没有。
 	responder = func(w http.ResponseWriter) {
 		_, _ = w.Write([]byte(`{"choices":[]}`))
 	}
@@ -481,9 +456,8 @@ func TestTranslateReadsTheAnswer(t *testing.T) {
 	}
 }
 
-// Every HTTP failure is translated before it reaches the caller: a rejected
-// key is a key problem, a 5xx is a service problem, and neither is a raw
-// status code in the window.
+// 每种 HTTP 失败在到达调用方前都被翻译：被拒的密钥是密钥问题，5xx 是服务问题，都不该在
+// 窗口里显示原始状态码。
 func TestTranslateTranslatesStatuses(t *testing.T) {
 	cases := []struct {
 		status int
@@ -499,8 +473,7 @@ func TestTranslateTranslatesStatuses(t *testing.T) {
 	for _, tc := range cases {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(tc.status)
-			// A service that echoes the credential back inside its error: the
-			// fragment the error carries must not hold it.
+			// 在错误里回显凭据的服务：错误携带的片段绝不能含有它。
 			_, _ = w.Write([]byte(`{"error":{"message":"the request failed","key":"sk-live-9f8e7d6c5b4a"}}`))
 		}))
 		_, err := Translate(context.Background(), Options{
@@ -521,8 +494,7 @@ func TestTranslateTranslatesStatuses(t *testing.T) {
 	}
 }
 
-// A response that is not JSON at all never reaches the caller as one: the
-// HTTP client refuses it.
+// 根本不是 JSON 的响应绝不会以此形态到达调用方：HTTP 客户端拒收它。
 func TestTranslateRefusesANonJSONAnswer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`<html>gateway timeout</html>`))
@@ -560,7 +532,7 @@ func TestTranslateRefusesWhatItCannotSend(t *testing.T) {
 	}
 }
 
-// A cancelled context stops the request rather than being waited out.
+// 已取消的 context 会中止请求，而非等它结束。
 func TestTranslateHonoursCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
@@ -583,10 +555,8 @@ func TestTranslateHonoursCancellation(t *testing.T) {
 	}
 }
 
-// A screenshot is read and translated in one model turn, which takes longer
-// than an ordinary API call. The image request must not be cut off by the HTTP
-// client's 10-second default: otherwise the stream stops mid-answer and the
-// app reports its own deadline as a network timeout.
+// 一张截图在一次模型回合内完成识别与翻译，比普通 API 调用久。图片请求不能被 HTTP 客户端
+// 10 秒默认截断：否则流会在回答中途停下，应用便把自己的期限报成网络超时。
 func TestImageRequestIsNotCappedByTheOrdinaryTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
@@ -595,7 +565,7 @@ func TestImageRequestIsNotCappedByTheOrdinaryTimeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// A client whose ordinary requests would give up long before the answer.
+	// 一个普通请求会远早于答案就放弃的客户端。
 	client := httpc.New(httpc.Options{Timeout: 20 * time.Millisecond})
 	if _, err := TranslateImage(context.Background(), ImageOptions{
 		Client:  client,
@@ -609,7 +579,7 @@ func TestImageRequestIsNotCappedByTheOrdinaryTimeout(t *testing.T) {
 	}
 }
 
-// A caller that needs a narrower deadline can still ask for one.
+// 需要更短期限的调用方仍可自行指定。
 func TestImageRequestHonoursANarrowerTimeout(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(100 * time.Millisecond)
@@ -631,9 +601,7 @@ func TestImageRequestHonoursANarrowerTimeout(t *testing.T) {
 	}
 }
 
-// A screenshot's thinking trace is larger than an ordinary JSON body. The
-// image stream has to accept that, or the card reports the ceiling as a
-// response it could not read.
+// 截图的思考链比普通 JSON 体大。图片流必须接受它，否则卡片会把这个上限报成无法读取的响应。
 func TestImageStreamIsNotCappedByTheOrdinaryResponseLimit(t *testing.T) {
 	event := "data: {\"choices\":[{\"delta\":{\"content\":null,\"reasoning_content\":\"x\"}}]}\n\n"
 	var body strings.Builder

@@ -1,35 +1,22 @@
-// Package selection reads what the user has selected in another application.
+// Package selection 读取用户在另一个应用里选中的内容。
 //
-// It exists because reading the selection is a better answer than reading the
-// clipboard: the clipboard is what was copied last, and the selection is what
-// the user is looking at. On Windows the first answer comes from UI Automation,
-// which is the same interface a screen reader reads a control with; on macOS
-// it comes from the Accessibility API.
+// 它存在是因为读取选中内容比读取剪贴板更好：剪贴板是上次复制的东西，而选中内容是用户正在
+// 看的东西。Windows 上第一个答案来自 UI Automation，也就是屏幕阅读器读取控件的接口；macOS
+// 上来自辅助功能 API。
 //
-// Neither covers everything: a browser turns its accessibility on only when it
-// is first asked, an application may not publish its text at all (the Windows
-// 11 Notepad is one), and a chat window may answer nothing however it is
-// asked. So the device has a second answer, which is what other desktop
-// translation tools do and is why they work everywhere: **ask the application
-// to copy**. The copy goes to the clipboard, the text is read from there, and
-// what was on the clipboard before is put back — which is stated here rather
-// than hidden because it is the one thing this package does that the user can
-// notice.
+// 两者都不覆盖全部：浏览器首次被询问时才开启辅助功能，某些应用根本不发布文本（Windows 11
+// 记事本即是一例），聊天窗口无论怎么问都可能返回空。因此设备还有第二个答案，也是其他桌面
+// 翻译工具的做法、让它们处处可用的原因：**请应用复制**。复制进入剪贴板，从中读出文本，再把
+// 原内容还原——这里写明而非隐藏，因为这是本包唯一用户能察觉的操作。
 //
-// What is on the clipboard and cannot be put back — a bitmap whose bytes the
-// platform would not hand over — is never copied over: a translation is not
-// worth losing the user's screenshot. A copy in a console window is not made
-// either: there the copy combination is a signal, not a copy. On macOS the
-// same rule is applied to a secure input field.
+// 剪贴板上无法还原的内容——平台不肯交出字节的位图——绝不复制覆盖：翻译不值得丢掉用户的截图。
+// 控制台窗口里也不做复制：那里复制组合键是信号而非复制。macOS 上对安全输入框应用同样的规则。
 //
-// A system with no such interface at all, an application that answers nothing
-// and a selection of nothing are all ordinary answers: they mean the caller
-// should fall back to the clipboard it already has, and ErrSelectionUnavailable
-// says so rather than describing a failure.
+// 完全没有该接口的系统、返回空的应用和空选中都是常见答案：都意味着调用方应回退到已有的
+// 剪贴板，ErrSelectionUnavailable 表达这一点而非描述失败。
 //
-// The implementations live in selection_windows.go, selection_darwin.go and
-// selection_other.go: the first two have both answers, and the rest answer with
-// the same "not here" as an application that publishes nothing.
+// 实现位于 selection_windows.go、selection_darwin.go 和 selection_other.go：前两者有两种
+// 答案，其余返回与应用不发布文本时相同的「此处不可用」。
 package selection
 
 import (
@@ -42,69 +29,49 @@ import (
 	"boku/internal/platform/logonce"
 )
 
-// DefaultTimeout bounds one reading of the selection, all attempts together. It
-// is short: the answer is about what the user has in front of them now, and a
-// request that took longer than this is one the user has already moved on from —
-// the clipboard then answers instead.
+// DefaultTimeout 限定一次读取选中内容的总时长（含所有尝试）。它很短：答案关乎用户此刻眼前的
+// 东西，超过这个时长的请求用户早已转向别处——那时改由剪贴板回答。
 const DefaultTimeout = 2 * time.Second
 
-// DefaultAttempts and DefaultRetryGap say how a reading that answers nothing is
-// tried again.
+// DefaultAttempts 和 DefaultRetryGap 说明返回空的读取如何重试。
 //
-// One reading is not enough, and the reason is a property of the applications
-// being read: an application that no accessibility client has ever asked — a
-// browser, typically — turns its accessibility on when it is *first* asked and
-// builds its tree a moment later, so the first reading comes back with nothing
-// to say and the next one has the selection. Measured on a freshly started
-// Chrome: the first reading answered nothing at 25ms, the second had the
-// selected text 105ms later. Four attempts 150ms apart answer that case and
-// still reach the copy below — which is what an application with nothing
-// selected has to reach — in under half a second.
+// 一次读取不够，原因是被读取应用的特性：从未被辅助功能客户端询问过的应用——通常是浏览器——
+// 在首次被询问时才开启辅助功能、稍后才建树，所以第一次读返回空，下一次才有选中内容。以刚启动
+// 的 Chrome 实测：25ms 时首次返回空，105ms 后第二次才有选中文本。四次尝试、间隔 150ms 能
+// 应对该情况，并在半秒内走到下面的复制——无选中的应用也必须走到那里。
 const (
 	DefaultAttempts = 4
 	DefaultRetryGap = 150 * time.Millisecond
 )
 
-// CopyWait and CopyStep bound the wait for an application to answer a synthetic
-// copy. The clipboard's own write counter is watched in steps, so a fast
-// application answers in one step and a slow one is given the whole of
-// CopyWait.
+// CopyWait 和 CopyStep 限定等待应用响应合成复制的时长。分步监视剪贴板自带的写计数器，
+// 快的应用一步即答，慢的给足整个 CopyWait。
 const (
 	CopyWait = 200 * time.Millisecond
 	CopyStep = 10 * time.Millisecond
 )
 
-// Options is what a device is assembled from.
+// Options 是组装设备所需的参数。
 type Options struct {
-	// Clipboard is the platform clipboard, which the copy fallback reads and
-	// puts back. Without one the device only reads what UI Automation
-	// publishes.
+	// Clipboard 是平台剪贴板，复制方案读取并还原它。没有它设备只读取 UI Automation 发布的内容。
 	Clipboard domain.ClipboardDevice
-	// BeforeCopy, when set, is called immediately before the synthetic copy.
-	// The clipboard tool uses it to keep the value that copy puts on the
-	// clipboard out of the history: it is not something the user copied, and
-	// the tool is about to put back what was.
+	// BeforeCopy 设置时在合成复制前立即调用。剪贴板工具用它把复制放进剪贴板的值排除在
+	// 历史之外：那不是用户复制的，而且工具随后要还原原内容。
 	BeforeCopy func()
-	// Sequence is the clipboard's write counter, when the platform has one.
-	// It is what tells a copy that replaced the clipboard from a copy that
-	// selected nothing: an application with no selection answers the copy
-	// with nothing, and the counter does not move.
+	// Sequence 是剪贴板的写计数器（平台有时）。它区分「替换了剪贴板的复制」和「没有选中内容的
+	// 复制」：无选中的应用对复制返回空，计数器不动。
 	//
-	// It is a function rather than a platform call so that the copy fallback
-	// is the same logic on every platform that has a counter; a platform
-	// without one leaves it nil and does not use the fallback.
+	// 用函数而非平台调用，使复制回退在有计数器的各平台上是同一套逻辑；没有计数器的平台留空，
+	// 不使用回退。
 	Sequence func() uint32
 }
 
-// attempt is one reading of the selection: the text, or "" when the platform
-// had nothing to say within the time it was given.
+// attempt 是一次读取：文本，或平台在给定时限内无话可说时的 ""。
 type attempt func(ctx context.Context, within time.Duration) string
 
-// readUntilAnswered tries a reading until one of them answers, the attempts run
-// out, the deadline passes or the caller gives up.
+// readUntilAnswered 反复尝试读取，直到某次有答案、尝试次数用尽、超时或调用方放弃。
 //
-// It is separate from the platform it runs on so that the retrying — which is
-// where the subtlety is — can be tested without a desktop session.
+// 与所运行的平台分开，以便不带桌面会话也能测试重试——微妙之处正在于此。
 func readUntilAnswered(ctx context.Context, read attempt, attempts int, gap time.Duration, deadline time.Time) string {
 	for round := 0; round < attempts; round++ {
 		if round > 0 {
@@ -125,26 +92,20 @@ func readUntilAnswered(ctx context.Context, read attempt, attempts int, gap time
 	return ""
 }
 
-// readWithACopy asks the application itself for its selection: press is the
-// copy combination, sequence is the clipboard's own write counter, and what the
-// copy puts on the clipboard is read and then replaced by what was there.
+// readWithACopy 请应用自己提供选中内容：press 是复制组合键，sequence 是剪贴板自带的写
+// 计数器，复制放进剪贴板的内容被读出，然后被原内容替换。
 //
-// The write counter is what tells "nothing is selected" from "an empty
-// selection": an application with nothing selected answers the copy with
-// nothing, and its counter does not move. The wait is bounded, and so is the
-// damage — a clipboard this tool cannot put back is left alone rather than
-// copied over.
+// 写计数器区分「没有选中」和「空选中」：无选中的应用对复制返回空，其计数器不动。等待有界，
+// 损害也有界——本工具无法还原的剪贴板不被复制覆盖。
 //
-// It is here rather than in the platform file so that the whole of the decision
-// can be tested with a fake clipboard and a fake copy.
+// 放在这里而非平台文件，是为了用假剪贴板和假复制测试整套决策。
 func readWithACopy(ctx context.Context, clipboard domain.ClipboardDevice, beforeCopy func(), sequence func() uint32, press func()) string {
 	if clipboard == nil {
 		return ""
 	}
 	saved, savedErr := clipboard.Read(ctx)
 	if savedErr == nil && !putBackable(saved) {
-		// Something this tool cannot restore is on the clipboard. Copying over
-		// it would lose it, and a translation is not worth that.
+		// 剪贴板上是本工具无法还原的东西。覆盖它会导致丢失，翻译不值得这样。
 		return ""
 	}
 	was := sequence()
@@ -153,25 +114,20 @@ func readWithACopy(ctx context.Context, clipboard domain.ClipboardDevice, before
 	}
 	press()
 	if !waitForTheClipboardToChange(sequence, was, CopyWait, CopyStep, time.Sleep) {
-		// The application answered the copy with nothing, which is what an
-		// application with no selection does.
+		// 应用对复制返回空，这是无选中的应用的表现。
 		return ""
 	}
 	got, gotErr := clipboard.Read(ctx)
 	putBack(ctx, clipboard, saved, savedErr)
 	if gotErr != nil || got.Kind != domain.ClipKindText {
-		// A file list or an image arrived: neither is text to translate, and
-		// the clipboard has been put back either way.
+		// 到达的是文件列表或图片：都不是可翻译文本，且无论哪种剪贴板都已还原。
 		return ""
 	}
 	return got.Text
 }
 
-// putBackable reports whether what is on the clipboard can be put back after a
-// synthetic copy has replaced it: text, a file list, and a bitmap whose bytes
-// came with the reading. A bitmap whose bytes could not be read cannot — and
-// nothing may destroy what it cannot restore, which is what the user's
-// screenshot would be.
+// putBackable 报告剪贴板上的内容能否在合成复制替换它之后还原：文本、文件列表，以及读取时
+// 连字节一起拿到的位图。拿不到字节的位图不行——不能破坏无法还原的东西，那正是用户的截图。
 func putBackable(content domain.ClipContent) bool {
 	switch content.Kind {
 	case domain.ClipKindText, domain.ClipKindFile:
@@ -182,19 +138,14 @@ func putBackable(content domain.ClipContent) bool {
 	return false
 }
 
-// putBack puts the clipboard back the way the copy found it.
+// putBack 把剪贴板还原成复制发现时的样子。
 //
-// A write that fails is logged and not returned: the caller asked for the
-// selection, and the copy it made has already happened either way — there is
-// nothing it could do differently, and failing the reading over a clipboard
-// that would not take the old value back would turn a translation into an
-// error about something the user did not ask about. It is still worth a line:
-// the user's previous clipboard is gone at that point, and this is the only
-// record of why.
+// 写失败只记录不返回：调用方要的是选中内容，而它做的复制无论如何已经发生——它没有别的选择，
+// 因为剪贴板不肯接回旧值而让读取失败，会把一次翻译变成用户没问过的错误。但仍值得记一行：
+// 此时用户之前的剪贴板已丢失，这是唯一的记录。
 func putBack(ctx context.Context, clipboard domain.ClipboardDevice, saved domain.ClipContent, savedErr error) {
 	if savedErr != nil {
-		// Nothing could be read, so there is nothing to put back: the copy was
-		// made over a clipboard this tool cannot describe.
+		// 什么都读不到，也就没有可还原的：复制发生在本工具无法描述的剪贴板上。
 		return
 	}
 	var err error
@@ -206,10 +157,8 @@ func putBack(ctx context.Context, clipboard domain.ClipboardDevice, saved domain
 	default:
 		err = clipboard.WriteText(ctx, saved.Text)
 	}
-	// Deduplicated: this runs once per selection read, which is once per
-	// shortcut press or per screenshot tap — a user pressing the key again
-	// because nothing happened would otherwise write the same line each time,
-	// and the clipboard being unusable is not news after the first minute.
+	// 去重：每次读取选中内容都会执行（每次快捷键或截图），用户因没反应而再次按键时否则会
+	// 每次写同一行，而剪贴板不可用过了第一分钟就不再是新闻。
 	if err != nil && logonce.Should("selection-clipboard-restore", err.Error()) {
 		slog.Warn("the clipboard could not be put back after reading the selection", "event", "clipboard_restore_failed", "kind", saved.Kind, "error", err)
 	}
@@ -218,11 +167,9 @@ func putBack(ctx context.Context, clipboard domain.ClipboardDevice, saved domain
 	}
 }
 
-// waitForTheClipboardToChange waits for the clipboard to be written to, as the
-// system itself counts writes. It reports whether it changed.
+// waitForTheClipboardToChange 等待剪贴板被写入，以系统自己的计数方式判断，返回是否变化。
 //
-// The counter and the clock are arguments so that the waiting can be tested
-// without a clipboard and without spending the time it waits for.
+// 计数器与时钟是参数，以便不带剪贴板、不实际消耗等待时间地测试。
 func waitForTheClipboardToChange(sequence func() uint32, was uint32, budget, step time.Duration, sleep func(time.Duration)) bool {
 	for waited := time.Duration(0); waited < budget; waited += step {
 		if sequence() != was {

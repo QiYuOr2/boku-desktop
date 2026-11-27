@@ -1,19 +1,14 @@
-// Package deepseek is everything this application knows about DeepSeek: the
-// panel its balance is shown in, the request that reads it, and the pure
-// mapping from the service's answer to the application's snapshot.
+// Package deepseek 包含本应用关于 DeepSeek 的全部知识：展示余额的面板、
+// 读取余额的请求，以及把服务响应纯映射为应用快照的代码。
 //
-// It is one package because it is one vendor: the panel's definition, the
-// credential it needs and the shape of its response change together, and a
-// change to any of them is a change to DeepSeek. What is *not* here is the
-// service's identity — the provider id and the credential key — which lives
-// in internal/contract/deepseek, because the translator talks to the same
-// service under the same name.
+// 之所以是同一个包，因为它属于同一个厂商：面板定义、所需凭据与响应结构
+// 一起变化，改任何一个都是改 DeepSeek。这里不包含的是服务身份——provider id
+// 与凭据 key——它们放在 internal/contract/deepseek，因为翻译器以同样的名字
+// 访问同一个服务。
 //
-// The division inside the package is by kind of code, and it is kept by
-// review: spec.go is configuration, client.go reaches the network and does
-// error translation, adapter.go is a pure function of the response. Nothing
-// in adapter.go may read the clock, open a file or make a request — it is
-// what makes the mapping testable from a fixture.
+// 包内按代码性质分文件，并由 review 维持：spec.go 是配置，client.go 出网并做
+// 错误翻译，adapter.go 是响应的纯函数。adapter.go 中不得读时钟、开文件或
+// 发请求——这正是映射可以用 fixture 测试的原因。
 package deepseek
 
 import (
@@ -22,34 +17,30 @@ import (
 )
 
 const (
-	// PanelID is stable across launches: the snapshot cache and the
-	// database key on it.
+	// PanelID 跨启动稳定：快照缓存与数据库都以它为键。
 	PanelID = "0198a1b2-0000-7000-8000-000000000001"
 
-	// RefreshEverySeconds is how long a balance stays fresh. The balance
-	// endpoint is cheap, so it is far below the global floor; the
-	// provider's own floor is what actually constrains it.
+	// RefreshEverySeconds 是余额保持新鲜的时长。余额端点开销小，因此远低于
+	// 全局下限；真正约束它的是 provider 自己的下限。
 	RefreshEverySeconds = 600
 )
 
-// The panel's metric keys.
+// 面板的指标 key。
 const (
 	MetricBalanceMinor  = "balanceMinor"
 	MetricGrantedMinor  = "grantedMinor"
 	MetricToppedUpMinor = "toppedUpMinor"
 )
 
-// PreferCurrency is the currency picked when the account reports several.
-// It is a preference, not a requirement: an account reporting only USD is
-// shown in USD.
+// PreferCurrency 是账户报告多种币种时选用的币种。它是偏好而非强制：
+// 只报告 USD 的账户就按 USD 显示。
 const PreferCurrency = "CNY"
 
-// UsageURL is DeepSeek's own page for the account: what the balance of the
-// panel is a summary of. The panel's headline opens it, so it belongs with
-// the rest of what this provider's panel is, next to its keys and titles.
+// UsageURL 是 DeepSeek 自己的账户页：面板的余额就是它的摘要。面板主指标会
+// 打开它，所以它和这个 provider 面板的其他定义（key、标题）放在一起。
 const UsageURL = "https://platform.deepseek.com/usage"
 
-// Panel returns the balance panel.
+// Panel 返回余额面板。
 func Panel() domain.Panel {
 	return domain.Panel{
 		ID:           PanelID,
@@ -63,8 +54,7 @@ func Panel() domain.Panel {
 	}
 }
 
-// Metrics returns the panel's metrics, in the order they are shown: the
-// balance first, because it is the headline.
+// Metrics 返回面板的指标，按显示顺序：余额在前，因为它是主指标。
 func Metrics() []domain.Metric {
 	return []domain.Metric{
 		{
@@ -97,7 +87,7 @@ func Metrics() []domain.Metric {
 	}
 }
 
-// Metric returns one metric by key, and whether it is the panel's.
+// Metric 按 key 返回指标，以及它是否属于该面板。
 func Metric(key string) (domain.Metric, bool) {
 	for _, m := range Metrics() {
 		if m.Key == key {

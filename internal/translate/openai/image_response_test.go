@@ -47,8 +47,8 @@ func TestReadSSEConsumesAMultilineEvent(t *testing.T) {
 }
 
 func TestReadSSEIgnoresNullContent(t *testing.T) {
-	// DeepSeek thinking mode sends content:null on reasoning chunks, then the
-	// answer. A null content is an empty delta, not a malformed event.
+	// DeepSeek 思考模式在推理块上发送 content:null，随后才是答案。null 是空增量，不是
+	// 畸形事件。
 	stream := strings.NewReader("data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":null,\"reasoning_content\":\"look\"}}]}\n\n" +
 		"data: {\"choices\":[{\"delta\":{\"content\":\"{\\\"status\\\":\\\"success\\\"}\",\"reasoning_content\":null}}]}\n\n" +
 		"data: [DONE]\n\n")

@@ -8,16 +8,14 @@ import (
 	"boku/internal/domain"
 )
 
-// fakeClipboard is the platform clipboard, with what a copy puts on it decided
-// by the test.
 type fakeClipboard struct {
 	content domain.ClipContent
 	err     error
-	// writes is what was put back, oldest first.
+	// writes 是还原过的内容，最早在前。
 	writes []string
-	// files is what a file list was put back as.
+	// files 是文件列表还原成的样子。
 	files [][]string
-	// images is what a bitmap was put back as.
+	// images 是位图还原成的样子。
 	images [][]byte
 }
 
@@ -43,9 +41,8 @@ func (f *fakeClipboard) WriteImage(_ context.Context, png []byte) error {
 	return nil
 }
 
-// TestACopyIsWhatIsReadAndTheClipboardIsPutBack is the whole point of the
-// fallback: an application that publishes nothing is asked to copy, the text
-// arrives on the clipboard, and what the user had there is put back.
+// TestACopyIsWhatIsReadAndTheClipboardIsPutBack 是回退方案的全部意义：不发布文本的应用
+// 被要求复制，文本到达剪贴板，用户原有的内容被还原。
 func TestACopyIsWhatIsReadAndTheClipboardIsPutBack(t *testing.T) {
 	clipboard := &fakeClipboard{content: domain.ClipContent{Kind: domain.ClipKindText, Text: "what the user had"}}
 	var sequence uint32 = 7
@@ -71,9 +68,7 @@ func TestACopyIsWhatIsReadAndTheClipboardIsPutBack(t *testing.T) {
 	}
 }
 
-// An application with nothing selected answers the copy with nothing, and that
-// is "no selection" rather than an empty translation: the clipboard's own write
-// counter says which of the two happened.
+// 无选中的应用对复制返回空，这是「没有选中」而非空翻译：剪贴板自己的写计数器区分两者。
 func TestACopyThatChangesNothingIsNoSelection(t *testing.T) {
 	clipboard := &fakeClipboard{content: domain.ClipContent{Kind: domain.ClipKindText, Text: "what the user had"}}
 	text := readWithACopy(context.Background(), clipboard,
@@ -88,10 +83,8 @@ func TestACopyThatChangesNothingIsNoSelection(t *testing.T) {
 	}
 }
 
-// A picture on the clipboard is not a reason to refuse to read the selection:
-// it is saved, the copy is made over it, and the picture goes back. This is
-// what the user hit — a screenshot on the clipboard made every selection
-// translation answer "the clipboard holds no text".
+// 剪贴板上有图片不是拒绝读取选中的理由：它被保存，复制覆盖后再还原。这正是用户遇到的
+// 问题——剪贴板里的截图会让每次划词翻译都回答「剪贴板没有文本」。
 func TestAPictureOnTheClipboardIsPutBack(t *testing.T) {
 	picture := []byte("89504e470d0a1a0a-screenshot")
 	clipboard := &fakeClipboard{content: domain.ClipContent{
@@ -115,8 +108,7 @@ func TestAPictureOnTheClipboardIsPutBack(t *testing.T) {
 	}
 }
 
-// A picture whose bytes could not be read is the one thing still left alone:
-// copying over it would lose it, and this tool cannot put it back.
+// 读不出字节的图片是唯一仍不动的东西：复制覆盖会丢失它，而本工具无法还原。
 func TestAPictureWithoutItsBytesIsNotCopiedOver(t *testing.T) {
 	clipboard := &fakeClipboard{content: domain.ClipContent{
 		Kind: domain.ClipKindImage, HasImage: true, ImageBytes: 4096,
@@ -133,8 +125,7 @@ func TestAPictureWithoutItsBytesIsNotCopiedOver(t *testing.T) {
 	}
 }
 
-// A copy that brings back a file list or an image is not a text to translate,
-// and the clipboard is put back all the same.
+// 复制回来的是文件列表或图片时不是可翻译文本，但剪贴板照样还原。
 func TestACopyOfSomethingOtherThanTextIsNotATranslation(t *testing.T) {
 	for _, arrived := range []domain.ClipContent{
 		{Kind: domain.ClipKindFile, Files: []string{`C:\a.txt`}},
@@ -154,8 +145,7 @@ func TestACopyOfSomethingOtherThanTextIsNotATranslation(t *testing.T) {
 	}
 }
 
-// A clipboard this tool cannot read is not a reason to refuse: the copy is made
-// over it and there is simply nothing to put back.
+// 本工具读不了的剪贴板不是拒绝的理由：复制照常在它上面进行，只是没有可还原的东西。
 func TestACopyOverAnUnknownClipboardIsStillMade(t *testing.T) {
 	clipboard := &fakeClipboard{err: domain.ErrUnsupportedClipboardFormat}
 	var sequence uint32 = 5
@@ -174,8 +164,7 @@ func TestACopyOverAnUnknownClipboardIsStillMade(t *testing.T) {
 	}
 }
 
-// The waiting is bounded by the budget, and it stops as soon as the counter
-// moves: a fast application is not made to wait for a slow one's budget.
+// 等待受预算限制，且计数器一变化就停止：快的应用不必等慢应用的预算。
 func TestTheWaitForTheCopyIsBounded(t *testing.T) {
 	slept := time.Duration(0)
 	steps := 0
@@ -193,8 +182,7 @@ func TestTheWaitForTheCopyIsBounded(t *testing.T) {
 		t.Errorf("the wait slept %v, want no more than the budget", slept)
 	}
 
-	// A counter that moves on the third look: the wait ends there rather than
-	// running out its budget.
+	// 计数器在第三次查看时变化：等待就此结束，而不是耗尽预算。
 	looks := 0
 	changed = waitForTheClipboardToChange(
 		func() uint32 {
@@ -217,8 +205,7 @@ func TestTheWaitForTheCopyIsBounded(t *testing.T) {
 	}
 }
 
-// A reading that answers is the answer: the retrying exists for applications
-// that need asking twice, not for making a working reading slower.
+// 有答案的读取就是答案：重试是为了需要询问两次的应用，不是为了让正常读取变慢。
 func TestAReadingThatAnswersIsNotRepeated(t *testing.T) {
 	asked := 0
 	text := readUntilAnswered(context.Background(), func(context.Context, time.Duration) string {
@@ -233,10 +220,8 @@ func TestAReadingThatAnswersIsNotRepeated(t *testing.T) {
 	}
 }
 
-// The case this was written for: an application that has never been asked by an
-// accessibility client answers nothing the first time and has the selection on
-// the second reading (measured against a freshly started Chrome: 25ms and then
-// 105ms later).
+// 写此测试的场景：从未被辅助功能客户端询问过的应用首次返回空，第二次读取才有选中内容
+// （以刚启动的 Chrome 实测：25ms 时为空，105ms 后才是选中文本）。
 func TestAReadingThatAnswersNothingIsTriedAgain(t *testing.T) {
 	asked := 0
 	text := readUntilAnswered(context.Background(), func(context.Context, time.Duration) string {
@@ -254,8 +239,7 @@ func TestAReadingThatAnswersNothingIsTriedAgain(t *testing.T) {
 	}
 }
 
-// An application with nothing selected is the ordinary case, and the clipboard
-// is waiting behind it: the attempts are bounded and so is the wait.
+// 未选中任何内容是最常见的情况，剪贴板在它之后等着：尝试次数有限，等待也有限。
 func TestNothingSelectedGivesUpAfterTheAttempts(t *testing.T) {
 	asked := 0
 	start := time.Now()
@@ -274,8 +258,7 @@ func TestNothingSelectedGivesUpAfterTheAttempts(t *testing.T) {
 	}
 }
 
-// The overall bound is the whole reading, retries included: a reading that has
-// already run out of time does not start another attempt.
+// 总时限覆盖整次读取（含重试）：已超时的读取不会再发起下一次尝试。
 func TestTheDeadlineEndsTheRetrying(t *testing.T) {
 	asked := 0
 	text := readUntilAnswered(context.Background(), func(context.Context, time.Duration) string {
@@ -287,7 +270,7 @@ func TestTheDeadlineEndsTheRetrying(t *testing.T) {
 	}
 }
 
-// A caller that has given up is not kept waiting through the gaps.
+// 已放弃的调用方不会在间隔里继续被拖住。
 func TestACancelledReadingStopsBetweenAttempts(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	asked := 0

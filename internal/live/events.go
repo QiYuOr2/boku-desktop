@@ -11,11 +11,10 @@ const (
 	eventSilence = "silence"
 )
 
-// ParseLine reads one CrispASR --stream-json line.
+// ParseLine 解析一行 CrispASR --stream-json 输出。
 //
-// A line that is not one of partial, final or silence is ignored. partial.text
-// is already the whole open sentence, and final.text is the only string that
-// is translated.
+// 不是 partial、final 或 silence 的行一律忽略。partial.text 已是当前完整句子，
+// 而 final.text 是唯一会被翻译的字符串。
 func ParseLine(line string) (kind, text string, ok bool) {
 	line = strings.TrimSpace(line)
 	if line == "" || line[0] != '{' {

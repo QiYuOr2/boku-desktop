@@ -16,14 +16,13 @@ import (
 	"boku/internal/platform/httpc"
 )
 
-// feedJSON wraps items in the space feed's envelope.
+// feedJSON 把 items 包进 space feed 的外壳。
 func feedJSON(items string) string {
 	return `{"code":0,"message":"0","data":{"has_more":false,"items":[` + items + `]}}`
 }
 
-// itemJSON builds one space feed item in the shape the web endpoint returns:
-// one modules object, the author under module_author, the body under
-// module_dynamic.
+// itemJSON 按 web 接口返回的形状构造一条 space feed item：一个 modules 对象，
+// module_author 放作者，module_dynamic 放正文。
 func itemJSON(id, kind string, mid int64, name, face string, pubTS int64, desc, archiveBVID, archiveTitle string) string {
 	parts := make([]string, 0, 2)
 	if desc != "" {
@@ -39,8 +38,7 @@ func itemJSON(id, kind string, mid int64, name, face string, pubTS int64, desc, 
 
 const navKeys = `{"code":-101,"message":"账号未登录","data":{"wbi_img":{"img_url":"https://i0.hdslb.com/bfs/wbi/7cd084941338484aae1ad9425b84077c.png","sub_url":"https://i0.hdslb.com/bfs/wbi/4932caff0ff746eab6f01bf08b70ac45.png"}}}`
 
-// feedServer stands in for Bilibili: the site bootstrap, the nav keys, the
-// space feed and the live status.
+// feedServer 代替 B 站：站点引导、nav 密钥、space feed 和直播状态。
 type feedServer struct {
 	mu         sync.Mutex
 	feeds      map[string]string
@@ -58,7 +56,7 @@ func (f *feedServer) count() int {
 	return f.feedCalls
 }
 
-// newFeedServer points the package at a test server and restores it afterwards.
+// newFeedServer 把包内指向测试服务器，结束后还原。
 func newFeedServer(t *testing.T) *feedServer {
 	t.Helper()
 	f := &feedServer{}
@@ -84,8 +82,7 @@ func newFeedServer(t *testing.T) *feedServer {
 			status := f.feedStatus
 			body, ok := f.feeds[r.URL.Query().Get("host_mid")]
 			f.mu.Unlock()
-			// A request without a signature or without the identity cookie is
-			// what Bilibili blocks, so the stand-in blocks it the same way.
+			// 缺少签名或缺少身份 cookie 会被 B 站拦截，替身按同样方式拦截。
 			if r.URL.Query().Get("w_rid") == "" || r.URL.Query().Get("wts") == "" ||
 				!strings.Contains(r.Header.Get("Cookie"), "buvid3=") {
 				_, _ = w.Write([]byte(`{"code":-412,"message":"request was banned"}`))
@@ -109,7 +106,7 @@ func newFeedServer(t *testing.T) *feedServer {
 			body, ok := f.liveStatus[uid]
 			f.mu.Unlock()
 			if !ok {
-				// Quiet by default: a room that is not on air.
+				// 默认安静：房间未开播。
 				body = `{"code":0,"data":{"` + uid + `":{"live_status":0,"uid":` + uid + `}}}`
 			}
 			_, _ = w.Write([]byte(body))
@@ -128,7 +125,7 @@ func newFeedServer(t *testing.T) *feedServer {
 	return f
 }
 
-// testPNG is a decodable 1x1 PNG.
+// testPNG 是一个可解码的 1x1 PNG。
 var testPNG = []byte{
 	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 	0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
@@ -182,8 +179,7 @@ func TestRefreshPlacesLiveCreatorFirst(t *testing.T) {
 	}
 }
 
-// The feed request has to be signed and carry the identity cookie; without
-// either, Bilibili answers -412.
+// feed 请求必须签名并携带身份 cookie，缺任一项 B 站都会返回 -412。
 func TestRefreshSignsTheFeedRequest(t *testing.T) {
 	f := newFeedServer(t)
 	f.feeds = map[string]string{"1": feedJSON(itemJSON("1", "DYNAMIC_TYPE_WORD", 1, "UP", "", 1700000000, "动态", "", ""))}
@@ -210,11 +206,10 @@ func TestRefreshSignsTheFeedRequest(t *testing.T) {
 	}
 }
 
-// A creator's avatar is available to the presentation after a refresh.
+// 刷新后展示层能取到 UP 的头像。
 func TestRefreshFetchesCreatorAvatar(t *testing.T) {
 	f := newFeedServer(t)
-	// The avatar URL is relative to the host, which is what the endpoint
-	// returns; serveImage turns it into the test server's own address.
+	// 头像 URL 相对主机，这是接口的返回形式；serveImage 会把它换成测试服务器地址。
 	f.feeds = map[string]string{"1": feedJSON(itemJSON("1", "DYNAMIC_TYPE_WORD", 1, "UP", "/bfs/face/1.png", 1700000000, "动态", "", ""))}
 	service := newTestService(t, Settings{Enabled: true, UIDs: []int64{1}})
 	if err := service.Refresh(context.Background()); err != nil {
@@ -225,7 +220,7 @@ func TestRefreshFetchesCreatorAvatar(t *testing.T) {
 	}
 }
 
-// A creator with no avatar URL is not a failed refresh.
+// UP 没有头像 URL 不算刷新失败。
 func TestRefreshWithoutAvatarIsFine(t *testing.T) {
 	f := newFeedServer(t)
 	f.feeds = map[string]string{"1": feedJSON(itemJSON("1", "DYNAMIC_TYPE_WORD", 1, "UP", "", 1700000000, "动态", "", ""))}
@@ -238,13 +233,11 @@ func TestRefreshWithoutAvatarIsFine(t *testing.T) {
 	}
 }
 
-// Bilibili answers a throttled request with code 0 and an empty list, so the
-// feed retries before it believes an empty answer.
+// B 站对被限流的请求返回 code 0 和空列表，所以 feed 在相信空结果前会重试。
 func TestRefreshRetriesAnEmptyFeed(t *testing.T) {
 	var mu sync.Mutex
 	calls := 0
-	// The first feed answer is empty and the second carries an item, which is
-	// what a throttled request followed by a good one looks like.
+	// 第一次 feed 返回空、第二次返回一条，正是被限流后恢复正常的样子。
 	recovering := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/":
@@ -288,8 +281,7 @@ func TestRefreshRetriesAnEmptyFeed(t *testing.T) {
 	}
 }
 
-// An empty feed after a real post must not replace that post. Bilibili uses
-// the same empty list for throttling, and believing it wipes the last row.
+// 空列表不能覆盖真实发过的帖子：B 站用同样的空列表表示限流，轻信它会抹掉上一行。
 func TestRefreshKeepsThePreviousPostWhenTheFeedIsEmpty(t *testing.T) {
 	f := newFeedServer(t)
 	f.feeds = map[string]string{"1": feedJSON(itemJSON("1", "DYNAMIC_TYPE_AV", 1, "UP", "", 1700000000, "", "BV1", "新视频"))}
@@ -319,7 +311,7 @@ func TestRefreshKeepsThePreviousPostWhenTheFeedIsEmpty(t *testing.T) {
 	}
 }
 
-// A creator that really has nothing is not an error once the retries are spent.
+// 重试耗尽后，确实没有内容的 UP 不是错误。
 func TestRefreshAcceptsAnEmptyFeedAfterRetries(t *testing.T) {
 	f := newFeedServer(t)
 	f.feeds = map[string]string{"1": feedJSON("")}
@@ -336,8 +328,7 @@ func TestRefreshAcceptsAnEmptyFeedAfterRetries(t *testing.T) {
 	}
 }
 
-// Without WBI keys the query cannot be signed, and that is reported rather
-// than silently returning nothing.
+// 缺少 WBI 密钥时无法签名查询，要报错而不是静默返回空。
 func TestRefreshReportsMissingKeys(t *testing.T) {
 	f := newFeedServer(t)
 	f.navBody = `{"code":-101,"data":{}}`
@@ -351,8 +342,7 @@ func TestRefreshReportsMissingKeys(t *testing.T) {
 	}
 }
 
-// An HTTP block carries its status to the card: 412 is a block, not a shape
-// change.
+// HTTP 拦截会把状态码带到卡片：412 是拦截，不是响应结构变化。
 func TestRefreshRefusesAnHTTPBlock(t *testing.T) {
 	f := newFeedServer(t)
 	f.feedStatus = http.StatusPreconditionFailed
@@ -366,9 +356,8 @@ func TestRefreshRefusesAnHTTPBlock(t *testing.T) {
 	}
 }
 
-// Streaming wins over any post, and the live status is asked for whether or
-// not the creator has posted. A creator who streams and posts must not be
-// shown as a post: being live is what is happening now.
+// 直播优先于任何帖子，且无论是否发帖都要询问直播状态。正在直播又发过帖的 UP 不能
+// 显示成帖子：直播才是当下正在发生的事。
 func TestRefreshShowsLiveEvenWhenTheCreatorHasPosts(t *testing.T) {
 	f := newFeedServer(t)
 	f.feeds = map[string]string{"1": feedJSON(itemJSON("1", "DYNAMIC_TYPE_AV", 1, "UP", "", 1700000000, "", "BV1", "刚发的视频"))}
@@ -391,8 +380,7 @@ func TestRefreshShowsLiveEvenWhenTheCreatorHasPosts(t *testing.T) {
 	}
 }
 
-// The live question is asked on every refresh, not only when the timeline came
-// back empty.
+// 每次刷新都要询问直播状态，不是只在时间线为空时才问。
 func TestRefreshAlwaysAsksTheLiveStatus(t *testing.T) {
 	f := newFeedServer(t)
 	f.feeds = map[string]string{"1": feedJSON(itemJSON("1", "DYNAMIC_TYPE_AV", 1, "UP", "", 1700000000, "", "BV1", "视频"))}
@@ -410,8 +398,7 @@ func TestRefreshAlwaysAsksTheLiveStatus(t *testing.T) {
 	t.Fatalf("requests = %v, want the live status asked even though posts exist", f.requests)
 }
 
-// A creator with nothing on their timeline can still be streaming, and that is
-// the row: an empty feed must not hide a live session.
+// 时间线没有任何内容的 UP 也可能在直播，这一行就是它：空 feed 不能掩盖直播。
 func TestRefreshShowsALiveCreatorWithNoPosts(t *testing.T) {
 	f := newFeedServer(t)
 	f.feeds = map[string]string{"1": feedJSON("")}
@@ -438,7 +425,7 @@ func TestRefreshShowsALiveCreatorWithNoPosts(t *testing.T) {
 	}
 }
 
-// Not streaming and nothing posted: the creator simply has no row.
+// 没直播也没发帖：该 UP 就没有行。
 func TestRefreshWithNoPostsAndNoLiveShowsNothing(t *testing.T) {
 	f := newFeedServer(t)
 	f.feeds = map[string]string{"1": feedJSON("")}
@@ -453,9 +440,8 @@ func TestRefreshWithNoPostsAndNoLiveShowsNothing(t *testing.T) {
 	}
 }
 
-// A pinned post is the old one the creator wants noticed, and it arrives first
-// in the feed. It must not be taken for the newest, and it must not use up one
-// of the requested slots.
+// 置顶帖是 UP 想让人注意的旧帖，且在 feed 里最先出现。不能把它当最新，也不能占用
+// 请求的名额。
 func TestPinnedPostsAreSkipped(t *testing.T) {
 	pinned := `{"id_str":"pin","type":"DYNAMIC_TYPE_DRAW","modules":{"module_author":{"mid":1,"name":"UP","pub_ts":1600000000},"module_tag":{"text":"置顶"},"module_dynamic":{"major":{"opus":{"jump_url":"//www.bilibili.com/opus/1","summary":{"text":"很早的置顶动态"}}}}}}`
 	fresh := itemJSON("fresh", "DYNAMIC_TYPE_AV", 1, "UP", "", 1700000000, "", "BV1", "新视频")
@@ -476,7 +462,7 @@ func TestPinnedPostsAreSkipped(t *testing.T) {
 	}
 }
 
-// A timeline holding nothing but a pinned post has nothing new to show.
+// 只有置顶帖的时间线没有新内容可显示。
 func TestOnlyPinnedPostsMeansNoRow(t *testing.T) {
 	pinned := `{"id_str":"pin","type":"DYNAMIC_TYPE_DRAW","modules":{"module_author":{"mid":1,"name":"UP","pub_ts":1600000000},"module_tag":{"text":"置顶"},"module_dynamic":{"major":{"opus":{"summary":{"text":"置顶"}}}}}}`
 	items, err := decodeDynamics(1, []byte(feedJSON(pinned)), 1)
@@ -554,8 +540,8 @@ func TestAvatarURL(t *testing.T) {
 	}
 }
 
-// Bilibili sends pub_ts as a number for most items and as a string for some.
-// One string-typed item must not make the whole feed undecodable.
+// B 站多数条目把 pub_ts 发成数字，少数发成字符串。一个字符串条目不能让整份 feed
+// 无法解码。
 func TestDecodeAcceptsAStringTimestamp(t *testing.T) {
 	payload := `{"code":0,"message":"0","data":{"items":[{"id_str":"1","type":"DYNAMIC_TYPE_WORD","modules":{"module_author":{"mid":"1","name":"UP","face":"","pub_ts":"1700000000"},"module_dynamic":{"desc":{"text":"动态"}}}}]}}`
 	items, err := decodeDynamics(1, []byte(payload), 1)
@@ -567,8 +553,7 @@ func TestDecodeAcceptsAStringTimestamp(t *testing.T) {
 	}
 }
 
-// A timestamp that is not a number at all is not a usable item; the author
-// check rejects it rather than showing a row dated 1970.
+// 完全不是数字的时间戳不是可用条目；作者校验会拒绝它，而不是显示一行 1970 年的记录。
 func TestDecodeRejectsAnUnreadableTimestamp(t *testing.T) {
 	payload := `{"code":0,"message":"0","data":{"items":[{"id_str":"1","type":"DYNAMIC_TYPE_WORD","modules":{"module_author":{"mid":1,"name":"UP","face":"","pub_ts":"yesterday"},"module_dynamic":{"desc":{"text":"动态"}}}}]}}`
 	_, err := decodeDynamics(1, []byte(payload), 1)

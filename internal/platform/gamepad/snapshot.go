@@ -2,8 +2,6 @@ package gamepad
 
 import "sync"
 
-// The playtime recorder reads this instead of enumerating HID again.
-// Connected already walks the devices for the title mark.
 var (
 	snapMu sync.Mutex
 	snap   []Pad
@@ -15,8 +13,8 @@ func note(pads []Pad) {
 	snapMu.Unlock()
 }
 
-// Snapshot is the last Connected result. It is empty until that first look
-// finishes, and it does not start a look of its own.
+// Snapshot 是上一次 Connected 的结果。在首次探测完成前为空，且不会自行
+// 发起一次探测。
 func Snapshot() []Pad {
 	snapMu.Lock()
 	defer snapMu.Unlock()

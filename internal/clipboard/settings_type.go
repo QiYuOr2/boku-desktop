@@ -1,44 +1,34 @@
-// This file is the clipboard tool's own configuration: the switches that are
-// about the clipboard and nothing else.
+// 本文件是剪贴板工具自己的配置：只关乎剪贴板的开关。
 //
-// It lives with the feature rather than in internal/domain because the
-// clipboard is the only thing that reads it. What a feature stores should look
-// like what that feature is, and a type only one feature uses belongs to that
-// feature — domain is for the entities and ports several features share.
+// 它随功能而居而非放进 internal/domain，因为只有剪贴板会读它。功能存储的东西
+// 应当像那个功能本身，只被一个功能使用的类型属于那个功能——domain 是留给多个
+// 功能共享的实体与端口的。
 //
-// The file it is written to is still the application's one settings file, and
-// the keys it is written under are still the ones §8 of the storage design
-// describes: the grouping is a property of the value, not of where it is
-// stored. internal/settings owns that file and does not know this type.
+// 它仍写入应用唯一的设置文件，所用的键仍是存储设计 §8 描述的那些：分组是值的属性，
+// 而非存放位置的属性。internal/settings 拥有那个文件，但并不认识这个类型。
 package clipboard
 
 import "time"
 
-// Settings is what the user chose about the clipboard tool: whether its line
-// is shown, whether it is read in the background, how often, and how much
-// history is kept.
+// Settings 是用户对剪贴板工具所作的选择：是否显示该栏、是否后台读取、
+// 多久读一次、保留多少历史。
 //
-// Both switches default to false. The clipboard is the most sensitive thing
-// Boku can read, so reading it is something the user turns on rather than
-// something they have to find and turn off.
+// 两个开关默认关闭。剪贴板是 Boku 能读到的最敏感的东西，因此读取需用户主动开启，
+// 而非需要用户去找并关闭。
 type Settings struct {
-	// RegionVisible shows the clipboard line in the quick window.
+	// RegionVisible 在快捷窗口中显示剪贴板栏。
 	RegionVisible bool
-	// Monitoring reads the clipboard in the background. Off means no reading
-	// at all, not a hidden reading.
+	// Monitoring 后台读取剪贴板。关闭即完全不读，而非隐藏地读。
 	Monitoring bool
-	// PollInterval is how often the clipboard is read while monitoring.
-	// Values below MinPollInterval are raised to it.
+	// PollInterval 监控时读取剪贴板的间隔。低于 MinPollInterval 的值会被抬高到它。
 	PollInterval time.Duration
-	// HistorySize is how many of the most recent copies the history keeps,
-	// and therefore how many the history page lists. Anything that is not one
-	// of HistorySizes is replaced by DefaultHistorySize.
+	// HistorySize 是历史保留的最近复制条数，也决定历史页面列出多少条。
+	// 不是 HistorySizes 之一的值会被替换为 DefaultHistorySize。
 	HistorySize int
 }
 
-// Normalize fills in what a stored setting left out and brings the interval
-// inside its bounds. It never fails: a hand-edited file should not keep the
-// application from starting, it should just be made sane.
+// Normalize 填补存储设置缺失的部分，并把间隔带回边界内。它从不失败：
+// 手工编辑过的文件不应妨碍应用启动，只需被修正到合理值。
 func (s Settings) Normalize() Settings {
 	if s.PollInterval < MinPollInterval {
 		s.PollInterval = DefaultPollInterval
@@ -49,7 +39,7 @@ func (s Settings) Normalize() Settings {
 	return s
 }
 
-// Interval is the poll interval, inside its bounds.
+// Interval 是边界内的轮询间隔。
 func (s Settings) Interval() time.Duration {
 	if s.PollInterval < MinPollInterval {
 		return DefaultPollInterval
@@ -57,8 +47,7 @@ func (s Settings) Interval() time.Duration {
 	return s.PollInterval
 }
 
-// KeepsHistory is how many copies the history keeps, one of the record ranges
-// whatever the stored value said.
+// KeepsHistory 是历史保留的复制条数，不论存储值为何都为某个记录数量范围。
 func (s Settings) KeepsHistory() int {
 	if !ValidHistorySize(s.HistorySize) {
 		return DefaultHistorySize
@@ -66,46 +55,37 @@ func (s Settings) KeepsHistory() int {
 	return s.HistorySize
 }
 
-// Reads reports whether the clipboard is read at all, which is what the quick
-// window's line depends on.
+// Reads 报告是否读取剪贴板，快捷窗口的剪贴板栏依赖于此。
 func (s Settings) Reads() bool { return s.RegionVisible && s.Monitoring }
 
-// Bounds on the clipboard poll. The floor keeps a mistaken configuration from
-// turning the poll into a busy loop; the default is the interval §4.1 of the
-// tool design names.
+// 剪贴板轮询的边界。下限防止错误配置把轮询变成忙循环；默认值取自工具设计 §4.1。
 const (
 	MinPollInterval     = 200 * time.Millisecond
 	DefaultPollInterval = 700 * time.Millisecond
-	// MaxTextBytes is how much text of one copy is kept. Anything longer is
-	// truncated: a clipboard holding a whole file must not end up in the
-	// history.
+	// MaxTextBytes 是单次复制保留的文本量上限，更长的会被截断：
+	// 持有整个文件的剪贴板不能整个进入历史。
 	MaxTextBytes = 64 << 10
-	// MaxImageBytes is how large a bitmap on the clipboard is read. A larger
-	// one is not read at all: the entry still says that a picture was copied,
-	// without the application holding it.
+	// MaxImageBytes 是读取剪贴板位图的大小上限。更大的不读取：条目仍标明
+	// 复制了一张图片，只是应用不持有它。
 	MaxImageBytes = 16 << 20
 )
 
-// The record range the user may choose, in entries: a short list that stays a
-// glance, or a longer one for someone who keeps going back to it. It is a
-// choice among three rather than a number, because a bound nobody can reason
-// about is a bound nobody sets.
+// 用户可选的记录数量范围，以条目计：短列表便于扫一眼，或更长给常回头翻的人。
+// 它是在三档中选一而非填一个数，因为没人能理解的边界等于没人会设的边界。
 const (
 	MinHistorySize     = 10
 	DefaultHistorySize = 30
 	MaxHistorySize     = 50
 )
 
-// historySizes is the choice, in the order it is offered. It is an array so
-// that nothing can change it, and so that answering "is this one of them"
-// costs no allocation on a frame.
+// historySizes 是按提供顺序排列的选项。用数组使其不可更改，
+// 也使「是否为其一」的判断在帧上无需分配。
 var historySizes = [...]int{MinHistorySize, DefaultHistorySize, MaxHistorySize}
 
-// HistorySizes returns the record ranges the user may choose, from the
-// shortest to the longest.
+// HistorySizes 返回用户可选的记录数量范围，从短到长。
 func HistorySizes() []int { return append([]int(nil), historySizes[:]...) }
 
-// ValidHistorySize reports whether n is one of the record ranges.
+// ValidHistorySize 报告 n 是否为某个记录数量范围。
 func ValidHistorySize(n int) bool {
 	for _, size := range historySizes {
 		if size == n {

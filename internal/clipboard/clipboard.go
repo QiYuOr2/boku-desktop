@@ -1,15 +1,8 @@
-// Package clipboard is the clipboard-history feature: reading what the
-// platform holds, deciding what it means, keeping the last few copies, and
-// writing a chosen entry back.
+// Package clipboard 提供剪贴板历史功能：读取平台剪贴板、判定其含义、
+// 保留最近若干条记录，并把选中的条目写回剪贴板。
 //
-// This file is the service. watch.go is the poll; it drives the same service
-// from a goroutine, because the platform clipboard lives on the main thread
-// and a poll must not hold it. What a reading means is a pure function
-// (domain.ClipContent in, a domain.ClipboardEntry out), so the interesting
-// half is testable without a desktop session.
-//
-// The history is a file rather than a table because the database does not
-// exist yet; store.go is that file, and it belongs to this feature.
+// 本文件是服务本体。轮询由 goroutine 驱动，因为平台剪贴板位于主线程，
+// 轮询不能占用它。一次读取的含义由纯函数决定，因此可脱离桌面会话测试。
 package clipboard
 
 import (
@@ -25,37 +18,32 @@ import (
 	"boku/internal/kit"
 )
 
-// maxCopiedTextBytes bounds what is written back to the clipboard: a copy
-// from the interface is a newline-free line, and anything larger is a
-// mistake rather than a paste.
+// maxCopiedTextBytes 限制写回剪贴板的文本大小：从界面复制的是无换行的一行，
+// 更大的内容属于误用而非粘贴。
 const maxCopiedTextBytes = 1 << 20
 
-// Clipboard is the clipboard tool: it reads what the platform currently
-// holds, records it as history, and writes a chosen entry back.
+// Clipboard 是剪贴板工具：读取平台当前内容、记录为历史、把选中条目写回。
 //
-// It is the only place that decides what the user's clipboard means, and it
-// survives a window closing: the history is the service's, not a view's.
-// Every method is safe to call from any goroutine.
+// 它是唯一决定用户剪贴板含义的地方，且窗口关闭后仍然存活：历史属于服务而非视图。
+// 所有方法都可从任意 goroutine 调用。
 type Clipboard struct {
 	device  domain.ClipboardDevice
 	store   domain.ClipboardStore
 	section *Section
-	// saver is the store the section is saved through, or nil when the
-	// settings are kept in memory only.
+	// saver 是保存 section 的存储；为 nil 时设置仅保存在内存中。
 	saver    StoreSettings
 	now      func() time.Time
 	emit     func()
 	interval time.Duration
 	keep     int
 
-	// watcher is the running poll, or nil while monitoring is off.
+	// watcher 是正在运行的轮询；监控关闭时为 nil。
 	watcher *Watcher
 	cancel  context.CancelFunc
 	done    chan struct{}
 
-	// dirty says the history has changed since it was last written, and
-	// writing says a background write is in progress. Together they keep at
-	// most one write in flight.
+	// dirty 表示历史自上次写入后已改变，writing 表示后台写入正在进行。
+	// 二者共同保证同一时刻至多一次写入。
 	dirty   bool
 	writing bool
 
@@ -67,43 +55,36 @@ type Clipboard struct {
 	writeAt    time.Time
 	writeValue string
 	writeKind  domain.ClipKind
-	// ignoreUntil is the end of a window in which the clipboard is not
-	// recorded at all, whoever wrote it. It is what a synthetic copy — the
-	// one the selection tool makes to read a text that no application
-	// publishes — asks for (see IgnoreTheNextCopy).
+	// ignoreUntil 是一段完全不记录剪贴板内容的窗口的结束时间，不论由谁写入。
+	// 它用于合成复制——划词工具为读取某个应用不发布的文本而发起的复制
+	// （见 IgnoreTheNextCopy）。
 	ignoreUntil time.Time
-	// lastCopy is what the last click on a recorded copy wrote, and why it
-	// failed when it did.
+	// lastCopy 是上一次点击历史记录写下的内容，以及写失败时的原因。
 	lastCopy    string
 	lastCopyErr error
-	// readAt is when the clipboard was last read. A window that opens can
-	// see that a reading has just happened and ask for a frame instead of
-	// spending another read.
+	// readAt 是上一次读取剪贴板的时间。刚打开的窗口可据此判断刚刚读过，
+	// 从而请求一帧而不是再读一次。
 	readAt time.Time
 }
 
-// ClipboardOptions is what the service is assembled from. Only Device and
-// Store are required; the rest has a working default.
+// ClipboardOptions 是装配服务所需的参数。仅 Device 与 Store 必填，其余有默认值。
 type ClipboardOptions struct {
 	Device domain.ClipboardDevice
 	Store  domain.ClipboardStore
-	// Section is this feature's settings, as the store holds them: it is
-	// read from at assembly and written through when a switch changes. A nil
-	// section keeps the settings in memory, which is what a test wants and
-	// what an assembly without a settings file must still survive.
+	// Section 是本功能的设置（存储持有的形式）：装配时读取，开关变化时经它写入。
+	// section 为 nil 时设置仅保存在内存中，适合测试，也适合没有设置文件的装配。
 	Section *Section
-	// Settings is the store the section is saved through. A nil store keeps
-	// the settings in memory only.
+	// Settings 是保存 section 的存储；为 nil 时设置仅保存在内存中。
 	Settings StoreSettings
 	Clock    domain.Clock
 	Emit     func()
-	// Keep overrides the record range the settings hold.
+	// Keep 覆盖设置中的记录数量范围。
 	Keep int
-	// PollIn overrides the interval the settings hold.
+	// PollIn 覆盖设置中的轮询间隔。
 	PollIn time.Duration
 }
 
-// NewClipboard builds the service and reads the settings it was given.
+// NewClipboard 构建服务并读取给定设置。
 func NewClipboard(opts ClipboardOptions) (*Clipboard, error) {
 	if opts.Device == nil {
 		return nil, fmt.Errorf("%w: the clipboard has no device", domain.ErrInvalidArgument)
@@ -126,17 +107,15 @@ func NewClipboard(opts ClipboardOptions) (*Clipboard, error) {
 		saver:   opts.Settings,
 		now:     clock.Now,
 		emit:    opts.Emit,
-		// An option overrides the record range the settings hold, which is
-		// what a test wants; load fills it in from the settings otherwise,
-		// and prunes the stored history to it as it reads it.
+		// 选项覆盖设置中的记录数量范围（适合测试）；否则由 load 从设置中填入，
+		// 并在读取时按它裁剪已存历史。
 		keep: opts.Keep,
 	}
 	if err := clipboard.load(context.Background()); err != nil {
 		return nil, err
 	}
-	// The interval the two switches were read with is the one the poll and
-	// the loop-suppression window use; an option overrides it, which is
-	// what a test wants.
+	// 两个开关读取时的间隔，就是轮询与循环抑制窗口使用的间隔；
+	// 选项可覆盖它（适合测试）。
 	clipboard.interval = clipboard.settings.Interval()
 	if opts.PollIn >= MinPollInterval {
 		clipboard.interval = opts.PollIn
@@ -144,16 +123,13 @@ func NewClipboard(opts ClipboardOptions) (*Clipboard, error) {
 	return clipboard, nil
 }
 
-// load reads the settings and the history from the store.
+// load 从存储读取设置和历史。
 //
-// A settings file that cannot be read is fatal: it is the user's own
-// configuration, and starting with a different one silently would be worse
-// than not starting. A history file that cannot be read is not: it is a
-// convenience, and it is kept as the last error so a test can see it. A
-// corrupt history must never cost the user their switches.
+// 设置文件读不出是致命错误：它是用户自己的配置，悄悄换一份启动比不启动更糟。
+// 历史文件读不出则不然：它只是便利，错误会被记下供测试查看，损坏的历史
+// 绝不能连累用户的开关。
 //
-// The history is pruned as it is read, so a record range the user shortened
-// while the application was not running is honored before anything is shown.
+// 历史在读取时即被裁剪，因此用户在应用未运行期间缩短的记录范围会在展示前生效。
 func (c *Clipboard) load(ctx context.Context) error {
 	if c.saver != nil {
 		if err := c.saver.Load(ctx); err != nil {
@@ -173,24 +149,22 @@ func (c *Clipboard) load(ctx context.Context) error {
 	return nil
 }
 
-// Settings returns the clipboard's own switches.
+// Settings 返回剪贴板自己的开关。
 func (c *Clipboard) Settings() Settings {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.settings
 }
 
-// SetEmit sets what is told that the clipboard content or the history
-// changed, so the interface can redraw. The assembly wires it to the
-// windows; it may be nil, which is what a test wants.
+// SetEmit 设置内容或历史变化时通知谁，以便界面重绘。装配时接到窗口上；可为 nil。
 func (c *Clipboard) SetEmit(emit func()) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.emit = emit
 }
 
-// SetRegionVisible shows or hides the clipboard line in the quick window.
-// Hiding it stops nothing: what the user turned off is the drawing.
+// SetRegionVisible 显示或隐藏快捷窗口中的剪贴板栏。
+// 隐藏不停止任何行为：用户关掉的只是绘制。
 func (c *Clipboard) SetRegionVisible(ctx context.Context, visible bool) error {
 	c.mu.Lock()
 	c.settings.RegionVisible = visible
@@ -199,9 +173,8 @@ func (c *Clipboard) SetRegionVisible(ctx context.Context, visible bool) error {
 	return c.saveSettings(ctx, settings)
 }
 
-// SetMonitoring starts or stops reading the clipboard. Stopping ends the
-// poll and waits for it, so that "off" means no further read rather than a
-// read in flight.
+// SetMonitoring 启停剪贴板读取。停止会结束轮询并等待它返回，
+// 使「关闭」意味着不再有读取，而不是读取仍在进行。
 func (c *Clipboard) SetMonitoring(ctx context.Context, enabled bool) error {
 	c.mu.Lock()
 	if c.settings.Monitoring == enabled {
@@ -222,17 +195,13 @@ func (c *Clipboard) SetMonitoring(ctx context.Context, enabled bool) error {
 	return nil
 }
 
-// saveSettings writes the clipboard's own switches.
+// saveSettings 写入剪贴板自己的开关。
 //
-// It goes through the store's Update rather than a Save of the whole settings
-// value: the file holds every feature's settings, and writing back the copy
-// this service holds would put back whatever another feature changed since
-// that copy was read. Update reads the file again, applies this feature's
-// change and writes as one step, touching nothing but the clipboard's four
-// values.
+// 它走存储的 Update，而非整份设置的 Save：文件持有每个功能的设置，写回本服务
+// 持有的副本会把其它功能在此期间改过的值一并复原。Update 会重新读取文件、
+// 应用本功能的改动并一次写入，只触碰剪贴板的四个值。
 //
-// It remembers the new switches here as well, even when the file could not be
-// written: the switch the user just flipped has taken effect for this run.
+// 新开关也会记在本服务中，即使文件写入失败：用户刚拨的开关本次运行已生效。
 func (c *Clipboard) saveSettings(ctx context.Context, settings Settings) error {
 	c.section.Set(settings)
 	if c.saver == nil {
@@ -244,14 +213,11 @@ func (c *Clipboard) saveSettings(ctx context.Context, settings Settings) error {
 	})
 }
 
-// SetHistorySize chooses how many of the most recent copies are kept, and
-// therefore how many the history page lists.
+// SetHistorySize 选择保留最近多少条记录，也就决定历史页面列出多少条。
 //
-// The history is pruned to the new bound here rather than at the next
-// reading: a user who asked for the last ten copies should not keep the
-// longer list on disk until something else is copied. The entries that go are
-// gone — the range is what the file holds, not what the page shows — so the
-// settings form says so before the choice is made.
+// 历史在此按新上限裁剪，而非等到下次读取：用户要的是最近十条，就不该把更长
+// 的列表留在磁盘上直到又复制了别的。被裁掉的条目就此消失——范围由文件持有，
+// 而非由页面显示——因此设置在做出选择前会说明这一点。
 func (c *Clipboard) SetHistorySize(ctx context.Context, size int) error {
 	if !ValidHistorySize(size) {
 		size = DefaultHistorySize
@@ -276,8 +242,7 @@ func (c *Clipboard) SetHistorySize(ctx context.Context, size int) error {
 	return err
 }
 
-// Start begins monitoring when the settings say so. main.go calls it once
-// the application is ready.
+// Start 在设置允许时开始监控。main.go 在应用就绪后调用一次。
 func (c *Clipboard) Start(ctx context.Context) {
 	if !c.Settings().Monitoring {
 		return
@@ -285,14 +250,13 @@ func (c *Clipboard) Start(ctx context.Context) {
 	c.begin(ctx)
 }
 
-// Stop ends monitoring and waits for the poll loop, and writes the history
-// once more. The application calls it as it quits.
+// Stop 结束监控并等待轮询循环，再写一次历史。应用退出时调用。
 func (c *Clipboard) Stop() {
 	c.stop()
 	c.flush()
 }
 
-// begin starts the poll loop if it is not already running.
+// begin 若尚未运行则启动轮询循环。
 func (c *Clipboard) begin(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -313,21 +277,19 @@ func (c *Clipboard) begin(ctx context.Context) {
 	c.cancel, c.done, c.watcher = cancel, done, watcher
 	c.mu.Unlock()
 
-	// A poll that runs for hours is worth one line saying it started: it is
-	// the only record of what the application was doing at the time.
+	// 轮询可能运行数小时，值得一行日志记下它启动：这是应用当时在做什么的唯一记录。
 	slog.Info("clipboard monitoring started", "interval", watcher.Interval.String())
 
 	go func() {
 		defer close(done)
 		if err := watcher.Run(runCtx); err != nil {
-			// The loop only gives up on an error it cannot continue past —
-			// a device that does not exist — and nothing else will say so.
+			// 循环只会因无法继续的错误退出——设备不存在——且别处不会报告它。
 			slog.Warn("the clipboard poll stopped", "error", err)
 		}
 	}()
 }
 
-// stop cancels the poll loop and waits for it to return.
+// stop 取消轮询循环并等待其返回。
 func (c *Clipboard) stop() {
 	c.mu.Lock()
 	cancel, done := c.cancel, c.done
@@ -343,13 +305,12 @@ func (c *Clipboard) stop() {
 	slog.Info("clipboard monitoring stopped")
 }
 
-// Show reports whether the interface has a reason to read the clipboard: the
-// region is drawn and the content it would draw is being collected.
+// Show 报告界面是否有理由读取剪贴板：栏被绘制且其要绘制的内容正在采集。
 func (c *Clipboard) Show() bool {
 	return c.Settings().Reads()
 }
 
-// Latest is the most recent reading, and whether there is one.
+// Latest 是最新一次读取，以及是否存在。
 func (c *Clipboard) Latest() (domain.ClipRecord, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -359,16 +320,12 @@ func (c *Clipboard) Latest() (domain.ClipRecord, bool) {
 	return *c.latest, true
 }
 
-// Open asks for one reading of the clipboard, whatever the monitoring switch
-// says, and returns at once. It is what opening the history window does: the
-// user asked to see the clipboard, and that is a read the switch was never
-// about.
+// Open 请求读取一次剪贴板，不论监控开关如何，并立即返回。打开历史窗口时正是如此：
+// 用户要求看剪贴板，这是开关从未管辖的读取。
 //
-// The reading happens on a goroutine rather than under the caller, because
-// the caller is drawing a frame. A clipboard read on Windows can wait on
-// whatever else is holding the clipboard, and every millisecond of that wait
-// is a millisecond the window spends drawn but empty. The frames the reading
-// leads to are asked for by the emit hook, when there is something to show.
+// 读取在 goroutine 中进行而非在调用方：调用方正在绘制一帧。Windows 上读取剪贴板
+// 可能等待占用剪贴板的其它程序，这段等待每多一毫秒，窗口就多空转一毫秒。
+// 读取带来的帧由 emit 钩子在确有内容可显示时请求。
 func (c *Clipboard) Open(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -376,9 +333,7 @@ func (c *Clipboard) Open(ctx context.Context) {
 	go c.Read(ctx)
 }
 
-// Read reads the clipboard once and waits for it, which is what a caller off
-// the drawing thread — and a test — wants. It is what Open does in the
-// background.
+// Read 读取一次剪贴板并等待它，适合不在绘制线程的调用方与测试。它就是 Open 在后台做的事。
 func (c *Clipboard) Read(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -386,17 +341,15 @@ func (c *Clipboard) Read(ctx context.Context) {
 	c.poll(ctx)
 }
 
-// PolledRecently reports whether the clipboard was read within the last
-// interval. A window that has just opened can ask before spending a read on
-// content it already has.
+// PolledRecently 报告上个间隔内剪贴板是否读过。刚打开的窗口可先问一句，
+// 避免为已有内容再读一次。
 func (c *Clipboard) PolledRecently() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return !c.readAt.IsZero() && c.now().Sub(c.readAt) < c.interval
 }
 
-// poll reads the device once, suppresses a reading that is the application's
-// own write coming back, and records what is left.
+// poll 读取设备一次，抑制本应用自己写回的内容，记录余下的部分。
 func (c *Clipboard) poll(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
@@ -418,58 +371,47 @@ func (c *Clipboard) poll(ctx context.Context) {
 	c.record(reading)
 }
 
-// noteRead remembers when the clipboard was last read, which is what keeps an
-// opened window from reading it again immediately.
+// noteRead 记下上次读取剪贴板的时间，使刚打开的窗口不会立刻再读一次。
 func (c *Clipboard) noteRead() {
 	c.mu.Lock()
 	c.readAt = c.now()
 	c.mu.Unlock()
 }
 
-// Suppress keeps the next reading from being recorded as a new copy. It is
-// what a write that is about to happen on its own goroutine calls: the write
-// and the read that sees it are not ordered, so the window is opened before
-// the write rather than after it.
+// Suppress 使下一次读取不被记为新复制。即将在自身 goroutine 上写入时会调用它：
+// 写入与读到它的读取无序，因此窗口在写入前而非写入后开启。
 func (c *Clipboard) Suppress() {
 	c.mu.Lock()
 	c.writeAt = c.now()
 	c.mu.Unlock()
 }
 
-// copyIgnoreWindow is how long a synthetic copy's value is kept out of the
-// history. It covers the copy, the read that takes the text out of it and the
-// write that puts the clipboard back, with room for a poll that was already on
-// its way.
+// copyIgnoreWindow 是合成复制的值被排除在历史之外的时长。它覆盖复制、
+// 从中取出文本的读取以及把剪贴板放回的写入，并为一趟已在途的轮询留出余量。
 const copyIgnoreWindow = 2 * time.Second
 
-// IgnoreTheNextCopy keeps what the clipboard reports for the next moment out of
-// the history, whoever wrote it.
+// IgnoreTheNextCopy 使剪贴板在接下来一刻报告的内容不被记入历史，不论由谁写入。
 //
-// It is what the selection tool calls just before it asks an application to
-// copy: that copy is not something the user asked to record — it is a question
-// put to the application in front — and the tool puts the clipboard back as it
-// found it straight afterwards. Unlike Suppress this does not compare the
-// reading with a value this application wrote, because it did not write it.
+// 划词工具在请求某应用复制前调用它：那次复制并非用户要记录的内容，而是
+// 向应用提出的一个问题，工具随后会原样把剪贴板放回。与 Suppress 不同，它不
+// 比对读取值是否为本应用所写，因为这次复制并非本应用所写。
 func (c *Clipboard) IgnoreTheNextCopy() {
 	c.mu.Lock()
 	c.ignoreUntil = c.now().Add(copyIgnoreWindow)
 	c.mu.Unlock()
 }
 
-// record turns a reading into the current content and, when it is new,
-// into a history entry. It is the watcher's callback and runs on the
-// watcher's goroutine.
+// record 把一次读取变为当前内容，并在其为新内容时转为一条历史记录。
+// 它是 watcher 的回调，运行在 watcher 的 goroutine 上。
 func (c *Clipboard) record(reading domain.ClipContent) {
 	record := Record(reading)
 	if record.Content == "" && record.Display == "" {
-		// Rich text with nothing readable in it: there is nothing to show
-		// and nothing to match, so it is not an entry.
+		// 无可读内容的富文本：既无可显示也无可匹配，不成条目。
 		return
 	}
 	if len(reading.Image) > 0 && record.ImageRef != "" && !c.keepImage(reading.Image, record.ImageRef) {
-		// The picture could not be kept. The entry still goes in — the user
-		// copied something — and a click on it says the picture is gone
-		// rather than pasting the line "[图片]".
+		// 图片未能保存。条目仍然保留——用户确实复制了东西——点击它会提示图片已丢失，
+		// 而不是粘贴「[图片]」这一行。
 		record.ImageRef = ""
 	}
 	c.mu.Lock()
@@ -485,29 +427,21 @@ func (c *Clipboard) record(reading domain.ClipContent) {
 	}
 }
 
-// keepImage puts the bytes of a copied picture where a click on its entry can
-// find them again.
+// keepImage 把复制图片的字节存到点击其条目时可以取回的地方。
 //
-// This is the only moment they can be had: by the time anyone clicks, the
-// clipboard holds something else. It runs on the watcher's goroutine, which is
-// why it is one file written once per copy rather than part of the history
-// write — the history is written in the background, and this has to be there
-// before the entry that names it.
+// 这是字节唯一能拿到的时刻：等到有人点击时，剪贴板已持有别的内容。它运行在
+// watcher 的 goroutine 上，因此是每份复制单独写一个文件，而非并入历史写入——
+// 历史在后台写入，而它必须在引用它的条目出现之前就绪。
 func (c *Clipboard) keepImage(png []byte, ref string) bool {
 	return c.store.SaveImage(context.Background(), ref, png) == nil
 }
 
-// append adds a reading to the history, unless it is already there. The
-// caller holds the lock. It reports whether the history changed.
+// append 把一次读取加入历史，除非它已在其中。调用方持有锁。它报告历史是否改变，
+// 由此决定是否需要重新写入。
 //
-// append adds a reading to the history, unless it is already there. The
-// caller holds the lock. It reports whether the history changed, which is
-// what decides whether it has to be written again.
-//
-// The same content copied again moves its entry back to the top instead of
-// adding a second one: the history is what was copied, not how often. A
-// reading of what is already on the clipboard — the poll asking again, or a
-// window being opened — is not a change, so it does not rewrite the file.
+// 相同内容再次复制会把其条目移回顶部，而非新增一条：历史记录的是复制过什么，
+// 而非复制了几次。对已在剪贴板上的内容的读取——轮询再次询问，或窗口被打开——
+// 不算改变，因此不会重写文件。
 func (c *Clipboard) append(record domain.ClipRecord) bool {
 	if record.Hash == "" || record.Content == "" {
 		return false
@@ -516,8 +450,7 @@ func (c *Clipboard) append(record domain.ClipRecord) bool {
 		if c.history[index].ContentHash != record.Hash {
 			continue
 		}
-		// Only a move that the list would show counts: within the same
-		// second, the entry is already where it belongs.
+		// 只有列表会显示出来的移动才算改变：同一秒内，条目已在应在的位置。
 		if record.CapturedAt.Sub(c.history[index].CopiedAt) < time.Second {
 			return false
 		}
@@ -527,9 +460,7 @@ func (c *Clipboard) append(record domain.ClipRecord) bool {
 	}
 	id, err := domain.NewID()
 	if err != nil {
-		// An entry nobody can identify is worse than no entry: the
-		// clipboard is a convenience, and it must not take the
-		// application down with it.
+		// 无人可识别的条目比没有条目更糟：剪贴板只是便利，不能因此拖垮应用。
 		return false
 	}
 	c.history = c.prune(append(c.history, domain.ClipboardEntry{
@@ -548,13 +479,12 @@ func (c *Clipboard) append(record domain.ClipRecord) bool {
 	return true
 }
 
-// prune orders the history newest first and drops what is over the limit,
-// keeping pinned entries. The caller holds the lock.
+// prune 按最新在前排序历史，丢弃超过上限的部分，保留置顶条目。调用方持有锁。
 func (c *Clipboard) prune(entries []domain.ClipboardEntry) []domain.ClipboardEntry {
 	kept := make([]domain.ClipboardEntry, 0, len(entries))
 	for _, entry := range entries {
 		if strings.TrimSpace(entry.Content) == "" || entry.ContentHash == "" {
-			continue // an entry that cannot be shown or matched
+			continue // 既无法显示也无法匹配的条目
 		}
 		kept = append(kept, entry)
 	}
@@ -562,9 +492,8 @@ func (c *Clipboard) prune(entries []domain.ClipboardEntry) []domain.ClipboardEnt
 	if len(kept) <= c.keep {
 		return kept
 	}
-	// An entry past the limit that is not pinned goes; a pinned one keeps
-	// its place, which is what pinning is for. The list is already newest
-	// first, so what stays is what is at its front.
+	// 超过上限的条目中，未置顶者移出，置顶者保留其位置，这正是置顶的意义。
+	// 列表已是最新在前，因此留下的就是排在前面的。
 	room := make([]domain.ClipboardEntry, 0, len(kept))
 	unpinned := 0
 	for _, entry := range kept {
@@ -577,8 +506,7 @@ func (c *Clipboard) prune(entries []domain.ClipboardEntry) []domain.ClipboardEnt
 			unpinned++
 		}
 	}
-	// The limit bounds the unpinned entries and nothing else: a pinned one
-	// is the reason the history may hold more than the limit.
+	// 上限约束的只是未置顶条目：置顶条目正是历史可以超过上限的原因。
 	if unpinned > c.keep {
 		room = c.evictOldest(room, unpinned-c.keep)
 	}
@@ -586,13 +514,11 @@ func (c *Clipboard) prune(entries []domain.ClipboardEntry) []domain.ClipboardEnt
 	return room
 }
 
-// forgetImages deletes the pictures of entries that are no longer in the
-// history: a picture whose entry is gone could never be put back, and an image
-// store that only grows is a directory full of screenshots nobody will see
-// again.
+// forgetImages 删除已不在历史中的条目的图片：条目没了，图片就再也放不回来，
+// 而只增不减的图片存储就是一个堆满不会再被看到的截图的目录。
 //
-// It runs on a goroutine of its own. The caller holds the lock and is drawing
-// a frame or polling the clipboard, and deleting a file is not worth either.
+// 它在自己的 goroutine 上运行：调用方持有锁且正在绘制一帧或轮询剪贴板，
+// 删除文件不值得占用其中之一。
 func (c *Clipboard) forgetImages(before, after []domain.ClipboardEntry) {
 	kept := make(map[string]bool, len(after))
 	for _, entry := range after {
@@ -612,17 +538,15 @@ func (c *Clipboard) forgetImages(before, after []domain.ClipboardEntry) {
 	go func() {
 		for _, ref := range dropped {
 			if err := c.store.DeleteImage(context.Background(), ref); err != nil {
-				// The entry is gone from the history either way: what stays
-				// behind is a file nobody will look at again, so this is a
-				// warning rather than a failure.
+				// 无论如何条目都已从历史移除：留下的只是一个无人再看的文件，
+				// 因此记为警告而非失败。
 				slog.Warn("a picture of a dropped entry could not be deleted", "error", err)
 			}
 		}
 	}()
 }
 
-// evictOldest drops n unpinned entries, from the oldest back, for a list
-// that is newest first. The caller holds the lock.
+// evictOldest 从最旧处起删除 n 个未置顶条目，适用于最新在前的列表。调用方持有锁。
 func (c *Clipboard) evictOldest(entries []domain.ClipboardEntry, n int) []domain.ClipboardEntry {
 	for n > 0 && len(entries) > 0 {
 		index := -1
@@ -641,15 +565,14 @@ func (c *Clipboard) evictOldest(entries []domain.ClipboardEntry, n int) []domain
 	return entries
 }
 
-// History is the recorded history, newest first, at most limit entries. A
-// limit of zero or less returns everything the store kept.
+// History 返回已记录的历史，最新在前，至多 limit 条。limit 为零或更小则返回存储保留的全部。
 func (c *Clipboard) History(limit int) []domain.ClipboardEntry {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.historyLocked(limit)
 }
 
-// historyLocked is History for callers that already hold the lock.
+// historyLocked 供已持有锁的调用方使用的 History。
 func (c *Clipboard) historyLocked(limit int) []domain.ClipboardEntry {
 	entries := c.history
 	if limit > 0 && len(entries) > limit {
@@ -658,23 +581,19 @@ func (c *Clipboard) historyLocked(limit int) []domain.ClipboardEntry {
 	return append([]domain.ClipboardEntry(nil), entries...)
 }
 
-// HistoryError is why the stored history could not be read, if it could not.
-// The interface says so rather than showing an empty history, which would
-// look like "nothing was ever copied".
+// HistoryError 是存储的历史读不出的原因（若有）。界面会据此说明，
+// 而不是显示空历史——那看起来像「从未复制过任何内容」。
 func (c *Clipboard) HistoryError() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.historyErr
 }
 
-// Copy writes a recorded copy back to the clipboard, as the thing it was: a
-// file list goes back as a file list, an image as an image when its bytes
-// are still in hand, and everything else as text. The entry it belongs to
-// moves to the top of the history.
+// Copy 把一条已记录的复制原样写回剪贴板：文件列表仍为文件列表，图片（字节仍在时）
+// 仍为图片，其余作为文本。所属条目会移至历史顶部。
 //
-// The write is remembered for two poll intervals: the loop would otherwise
-// read back what this application just wrote and record it as a new copy,
-// which is the loop the documentation calls out.
+// 写入结果会记住两个轮询间隔：否则循环会读回本应用刚写的内容并记为新复制，
+// 这正是文档所指出的循环。
 func (c *Clipboard) Copy(ctx context.Context, entry domain.ClipboardEntry) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -692,16 +611,12 @@ func (c *Clipboard) Copy(ctx context.Context, entry domain.ClipboardEntry) error
 	return nil
 }
 
-// CopyAsync puts a recorded copy back on the clipboard and returns at once,
-// reporting to done what the write did.
+// CopyAsync 把一条已记录的复制写回剪贴板并立即返回，通过 done 报告写入结果。
 //
-// It is what a click on a history row calls. The write itself has to happen
-// on the platform's thread, and the caller is that thread, drawing the frame
-// the click was in: doing it here would mean the frame — and every frame
-// after it until the write returned — is drawn before the clipboard has the
-// copy. Nothing is left half-done by returning early: the entry is touched
-// before the write, so a click is visible in the list whatever the platform
-// answers.
+// 点击历史行时调用它。写入本身必须发生在平台线程，而调用方正是绘制点击所在帧
+// 的那个线程：在这里写入意味着该帧——以及直到写入返回的后续所有帧——都在
+// 剪贴板拿到复制之前绘制。提前返回不会留下半成品：条目在写入前已被 touch，
+// 因此无论平台如何回应，点击在列表中都是可见的。
 func (c *Clipboard) CopyAsync(entry domain.ClipboardEntry, done func(error)) {
 	c.mu.Lock()
 	c.writeValue = writeFingerprint(entry)
@@ -719,14 +634,11 @@ func (c *Clipboard) CopyAsync(entry domain.ClipboardEntry, done func(error)) {
 	}()
 }
 
-// write puts a recorded copy back on the clipboard as the right kind of
-// thing.
+// write 把一条已记录的复制以正确的类型写回剪贴板。
 //
-// A file list goes back as files: that is the copy whose value is in being
-// pasted into something that takes a file. A picture goes back as a picture,
-// loaded from the image store — what a click on one used to do was put the line
-// "[图片]" on the clipboard, which is a text nobody can paste anywhere.
-// Everything else goes back as the text it was.
+// 文件列表作为文件写回：这种复制的价值就在于能粘进接受文件的程序。图片作为
+// 图片写回从图片存储加载——过去点击图片会把「[图片]」这一行放到剪贴板，
+// 那是哪里都粘不了的文本。其余内容作为文本写回。
 func (c *Clipboard) write(ctx context.Context, entry domain.ClipboardEntry) error {
 	if entry.Kind == domain.ClipKindImage {
 		if entry.ImageRef == "" {
@@ -752,9 +664,8 @@ func (c *Clipboard) write(ctx context.Context, entry domain.ClipboardEntry) erro
 	return c.device.WriteText(ctx, value)
 }
 
-// entryHash is what identifies a recorded copy. An entry that has one keeps
-// it: it was computed from what the user copied, and recomputing it from the
-// one line the history shows would turn one copy into two.
+// entryHash 是识别一条已记录复制的依据。已带哈希的条目保留它：它由用户复制的
+// 原始内容算出，若用历史显示的那一行重算，会把一次复制变成两条。
 func entryHash(entry domain.ClipboardEntry) string {
 	if entry.ContentHash != "" {
 		return entry.ContentHash
@@ -765,9 +676,8 @@ func entryHash(entry domain.ClipboardEntry) string {
 	return kit.ClipContentHash(entry.Content)
 }
 
-// writeFingerprint is what the suppression window compares a reading
-// against: the text of a text copy, and the one line that stands for a file
-// list.
+// writeFingerprint 是抑制窗口用于比对读取值的内容：文本复制取文本，
+// 文件列表取代表它的那一行。
 func writeFingerprint(entry domain.ClipboardEntry) string {
 	if entry.Content != "" {
 		return strings.TrimSpace(entry.Content)
@@ -775,8 +685,7 @@ func writeFingerprint(entry domain.ClipboardEntry) string {
 	return strings.TrimSpace(entry.Display)
 }
 
-// touch moves the entry holding a copy back to the top, recording it when
-// the history never saw it. The caller holds the lock.
+// touch 把持有某次复制的条目移回顶部，历史从未见过它时则记录之。调用方持有锁。
 func (c *Clipboard) touch(entry domain.ClipboardEntry) {
 	hash := entryHash(entry)
 	for index := range c.history {
@@ -798,19 +707,17 @@ func (c *Clipboard) touch(entry domain.ClipboardEntry) {
 	})
 }
 
-// suppressed reports whether a reading is this application's own write
-// coming back.
+// suppressed 报告某次读取是否为本应用自己写回的内容。
 func (c *Clipboard) suppressed(reading domain.ClipContent) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.suppresses(reading)
 }
 
-// suppresses is suppressed without the lock, for callers that hold it.
+// suppresses 供持有锁的调用方使用的 suppressed。
 func (c *Clipboard) suppresses(reading domain.ClipContent) bool {
 	if !c.ignoreUntil.IsZero() && c.now().Before(c.ignoreUntil) {
-		// A window a synthetic copy opened: nothing read inside it is a copy
-		// the user made.
+		// 合成复制开启的窗口：其中读到的任何内容都不是用户的复制。
 		return true
 	}
 	if c.writeValue == "" {
@@ -820,8 +727,7 @@ func (c *Clipboard) suppresses(reading domain.ClipContent) bool {
 		c.writeValue = ""
 		return false
 	}
-	// A written file list comes back as the same paths; a written text as
-	// the same text.
+	// 写出的文件列表以相同路径回来；写出的文本以相同文本回来。
 	if reading.Kind != c.writeKind {
 		return false
 	}
@@ -835,11 +741,10 @@ func (c *Clipboard) suppresses(reading domain.ClipContent) bool {
 	return strings.TrimSpace(text) == c.writeValue
 }
 
-// newerEntry orders two entries newest first, and breaks a tie by id.
+// newerEntry 将两条条目按最新在前排序，相同时按 id 决出先后。
 //
-// Ids are UUIDv7, so their order is the order they were minted in: two
-// copies within the same second still have a stable order, which is what
-// keeps the list from reshuffling between frames.
+// id 是 UUIDv7，其顺序即铸造顺序：同一秒内的两次复制也有稳定顺序，
+// 这正是列表不会在帧与帧之间重新洗牌的原因。
 func newerEntry(a, b domain.ClipboardEntry) bool {
 	if a.CopiedAt.Equal(b.CopiedAt) {
 		return a.ID > b.ID
@@ -847,14 +752,11 @@ func newerEntry(a, b domain.ClipboardEntry) bool {
 	return a.CopiedAt.After(b.CopiedAt)
 }
 
-// persist asks for the history to be written, and returns at once.
+// persist 请求写入历史并立即返回。
 //
-// Writing it where the change happened would put a file the size of the
-// history — up to a few hundred entries — between the click and the frame
-// that shows the click landed. A background writer takes the latest
-// snapshot instead, and one already on its way makes the next call a no-op:
-// a click during a write is folded into the write after it rather than
-// queueing a second one.
+// 就地写入会把一份历史大小的文件（可达数百条）挡在点击与「点击已生效」的帧之间。
+// 后台写入者取最新快照，且已在途的写入会让下次调用成为空操作：写入期间的点击
+// 会并入其后那次写入，而不是排队第二次。
 func (c *Clipboard) persist() {
 	c.mu.Lock()
 	c.dirty = true
@@ -876,10 +778,8 @@ func (c *Clipboard) persist() {
 			entries := append([]domain.ClipboardEntry(nil), c.history...)
 			c.dirty = false
 			c.mu.Unlock()
-			// The in-memory history is the working copy and this file is
-			// the only one that survives the process: a write that failed
-			// is the reason this run's copies are gone at the next launch,
-			// and nothing else would say so.
+			// 内存中的历史是工作副本，而这个文件是进程结束后唯一留存的东西：
+			// 写入失败就意味着本次运行的复制在下次启动时消失，而别处不会提示。
 			if err := c.store.SaveEntries(context.Background(), entries); err != nil {
 				slog.Warn("the clipboard history could not be written", "error", err)
 			}
@@ -887,16 +787,14 @@ func (c *Clipboard) persist() {
 	}()
 }
 
-// settled reports whether no write is pending and none is in flight. It is
-// how a test waits for the history to be on disk.
+// settled 报告没有待写的内容且没有在途写入。测试借此等待历史落盘。
 func (c *Clipboard) settled() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return !c.dirty && !c.writing
 }
 
-// flush writes the history now and waits for it, for the caller that is
-// about to stop existing.
+// flush 立即写入历史并等待它，供即将不存在的调用方使用。
 func (c *Clipboard) flush() {
 	c.mu.Lock()
 	entries := append([]domain.ClipboardEntry(nil), c.history...)
@@ -906,20 +804,18 @@ func (c *Clipboard) flush() {
 	if store == nil {
 		return
 	}
-	// This is the last write of the run, so a failure here is the one the
-	// user is most likely to notice and the least likely to be told about.
+	// 这是本次运行的最后一次写入，此处失败最易被用户注意、也最难被告知。
 	if err := store.SaveEntries(context.Background(), entries); err != nil {
 		slog.Warn("the clipboard history could not be written as the application quit", "error", err)
 	}
 }
 
-// Record is the one reading the service keeps and draws: what the clipboard
-// holds, as one line, a hash to match it by, and which kind it is.
+// Record 是服务保留并绘制的那一次读取：剪贴板当前内容，浓缩为一行，
+// 附带用于匹配的哈希和类型。
 //
-// Content is the value a history entry puts back on the clipboard: the text
-// itself for a copy, and for a file list or an image the paths and the name,
-// which is what the platform can write. Display is the line both faces of
-// the tool show, so that a list of ten copies stays a list.
+// Content 是历史条目写回剪贴板的值：文本复制即文本本身，文件列表或图片则为
+// 路径与名称，即平台能写的形式。Display 是工具两面都展示的那一行，
+// 使十条复制的列表仍然是一个列表。
 func Record(reading domain.ClipContent) domain.ClipRecord {
 	switch reading.Kind {
 	case domain.ClipKindFile:
@@ -945,10 +841,8 @@ func Record(reading domain.ClipContent) domain.ClipRecord {
 			name = reading.Files[0]
 		}
 		display := "[" + kit.ClipImageName(name) + "]"
-		// The hash is the picture itself when its bytes came with the
-		// reading, so that two screenshots are two entries; without them
-		// there is only the name the platform offered, and every nameless
-		// picture is then the same picture — which is what used to happen.
+		// 读取带有字节时哈希就是图片本身，使两张截图成为两条；没有字节时
+		// 只有平台提供的名称，于是无名图片都成了同一张——这正是过去的问题。
 		hash := kit.ClipContentHash("image:" + kit.ClipFileName(name))
 		if reading.ImageRef != "" {
 			hash = kit.ClipContentHash("image:" + reading.ImageRef)
@@ -967,15 +861,13 @@ func Record(reading domain.ClipContent) domain.ClipRecord {
 	default:
 		text := reading.Text
 		if strings.TrimSpace(text) == "" && reading.HTML != "" {
-			// No plain-text flavour came with the rich one: the text is
-			// what the markup shows.
+			// 富文本没有附带纯文本：文本由标记呈现的内容决定。
 			text = kit.ExtractHTMLText(reading.HTML)
 		}
 		kept := kit.ClipText(text)
 		display := kit.ClipDisplay(kept)
 		if display == "" {
-			// Rich text with nothing readable in it is still a copy, and
-			// the interface has to say something rather than nothing.
+			// 无可读内容的富文本仍是一次复制，界面必须有所显示而非空白。
 			display = kit.ClipDisplay(kit.ExtractHTMLText(reading.HTML))
 		}
 		return domain.ClipRecord{
@@ -988,5 +880,4 @@ func Record(reading domain.ClipContent) domain.ClipRecord {
 	}
 }
 
-// errorsIsInvalidArgument reports whether an error is the domain's way of
-// saying the caller asked for something impossible.
+// errorsIsInvalidArgument 报告错误是否为领域层表示「调用方请求了不可能的操作」的方式。

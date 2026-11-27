@@ -1,6 +1,5 @@
-// This file maps Grok's billing response onto the application's snapshot.
-// It is a pure function of the response: no network, no clock, and a fixture
-// for every case. A missing percentage is a bad response, never a zero.
+// 本文件把 Grok 的账单响应映射为领域快照。
+// 纯函数：不碰网络、时钟，每种情况都有 fixture。缺少百分比视为坏响应，绝不当作 0。
 package grok
 
 import (
@@ -43,16 +42,12 @@ type amount struct {
 	Val *float64 `json:"val"`
 }
 
-// Adapter maps the response.
 type Adapter struct{}
 
-// NewAdapter returns the adapter.
 func NewAdapter() *Adapter { return &Adapter{} }
 
-// ProviderID returns the provider this adapter maps.
 func (a *Adapter) ProviderID() string { return ProviderID }
 
-// Normalize turns one billing response into a snapshot.
 func (a *Adapter) Normalize(result domain.FetchResult, panel domain.Panel) (domain.Snapshot, error) {
 	var payload billingResponse
 	if err := json.Unmarshal(result.Payload, &payload); err != nil {

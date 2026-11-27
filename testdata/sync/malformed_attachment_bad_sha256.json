@@ -1,0 +1,7 @@
+{
+  "attachmentId": "0198b000-0000-7000-8000-0000000000a1",
+  "url": "https://storage.example.invalid/download?signature=test",
+  "expiresAt": "2026-11-24T00:15:00Z",
+  "sha256": "9F86D081884C7D659A2FEAA0C55AD015A3BF4F1B2B0B822CD15D6C15B0F00A08",
+  "size": 182044
+}

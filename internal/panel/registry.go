@@ -1,15 +1,12 @@
-// Package panel is the panel feature: reading the numbers a provider-backed
-// panel shows, and the registry that pairs every provider with the adapter
-// that interprets it.
+// Package panel 是面板功能：读取 provider 驱动的面板所展示的数字，以及把每个
+// provider 与解释它的 adapter 配对的注册表。
 //
-// This file is the registry. The two are registered together and checked at
-// startup, because a provider without an adapter can only fail later, in
-// front of the user, as a card that says nothing. panels.go is the service:
-// caching, single-flight, and a failure that keeps the last good reading.
+// 本文件是注册表。两者一起注册并在启动时校验，因为缺少 adapter 的 provider 只能
+// 在之后、在用户面前以一张空卡片的形式失败。panels.go 是服务：缓存、单飞
+// （single-flight），以及失败时保留上一次良好读数。
 //
-// Nothing here knows a concrete provider: the assembly in main.go registers
-// them, and each vendor's own code lives in a package under this one
-// (panel/deepseek, panel/codex).
+// 这里不认识任何具体 provider：main.go 的装配注册它们，每个厂商自己的代码位于
+// 本包下的子包（panel/deepseek、panel/codex）。
 package panel
 
 import (
@@ -21,14 +18,14 @@ import (
 	"boku/internal/domain"
 )
 
-// Registry holds the providers and their adapters by provider id.
+// Registry 按 provider id 保存 provider 及其 adapter。
 type Registry struct {
 	mu        sync.RWMutex
 	providers map[string]domain.Provider
 	adapters  map[string]domain.Adapter
 }
 
-// NewRegistry returns an empty registry.
+// NewRegistry 返回一个空注册表。
 func NewRegistry() *Registry {
 	return &Registry{
 		providers: make(map[string]domain.Provider),
@@ -36,11 +33,10 @@ func NewRegistry() *Registry {
 	}
 }
 
-// Register adds a provider and the adapter that maps it.
+// Register 添加一个 provider 及映射它的 adapter。
 //
-// It refuses duplicates and mismatches instead of overwriting: two
-// providers answering to one id means two answers to the same question, and
-// only the application's assembly can decide which is right.
+// 它拒绝重复和错配而不是覆盖：两个 provider 响应同一个 id 意味着对同一问题有两个
+// 答案，只有应用的装配层能决定哪个正确。
 func (r *Registry) Register(provider domain.Provider, adapter domain.Adapter) error {
 	if provider == nil {
 		return fmt.Errorf("%w: a provider is nil", domain.ErrInvalidArgument)
@@ -72,8 +68,7 @@ func (r *Registry) Register(provider domain.Provider, adapter domain.Adapter) er
 	return nil
 }
 
-// Provider returns the provider registered under an id, or
-// ErrProviderNotFound.
+// Provider 返回按 id 注册的 provider，否则返回 ErrProviderNotFound。
 func (r *Registry) Provider(id string) (domain.Provider, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -84,8 +79,7 @@ func (r *Registry) Provider(id string) (domain.Provider, error) {
 	return provider, nil
 }
 
-// Adapter returns the adapter registered under an id, or
-// ErrProviderNotFound.
+// Adapter 返回按 id 注册的 adapter，否则返回 ErrProviderNotFound。
 func (r *Registry) Adapter(id string) (domain.Adapter, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -96,7 +90,7 @@ func (r *Registry) Adapter(id string) (domain.Adapter, error) {
 	return adapter, nil
 }
 
-// IDs returns the registered provider ids, sorted.
+// IDs 返回已注册的 provider id，按序排列。
 func (r *Registry) IDs() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -108,10 +102,8 @@ func (r *Registry) IDs() []string {
 	return ids
 }
 
-// Validate reports a provider without an adapter, or an adapter without a
-// provider. The application calls it once the assembly is done: a
-// configuration error is worth failing at startup, not on the first panel
-// the user opens.
+// Validate 报告缺少 adapter 的 provider，或缺少 provider 的 adapter。
+// 应用在装配完成后调用一次：配置错误值得在启动时失败，而不是等用户打开第一个面板时。
 func (r *Registry) Validate() error {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

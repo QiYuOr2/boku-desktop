@@ -5,54 +5,40 @@ import (
 	"errors"
 )
 
-// SelectionDevice is the platform's own answer to "what has the user
-// selected", read from the application they are working in rather than from
-// the clipboard.
+// SelectionDevice 是平台自身对「用户选中了什么」的回答，从用户正在工作的
+// 应用读取，而非从剪贴板。
 //
-// It is the better question to ask. The clipboard holds what was copied
-// last, which may be something else entirely — a password from a moment ago,
-// a line from another window — so a tool that reads it is guessing. The
-// selection is not a guess: the user has it in front of them right now, and
-// reading it disturbs nothing, where copying it would replace what they had
-// on the clipboard and, on the platforms that need one, would need a
-// synthetic key press to do it.
+// 剪贴板只保存上一次复制的内容，可能是完全无关的东西（刚才的密码、另一个
+// 窗口的一行），所以读它只是在猜。选区不是猜：用户此刻正看着它，读取它不
+// 干扰任何东西，而复制它会覆盖用户原有的剪贴板内容，且在某些平台上还需要
+// 一次合成的按键。
 //
-// Not every platform, and not every application, publishes its selection. A
-// system with no API for it, a control that does not implement the pattern,
-// and an empty selection are all ordinary answers: they mean the caller
-// should fall back to the clipboard, and ErrSelectionUnavailable says so
-// rather than describing a failure.
+// 并非每个平台、每个应用都公开其选区。没有相应 API 的系统、不实现该模式的
+// 控件、以及空选区都是普通结果：表示调用方应回退到剪贴板，而非描述为失败，
+// 由 ErrSelectionUnavailable 表达。
 type SelectionDevice interface {
-	// SelectedText returns what is selected in the application the user is
-	// working in, trimmed to nothing when there is none. It returns
-	// ErrSelectionUnavailable when the platform cannot say.
+	// SelectedText 返回用户正在工作的应用中选中的文本，无选中时为空串。
+	// 平台无法告知时返回 ErrSelectionUnavailable。
 	//
-	// It may run on any goroutine; an implementation is responsible for
-	// whatever thread the platform requires.
+	// 它可能在任意 goroutine 上运行；实现方负责平台要求的线程。
 	SelectedText(ctx context.Context) (string, error)
 }
 
-// ErrSelectionUnavailable means the platform could not say what is selected:
-// it has no such API, the application in front does not publish its
-// selection, or nothing is selected.
+// ErrSelectionUnavailable 表示平台无法说明选中了什么：没有此类 API、前台
+// 应用不公开其选区、或没有选中任何内容。
 var ErrSelectionUnavailable = errors.New("the platform has no selected text to give")
 
-// SelectionAuthorizer is implemented by a selection device that can ask the
-// platform to show its permission prompt. macOS is the platform that needs
-// one: its Accessibility list only learns about an application after that
-// application has asked, and the system — not the application — owns the
-// switch. A platform that needs no permission simply does not implement this.
+// SelectionAuthorizer 由能请求平台弹出权限提示的选区设备实现。macOS 是需
+// 要它的平台：它的辅助功能列表只在该应用请求后才能识别它，且开关归系统而
+// 非应用所有。无需权限的平台直接不实现它。
 type SelectionAuthorizer interface {
-	// RequestSelectionAccess asks the system to show the permission prompt,
-	// and reports whether the permission is already granted. A false answer
-	// after the prompt means the user has not granted it yet, not that the
-	// request failed.
+	// RequestSelectionAccess 请求系统弹出权限提示，并报告权限是否已授予。
+	// 提示后返回 false 表示用户尚未授予，而非请求失败。
 	RequestSelectionAccess() bool
 }
 
-// SelectionAccessState reports whether the platform's permission for reading
-// the selection is already granted, without asking for it. The settings page
-// uses it to stop showing the request once the switch is on.
+// SelectionAccessState 报告读取选区的平台权限是否已授予，且不主动请求。
+// 设置页用它来在开关打开后不再显示请求。
 type SelectionAccessState interface {
 	SelectionAccessGranted() bool
 }

@@ -1,8 +1,7 @@
-// Package regioncapture reads pixels from a rectangle of the desktop.
+// Package regioncapture 读取桌面矩形容器内的像素。
 //
-// It deliberately does not present any UI and never touches the clipboard.
-// The application owns the native selection overlay; this package owns only
-// the operating-system pixel read and PNG encoding.
+// 本包不呈现任何 UI，也不接触剪贴板：原生选择浮层由应用层负责，本包只负责
+// 操作系统像素读取与 PNG 编码。
 package regioncapture
 
 type Device struct{}

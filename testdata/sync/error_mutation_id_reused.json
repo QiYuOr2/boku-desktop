@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "mutation_id_reused",
+    "message": "mutation id reused with different content",
+    "retryable": false
+  }
+}

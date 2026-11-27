@@ -13,9 +13,8 @@ import (
 	"boku/internal/settings"
 )
 
-// The appearance is a setting like any feature's: it has a default, it reads
-// only its own key, and it writes the choice back under the same name. These
-// are the rules of settings.json, checked where the section is written.
+// 外观和任何功能的设置一样：有默认值、只读自己的键、并以同名写回选择。
+// 这些是 settings.json 的规则，在写该 section 的地方校验。
 func TestAppearanceDefaultsToFollowingTheDesktop(t *testing.T) {
 	appearance := NewAppearanceSection()
 	if got := appearance.Name(); got != "appearance" {
@@ -50,8 +49,7 @@ func TestAppearanceReadsEachMode(t *testing.T) {
 	}
 }
 
-// A file without the key is a user who never chose: the default stays, as it
-// does for every feature's settings.
+// 文件中没有该键意味着用户从未选择：保留默认值，对所有功能的设置都如此。
 func TestAppearanceAbsentKeyKeepsTheChoice(t *testing.T) {
 	appearance := NewAppearanceSection()
 	appearance.Set(AppearanceDark)
@@ -63,8 +61,7 @@ func TestAppearanceAbsentKeyKeepsTheChoice(t *testing.T) {
 	}
 }
 
-// A value this build does not know follows the desktop rather than refusing
-// to start: a settings file written by a newer build is still readable.
+// 本版本不认识的值跟随桌面，而非拒绝启动：更新版本写的设置文件仍可读取。
 func TestAppearanceUnknownModeFollowsTheDesktop(t *testing.T) {
 	appearance := NewAppearanceSection()
 	appearance.Set(AppearanceDark)
@@ -77,8 +74,7 @@ func TestAppearanceUnknownModeFollowsTheDesktop(t *testing.T) {
 	}
 }
 
-// A value of the wrong JSON type is a broken file, and the store reports it
-// instead of silently changing the user's choice.
+// JSON 类型错误的值是损坏的文件，存储会报告它，而不是静默改变用户的选择。
 func TestAppearanceRejectsAValueThatIsNotAString(t *testing.T) {
 	appearance := NewAppearanceSection()
 	values := map[string]json.RawMessage{appearanceThemeKey: json.RawMessage(`1`)}
@@ -127,13 +123,12 @@ func TestThemeSourceMatchesTheMode(t *testing.T) {
 	}
 }
 
-// appearanceStore is a settings store that records what it was asked to do.
+// appearanceStore 是记录被要求做什么的设置存储。
 type appearanceStore struct {
 	calls   int
 	section string
 	err     error
-	// changeRan says whether the store reached the change: a read that failed
-	// does not, which is the case the window still has to answer.
+	// changeRan 表示存储是否到达了变更：读取失败时不会，而窗口仍需对此作答。
 	changeRan bool
 }
 
@@ -147,8 +142,7 @@ func (s *appearanceStore) Update(_ context.Context, section string, change func(
 	return change()
 }
 
-// A theme click is written through the store, applied at once, and repaints:
-// the file and the frame are the same answer.
+// 主题点击经存储写入、立即应用并重绘：文件与帧是同一个答案。
 func TestSetAppearanceWritesAppliesAndRepaints(t *testing.T) {
 	store := &appearanceStore{}
 	var applied []AppearanceMode
@@ -180,9 +174,8 @@ func TestSetAppearanceWritesAppliesAndRepaints(t *testing.T) {
 	}
 }
 
-// A file that cannot be written still changes this run's appearance: the
-// click was the user's. The window says the choice was not stored, because
-// the next launch will not remember it.
+// 无法写入的文件仍会改变本次运行的外观：点击是用户的选择。窗口会说明该选择未被存储，
+// 因为下次启动不会记得它。
 func TestSetAppearanceSurvivesAFailedWrite(t *testing.T) {
 	store := &appearanceStore{err: errors.New("disk is full")}
 	var applied []AppearanceMode
@@ -208,10 +201,8 @@ func TestSetAppearanceSurvivesAFailedWrite(t *testing.T) {
 	}
 }
 
-// The real store is the one place this can go wrong in a way a fake cannot
-// show: Update reads the file before it runs the change, so a section that
-// set its value only before the call would have it overwritten by the value
-// already on disk and write that back. The choice has to survive the read.
+// 真实存储是这里唯一会以假实现无法展示的方式出错的地方：Update 在执行变更前先读文件，
+// 因此只在调用前设好值的 section 会被磁盘上已有的值覆盖并写回。选择必须在这次读取后存活。
 func TestSetAppearanceSurvivesTheStoresRead(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	appearance := NewAppearanceSection()
@@ -219,8 +210,7 @@ func TestSetAppearanceSurvivesTheStoresRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("settings.New: %v", err)
 	}
-	// Give the file a value to be overwritten by: the default is already in
-	// memory, so save it once.
+	// 给文件一个可被覆盖的值：默认值已在内存中，因此保存一次。
 	if err := store.Save(context.Background()); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -244,10 +234,8 @@ func TestSetAppearanceSurvivesTheStoresRead(t *testing.T) {
 	}
 }
 
-// A fixed appearance cannot keep the system popover: its material follows the
-// desktop, not the appearance Boku forces, so the page and its background
-// would disagree. Only the automatic mode, whose page and popover both follow
-// the desktop, uses the native popover.
+// 固定外观不能保留系统 popover：其材质跟随桌面，而非 Boku 强制的外观，
+// 页面与背景会不一致。只有自动模式（页面与 popover 都跟随桌面）才用原生 popover。
 func TestTheQuickWindowIsAPopoverOnlyInTheAutomaticAppearance(t *testing.T) {
 	state := &State{appearance: NewAppearanceSection()}
 	if !state.quickWindowUsesPopover() {
@@ -263,8 +251,7 @@ func TestTheQuickWindowIsAPopoverOnlyInTheAutomaticAppearance(t *testing.T) {
 	}
 }
 
-// The card a fixed appearance draws centres itself on the tray icon, where a
-// popover's arrow would be. Other platforms keep their end alignment.
+// 固定外观绘制的卡片在托盘图标处居中，也就是 popover 箭头所在处。其它平台保持末端对齐。
 func TestTheFixedAppearanceCardCentresOnTheTrayIcon(t *testing.T) {
 	tests := []struct {
 		goos    string
@@ -285,7 +272,7 @@ func TestTheFixedAppearanceCardCentresOnTheTrayIcon(t *testing.T) {
 	}
 }
 
-// popoverAppearance records the call the state would make to the platform.
+// popoverAppearance 记录 State 会对平台发起的调用。
 type popoverAppearance struct {
 	dark  bool
 	calls int
@@ -296,9 +283,7 @@ func (p *popoverAppearance) SetDark(uintptr) bool {
 	return p.dark
 }
 
-// Forced dark uses the native popover only when a platform bridge is
-// injected; the automatic appearance always does, and forced light never
-// does (its material could follow a dark desktop).
+// 强制深色仅在注入了平台桥接时才用原生 popover；自动外观总是用，强制浅色从不用（其材质可能跟随深色桌面）。
 func TestThePopoverBridgeIsOnlyNeededForForcedDark(t *testing.T) {
 	bridge := &popoverAppearance{dark: true}
 	state := &State{appearance: NewAppearanceSection(), popoverAppearance: bridge}
@@ -316,7 +301,7 @@ func TestThePopoverBridgeIsOnlyNeededForForcedDark(t *testing.T) {
 		t.Error("a forced dark appearance with a bridge did not use the system popover")
 	}
 
-	// Without the bridge, forced dark is the application's card.
+	// 没有桥接时，强制深色使用应用卡片。
 	state.popoverAppearance = nil
 	if state.quickWindowUsesPopover() {
 		t.Error("forced dark used a popover without a bridge to make it dark")

@@ -2,9 +2,8 @@ package panel
 
 import "testing"
 
-// A panel nobody has chosen about is on: the switches in the settings window
-// are the only thing that turns one off, so a file that does not name a panel
-// — every file written before the switch existed — reads as "on".
+// 无人做出选择的面板是开启的：设置窗口的开关是唯一能关闭它的东西，因此文件未提及
+// 某个面板（包括所有在开关存在之前写入的文件）都读作"开启"。
 func TestAPanelNobodyChoseAboutIsOn(t *testing.T) {
 	none := NewSection()
 	if !none.On("panel-1") {
@@ -28,8 +27,7 @@ func TestAPanelNobodyChoseAboutIsOn(t *testing.T) {
 	}
 }
 
-// The choices come back copied: a caller that wrote into the map it was handed
-// would be changing the settings without going through Update.
+// 交出的选择是副本：调用方若写入拿到的 map，就绕过了 Update 修改设置。
 func TestTheChoicesHandedOutAreACopy(t *testing.T) {
 	section := NewSection()
 	section.Set("panel-1", false)

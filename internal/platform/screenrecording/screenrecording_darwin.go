@@ -15,8 +15,8 @@ var (
 	ask        func() bool
 )
 
-// bridge resolves CoreGraphics and the two permission functions once. They
-// arrived with macOS 10.15, which every supported macOS has.
+// bridge 一次性解析 CoreGraphics 和两个权限函数；它们随 macOS 10.15 提供，
+// 所有受支持的 macOS 都有。
 func bridge() {
 	lib, err := purego.Dlopen(
 		"/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics",
@@ -41,13 +41,13 @@ func bridge() {
 func granted() bool {
 	bridgeOnce.Do(bridge)
 	if !bridgeOK {
-		// Without the permission functions there is no switch to turn on.
+		// 没有权限函数就说明没有可开启的开关。
 		return true
 	}
 	return preflight()
 }
 
-// settingsURL is System Settings' Screen Recording pane.
+// settingsURL 指向系统设置中的「屏幕录制」面板。
 func settingsURL() string {
 	return "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
 }
@@ -55,12 +55,10 @@ func settingsURL() string {
 func request() bool {
 	bridgeOnce.Do(bridge)
 	if !bridgeOK {
-		// Without the permission functions there is no switch to turn on,
-		// and the capture reports whatever went wrong itself.
+		// 没有权限函数就没有可开启的开关，采集失败会自行上报错误。
 		return true
 	}
-	// Asked only when the permission is not there: the request presents the
-	// system's prompt, and there is nothing to ask once the answer is known.
+	// 仅在尚无权限时询问：该请求会弹出系统提示，答案已知后无需再问。
 	if preflight() {
 		return true
 	}

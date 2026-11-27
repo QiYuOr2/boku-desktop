@@ -8,11 +8,9 @@ import (
 	"path/filepath"
 )
 
-// BinaryPath is the program the application was started from.
+// BinaryPath 返回应用启动时的程序路径。
 //
-// The macOS login item registers the application bundle rather than this
-// path, but the settings page still asks for the program to answer "where am
-// I", and the legacy launch agent cleanup compares it with the old document.
+// macOS 登录项注册的是应用包而非此路径，但设置页仍需程序路径来回答"我在哪"，旧 launch agent 清理也要用它比对旧文档。
 func BinaryPath() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {

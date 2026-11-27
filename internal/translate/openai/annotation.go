@@ -10,38 +10,25 @@ import (
 	"boku/internal/domain"
 )
 
-// The Japanese settings ask the translator for more than a translation: each
-// word of the source, how it is read, and — for a loanword written in
-// katakana — the word it came from. The model answers with one JSON object
-// per line, and this file is what turns that answer into segments.
+// 日文设置要求译者给出比译文更多的内容：原文的每个词、它的读音，以及片假名外来语的
+// 原词。模型每行返回一个 JSON 对象，本文件负责把它转成片段。
 //
-// The parser is deliberately forgiving. A model's output is not a contract:
-// it may wrap the lines in a code fence, spell a field out in full, forget
-// one, or answer the translation alone. None of that is a failure — the
-// window can always draw what came back — so nothing here returns an error.
-// What it cannot read as a segment becomes plain text, and if it reads
-// nothing at all, the whole answer is the translation.
+// 解析器刻意宽容：模型输出不是契约，可能包在代码围栏里、字段写全称、漏字段、或只
+// 给译文。这些都不算失败——窗口总能画出返回的内容——所以这里不返回错误。无法读成
+// 片段的内容当作纯文本，若一条都读不出，整段回答即译文。
 
-// AnnotationOptions is what to ask for. It is the domain's own value: the
-// choice belongs to the user's settings, and the request carries it from
-// there to here.
+// AnnotationOptions 是域自身的类型别名：要哪些标注由用户设置决定。
 type AnnotationOptions = domain.AnnotationOptions
 
-// SystemPrompt is the instruction that decides the shape of the answer: a
-// plain translation when nothing more was asked for, and the line-by-line
-// annotation when the Japanese settings want it.
+// SystemPrompt 决定回答形状的指令：未要求标注时是纯译文，日文设置要标注时是逐行
+// 注解。
 //
-// The prompt names the languages in the interface's own words: a model is
-// better at "翻译成中文" than at "translate into zh".
+// 提示词用界面自身的语言称呼语种：模型更懂「翻译成中文」而不是「translate into zh」。
 //
-// Two of the requirements are the user's, and both are asked for in words a
-// model cannot read as optional — a katakana loanword must carry the word it
-// came from (モード is "mode", and a Japanese speaker reading 模式 wants to see
-// that), and the translation must keep the source's own marks: a source that
-// says 【回想モード完備】 is answered with 【完备回想模式】, brackets and all.
-// The example is those two rules at once, and it is also what tells a model
-// that punctuation gets a piece of its own, since that is how the brackets
-// survive into the pieces.
+// 其中两条是用户的硬要求，都用模型无法读作可选的措辞表达：片假名外来语必须带上它的
+// 原词（モード 是 "mode"，读 模式 的日文使用者想看到它），且译文必须保留原文自身的
+// 标点：原文【回想モード完備】应回答【完备回想模式】，括号也要保留。
+// 示例同时体现这两条规则，也告诉模型标点单独成片段——括号正是如此才得以保留。
 func SystemPrompt(source, target domain.Language, opts AnnotationOptions) string {
 	into := target.Name()
 	from := "用户给出的原文"
@@ -100,13 +87,11 @@ func SystemPrompt(source, target domain.Language, opts AnnotationOptions) string
 	return strings.Join(lines, "\n")
 }
 
-// annotationExample is the prompt's example: one line per piece of
-// 【回想モード完備】, with the optional fields only when they were asked for.
+// annotationExample 是提示词的示例：【回想モード完備】每段一行，可选字段只在
+// 被要求时才出现。
 //
-// It is the three rules at once, which is why it is worth more than a
-// sentence of instructions: 回想 is one piece with one reading rather than two
-// characters with two, モード carries the word it came from and no reading of
-// its own, and the brackets are pieces that translate to themselves.
+// 它同时体现三条规则，比一句说明更有价值：回想 是一段一个读音而非两字两音，モード
+// 带原词而无自身读音，括号是译成自身的片段。
 func annotationExample(opts AnnotationOptions) []string {
 	line := func(s, t, reading, gloss string) string {
 		var b strings.Builder
@@ -129,25 +114,20 @@ func annotationExample(opts AnnotationOptions) []string {
 	}
 }
 
-// readingFor is the reading a piece should carry: one that belongs to it.
+// readingFor 是片段该带的读音：只属于它自己的读音。
 //
-// A reading is for kanji — that is what the setting is called, and what the
-// design draws above the word. A model that annotates every piece writes
-// katakana above は and above モード: the first is a reading nobody needs, and
-// the second is the word itself, which says nothing. Neither is dropped from
-// the answer as a mistake — the answer is still a translation — but the window
-// draws the annotation the user asked for, whatever the model sent.
+// 读音是给汉字的——设置因此得名，界面也把它画在词的上方。给每段都注音的模型会在
+// は 和 モード 上方写片假名：前者是没人需要的读音，后者就是词本身，说了等于没说。
+// 这两者不会当错误丢掉——回答仍是译文——但窗口只画用户真正要的标注，不随模型乱给。
 func readingFor(text, reading string) string {
 	if reading == "" || !hasHan(text) {
-		// Kana, punctuation, digits: there is nothing to read. That covers a
-		// loanword too, whose katakana is already its reading.
+		// 假名、标点、数字没有可读的东西；外来语也算在内，它的片假名本身就是读音。
 		return ""
 	}
 	return reading
 }
 
-// glossFor is the gloss a piece should carry: the word a loanword came from,
-// which only a piece written in katakana has.
+// glossFor 是片段该带的释义：外来语的原词，只有片假名写成的片段才有。
 func glossFor(text, gloss string) string {
 	if gloss == "" || !hasKatakana(text) {
 		return ""
@@ -155,7 +135,7 @@ func glossFor(text, gloss string) string {
 	return gloss
 }
 
-// hasHan reports whether any of the text is a kanji.
+// hasHan 报告文本里是否有汉字。
 func hasHan(text string) bool {
 	for _, r := range text {
 		if unicode.In(r, unicode.Han) {
@@ -165,14 +145,12 @@ func hasHan(text string) bool {
 	return false
 }
 
-// looksLikeData reports whether a piece of an answer is the answer's own
-// format rather than something to read: a JSON object or array, whole or
-// broken, on its own or spread over the line.
+// looksLikeData 报告一段回答是否为回答自身的格式而非可读内容：单独或跨行的、完整
+// 或残缺的 JSON 对象或数组。
 //
-// It exists for one rule: what the window shows is the translation. A model
-// that answers badly must not put `{"s":"\n","t":"\n"}` in front of the user —
-// the line is not a translation, and the window says what it says about an
-// answer it could not use instead.
+// 它只为一条规则存在：窗口显示的是译文。回答得糟糕的模型不能把
+// `{"s":"\n","t":"\n"}` 摆在用户面前——那不是译文，窗口会改用「无法使用此回答」的
+// 提示。
 func looksLikeData(line string) bool {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
@@ -186,7 +164,7 @@ func looksLikeData(line string) bool {
 	return last == '}' || last == ']'
 }
 
-// hasKatakana reports whether any of the text is katakana.
+// hasKatakana 报告文本里是否有片假名。
 func hasKatakana(text string) bool {
 	for _, r := range text {
 		if unicode.In(r, unicode.Katakana) {
@@ -196,37 +174,26 @@ func hasKatakana(text string) bool {
 	return false
 }
 
-// Annotation is what was read out of an answer: the segments, the
-// translation they add up to, and whether the translation could be cut into
-// segments at all.
+// Annotation 是从回答中读出的内容：片段、它们拼成的译文，以及译文能否被切分。
 type Annotation struct {
 	Segments []domain.Segment
-	// TranslatedText is the segments' own translations, joined in the order
-	// they were given; for an answer that could not be segmented it is the
-	// whole answer as it came.
+	// TranslatedText 是各片段译文按给定顺序拼接；无法分段的回答就是原样整段。
 	TranslatedText string
-	// Segmented reports whether the answer could be read as pieces. It is
-	// false for a plain translation, and the window then draws the source
-	// as one line.
+	// Segmented 报告回答能否读成片段。纯译文为 false，此时窗口把原文画成一行。
 	Segmented bool
-	// UnreadableLines is how many lines were not a JSON object. Those lines
-	// are still shown — as plain text — but the caller may say that the
-	// answer was not understood in full. It is 0 for an answer that read as
-	// segments throughout, and for one that was never meant to be segmented.
+	// UnreadableLines 是非 JSON 对象的行数。这些行仍会以纯文本显示，但调用方可据此
+	// 说明回答未被完全理解。全部读成片段、或本就不需分段时为 0。
 	UnreadableLines int
 }
 
-// ParseAnnotation reads an annotated answer.
+// ParseAnnotation 读取带标注的回答。
 //
-// It never fails: an answer that is not a list of JSON objects is a plain
-// translation, which is a thing the window can draw.
+// 它从不失败：不是 JSON 对象列表的回答就是纯译文，窗口能画出它。
 func ParseAnnotation(content string) Annotation {
 	trimmed := strings.TrimSpace(content)
 	lines := answerLines(trimmed)
-	// A model that answers one JSON array is not following the prompt, but it
-	// is saying the same thing: read the array's own elements as the lines.
-	// Without this, a compact array on one line is one unreadable line, and
-	// an annotated answer the user asked for is drawn as a plain translation.
+	// 用单个 JSON 数组作答的模型虽不合提示，但意思相同：把数组元素当作各行。
+	// 否则一整行紧凑数组会成为一行不可读内容，用户要的标注就被画成纯译文了。
 	if elements, ok := answerArray(trimmed); ok {
 		lines = elements
 	}
@@ -237,9 +204,8 @@ func ParseAnnotation(content string) Annotation {
 		segments   []domain.Segment
 		translated []string
 		unreadable int
-		// dropped says the answer carried pieces of the service's own format
-		// that could not be read. What they were is not shown, and the answer
-		// is then the readable lines rather than the raw one.
+		// dropped 表示回答里夹带了无法读取的服务自身格式。它们不会显示，回答取可读的
+		// 行而非原始内容。
 		dropped bool
 	)
 	for _, line := range lines {
@@ -248,17 +214,14 @@ func ParseAnnotation(content string) Annotation {
 			Reading string `json:"r"`
 			Gloss   string `json:"g"`
 			Target  string `json:"t"`
-			// The spelled-out names, for a model that ignores the prompt's
-			// field names and writes its own.
+			// 字段全称，用于无视提示字段名、自造名字的模型。
 			TextLong    string `json:"text"`
 			ReadingLong string `json:"reading"`
 			GlossLong   string `json:"gloss"`
 			TargetLong  string `json:"translation"`
 		}
 		if err := json.Unmarshal([]byte(line), &parsed); err != nil {
-			// A line that is the service's own format and nothing else is
-			// not shown: the window shows the translation, and a user must
-			// never be handed the wire format because a model malformed it.
+			// 纯服务格式的行不显示：窗口显示译文，绝不能因模型格式错误就把线格式塞给用户。
 			if looksLikeData(line) {
 				dropped = true
 			} else {
@@ -270,9 +233,7 @@ func ParseAnnotation(content string) Annotation {
 		text := firstNonEmpty(parsed.Text, parsed.TextLong)
 		target := firstNonEmpty(parsed.Target, parsed.TargetLong)
 		if text == "" {
-			// An object that names no source piece is not a segment: there
-			// is nothing to draw it under. Its translation is not dropped
-			// with it, when it has one.
+			// 未指明原文片段的对象不是片段：没有东西可承载它。若它带译文，译文保留。
 			switch {
 			case target != "":
 				translated = append(translated, target)
@@ -286,10 +247,8 @@ func ParseAnnotation(content string) Annotation {
 		}
 		segments = append(segments, domain.Segment{
 			Text: text,
-			// The annotations that belong to the piece: a reading for a word
-			// with kanji in it, a gloss for one written in katakana. What a
-			// model puts where it does not belong is left out here rather
-			// than drawn.
+			// 属于片段的标注：含汉字的词给读音，片假名片段给释义。模型放错位置的东西
+			// 在此剔除而非画出。
 			Reading: readingFor(text, firstNonEmpty(parsed.Reading, parsed.ReadingLong)),
 			Gloss:   glossFor(text, firstNonEmpty(parsed.Gloss, parsed.GlossLong)),
 			Target:  target,
@@ -297,26 +256,21 @@ func ParseAnnotation(content string) Annotation {
 		if target != "" {
 			translated = append(translated, target)
 		} else {
-			// A piece the model annotated but did not translate: the piece
-			// itself stands in for its translation rather than leaving a
-			// hole in the paragraph.
+			// 模型标注了却没翻译的片段：用片段本身顶替译文，免得段落出现空洞。
 			translated = append(translated, text)
 		}
 	}
 	if len(segments) == 0 {
-		// Nothing in the answer was an object it could read. An answer that
-		// carried the service's own format anyway has braces in it that are
-		// not a translation: what was readable is the answer, and the rest is
-		// dropped rather than drawn.
+		// 回答里没有能读成对象的内容。若回答里夹带服务格式，其花括号不是译文：可读部分
+		// 即回答，其余丢弃而非画出。
 		if dropped || looksLikeData(trimmed) {
 			return Annotation{TranslatedText: joinTranslated(translated), UnreadableLines: unreadable}
 		}
-		// Otherwise it is the translation itself, however it was wrapped.
+		// 否则就是译文本身，无论它怎么被包裹。
 		return Annotation{TranslatedText: trimmed}
 	}
-	// Latin scripts separate their words, and the joining puts a space back
-	// between two pieces that were written apart. Han, kana, Hangul and
-	// punctuation are written without spaces, and get none.
+	// 拉丁文字以空格分词，拼接时在分开书写两片段之间补回一个空格；汉字、假名、谚文与
+	// 标点不空格，也不补。
 	return Annotation{
 		Segments:        segments,
 		TranslatedText:  joinTranslated(translated),
@@ -325,12 +279,10 @@ func ParseAnnotation(content string) Annotation {
 	}
 }
 
-// joinTranslated puts the pieces of a translation back together.
+// joinTranslated 把译文的片段重新拼起来。
 //
-// It cannot know where the model's own spaces were, so it uses one rule:
-// a space goes between two pieces only when both sides are written in a
-// script that separates its words. Joining a Japanese answer that way leaves
-// it exactly as it was written; joining a Latin one keeps its words apart.
+// 它无从得知模型原本的空格位置，只用一条规则：仅当两侧都以分词书写时，两片段间才加
+// 空格。这样拼日文能原样还原，拼拉丁文能保持词间距。
 func joinTranslated(pieces []string) string {
 	var b strings.Builder
 	for _, piece := range pieces {
@@ -345,8 +297,7 @@ func joinTranslated(pieces []string) string {
 	return strings.TrimSpace(b.String())
 }
 
-// separatesWords reports whether a script writes its words apart, which is
-// what decides whether a space belongs between two pieces.
+// separatesWords 报告某种文字是否以空格分词，这决定两片段间是否该有空格。
 func separatesWords(r rune) bool {
 	switch {
 	case r == 0:
@@ -375,9 +326,7 @@ func lastRune(text string) rune {
 	return last
 }
 
-// answerLines splits an answer into the lines a person would read: fenced
-// code is unwrapped, and blank lines and the punctuation of an array are
-// dropped.
+// answerLines 把回答拆成人会读的行：去掉代码围栏，丢弃空行与数组的标点。
 func answerLines(content string) []string {
 	text := strings.TrimSpace(strings.TrimPrefix(content, "\ufeff"))
 	if strings.HasPrefix(text, "```") {
@@ -401,7 +350,7 @@ func answerLines(content string) []string {
 	return lines
 }
 
-// firstNonEmpty returns the first of the values with anything in it.
+// firstNonEmpty 返回首个非空的值。
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
@@ -411,12 +360,10 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// answerArray reads an answer that is one JSON array, as one piece of JSON per
-// element. The pieces are read exactly as a line of the answer would be, so an
-// array and a column of objects come out the same.
+// answerArray 把一个 JSON 数组形式的回答读成逐元素的 JSON 片段，读取方式与单行完全相同，
+// 所以数组与对象列的结果一致。
 //
-// It reports false when the answer is not one array, which leaves it to the
-// line-by-line reading the prompt asks for.
+// 若回答不是单个数组则返回 false，交回提示所要求的逐行读取。
 func answerArray(content string) ([]string, bool) {
 	text := strings.TrimSpace(strings.TrimPrefix(content, "\ufeff"))
 	if strings.HasPrefix(text, "```") {
@@ -442,11 +389,8 @@ func answerArray(content string) ([]string, bool) {
 	return lines, true
 }
 
-// AnnotationNote is what the window should say about an annotated answer: how
-// many of its lines could not be read, and — when the settings asked for
-// readings and the answer came back with no pieces at all — that there are
-// none. The second one is what keeps a missing annotation from looking like a
-// translation that simply never had any.
+// AnnotationNote 是窗口对带标注回答该说的话：有多少行没读懂，以及——设置要了读音但
+// 回答根本没有片段时——确实没有。后者让缺失的标注不至于看起来像本就没有标注的译文。
 func AnnotationNote(annotation Annotation, opts AnnotationOptions) string {
 	if !opts.Wants() {
 		return ""
@@ -460,9 +404,8 @@ func AnnotationNote(annotation Annotation, opts AnnotationOptions) string {
 	return ""
 }
 
-// JoinSegments is the source text a list of segments adds up to. The window
-// draws the source from the pieces rather than from what was sent, so that
-// what is highlighted and what is read are the same thing.
+// JoinSegments 是片段拼成的原文。窗口用片段而非发送内容来画原文，好让高亮的与读出的
+// 是同一份。
 func JoinSegments(segments []domain.Segment) string {
 	pieces := make([]string, 0, len(segments))
 	for _, segment := range segments {
@@ -473,10 +416,8 @@ func JoinSegments(segments []domain.Segment) string {
 	return joinTranslated(pieces)
 }
 
-// Truncate cuts text to at most max characters, on a character boundary, and
-// reports whether it had to. It is the tool's own ceiling: a selection is a
-// sentence or a paragraph, and a whole document in the clipboard is not what
-// translation is for.
+// Truncate 把文本按字符边界截到至多 max 个字符，并报告是否截断过。它是工具自身上限：
+// 选中内容是一句或一段，剪贴板里整篇文档不是翻译的用途。
 func Truncate(text string, max int) (string, bool) {
 	trimmed := strings.TrimSpace(text)
 	if len([]rune(trimmed)) <= max {

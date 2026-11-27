@@ -9,29 +9,25 @@ import (
 	"testing"
 )
 
-// fakeUpdater is the feed and the transport in one value a test can make
-// answer anything: what the feed says, what the archive is, and whether the
-// installation was asked for.
+// fakeUpdater 把发布源与传输合为一体，测试可让它回答任何内容：发布源说什么、
+// 归档是什么、是否被要求安装。
 type fakeUpdater struct {
 	enabled bool
 
 	mu sync.Mutex
-	// release is what the feed answers. nil with a nil error is "up to date".
+	// release 是发布源的回答。nil 且错误为空表示「已是最新」。
 	release *Release
-	// releaseErr is a feed that could not be read.
+	// releaseErr 是无法读取的发布源。
 	releaseErr error
-	// archive is what Fetch serves, by URL. A URL that is not here is a file
-	// that cannot be downloaded.
+	// archive 是 Fetch 按 URL 提供的归档；不在其中的 URL 即无法下载的文件。
 	archive map[string][]byte
-	// fetchErr fails Fetch for the URL it is set for.
+	// fetchErr 为指定 URL 让 Fetch 失败。
 	fetchErr map[string]error
 
-	// releases and fetches count what was asked, which is what the single
-	// flight is checked with.
+	// releases 与 fetches 记录被请求了什么，用于核对单飞。
 	releases int
 	fetches  []string
-	// installed is the version Install was asked for, and installs counts
-	// the calls so that a second install is visible.
+	// installed 是 Install 被要求的版本，installs 记录调用次数，使第二次安装可见。
 	installed  string
 	installs   int
 	installErr error
@@ -75,15 +71,14 @@ func (f *fakeUpdater) Install(_ context.Context, version string) error {
 	return f.installErr
 }
 
-// counts is what the feed and the transport were asked, under the lock: a
-// check may run on its own goroutine.
+// counts 在锁下返回发布源与传输被请求的次数：检查可能在独立 goroutine 上运行。
 func (f *fakeUpdater) counts() (releases int, fetches []string, installs int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.releases, append([]string(nil), f.fetches...), f.installs
 }
 
-// fakeRelauncher records that the application was asked to restart.
+// fakeRelauncher 记录应用是否被要求重启。
 type fakeRelauncher struct {
 	mu       sync.Mutex
 	relaunch int
@@ -101,7 +96,7 @@ func (r *fakeRelauncher) count() int {
 	return r.relaunch
 }
 
-// aRelease is a release that names one archive.
+// aRelease 是命名一个归档的 release。
 func aRelease(t *testing.T, version string, payload []byte) *Release {
 	t.Helper()
 	release := &Release{
@@ -119,7 +114,7 @@ func aRelease(t *testing.T, version string, payload []byte) *Release {
 	return release
 }
 
-// serve puts the payload where the release's archive is.
+// serve 把 payload 放到 release 的归档位置。
 func serve(f *fakeUpdater, release *Release, payload []byte) {
 	asset, _ := release.Archive()
 	f.archive[asset.URL] = payload

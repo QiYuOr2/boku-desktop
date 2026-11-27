@@ -15,12 +15,9 @@ import (
 	"boku/internal/kit"
 )
 
-// testScreenshot is the platform's region picker as a test drives it: it
-// answers with the PNG the test made, or with the error it was given.
 type testScreenshot struct {
-	png []byte
-	err error
-	// asked, when set, is signalled once the picker was opened.
+	png   []byte
+	err   error
 	asked chan struct{}
 	once  sync.Once
 }
@@ -34,8 +31,6 @@ func (d *testScreenshot) Capture(context.Context) ([]byte, error) {
 	return d.png, d.err
 }
 
-// qrPNG is a readable minimal PNG: the card decodes the capture for its
-// preview before showing it, so a fake capture has to be a real image.
 func qrPNG(t *testing.T) []byte {
 	t.Helper()
 	var buf bytes.Buffer
@@ -46,10 +41,6 @@ func qrPNG(t *testing.T) []byte {
 	return buf.Bytes()
 }
 
-// qrCard is the test card that also says when it appeared. The QR flow
-// shows its card only after the capture, and a test has no event loop to
-// wait for it: the channel is the synchronisation, and it also makes what
-// the state wrote before showing visible to the test.
 type qrCard struct {
 	*testCard
 	shown chan struct{}
@@ -61,8 +52,6 @@ func (c *qrCard) ShowInactive() {
 	c.once.Do(func() { close(c.shown) })
 }
 
-// qrState is the card state a QR test drives. It has no running
-// application, so onMain runs its update inline.
 func qrState(t *testing.T) (*State, *testTranslateFixture, *qrCard) {
 	t.Helper()
 	state, translate, base := translateState(t)
@@ -75,8 +64,6 @@ func qrState(t *testing.T) (*State, *testTranslateFixture, *qrCard) {
 	return state, translate, card
 }
 
-// waitQRShown waits for the card, after which the state it was given is the
-// state the test should read.
 func waitQRShown(t *testing.T, card *qrCard) {
 	t.Helper()
 	select {
@@ -186,8 +173,6 @@ func TestQRRecognitionLeavesNoCardWhenTheSelectionIsCancelled(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("the region picker was never opened")
 	}
-	// The picker's normal ways out must leave no card, exactly like the
-	// screenshot translation's.
 	time.Sleep(20 * time.Millisecond)
 	if card.visible() {
 		t.Fatal("cancelling the selection left a card behind")

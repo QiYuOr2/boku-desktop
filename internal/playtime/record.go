@@ -9,16 +9,15 @@ import (
 	"boku/internal/platform/gamepad"
 )
 
-// heartEvery is how often an open session is saved while it is still
-// running. Ending one saves immediately. The poll itself does not.
+// heartEvery 是运行中的会话被保存的频率。结束会话会立即保存；轮询本身不保存。
 const heartEvery = 30 * time.Second
 
-// Sampler is the platform's look at which games are running.
+// Sampler 是平台视角下当前正在运行的游戏。
 type Sampler interface {
 	Sample() (Sample, error)
 }
 
-// Recorder samples on a goroutine and writes sessions to the store.
+// Recorder 在 goroutine 上采样并把会话写入存储。
 type Recorder struct {
 	tracker *Tracker
 	store   *Store
@@ -33,9 +32,8 @@ type Recorder struct {
 	changed func()
 }
 
-// Open reads the session database in dir. A database that cannot be read
-// does not stop the application: recording stays off so a later save
-// cannot replace it.
+// Open 读取 dir 下的会话数据库。数据库不可读时不阻断应用：记录保持关闭，
+// 以免后续保存覆盖它。
 func Open(dir string, section *Section) *Recorder {
 	if section == nil {
 		section = NewSection()
@@ -59,7 +57,7 @@ func Open(dir string, section *Section) *Recorder {
 	return &Recorder{tracker: tracker, store: store, covers: newCovers(dir), section: section}
 }
 
-// Start begins sampling. On a system with no process list it does nothing.
+// Start 开始采样。在没有进程列表的系统上什么也不做。
 func (r *Recorder) Start() {
 	if r == nil || r.store == nil || !r.store.writable {
 		return
@@ -80,9 +78,8 @@ func (r *Recorder) Start() {
 	go r.loop(ctx)
 }
 
-// SetChanged is called on the sampling goroutine after a session changes,
-// and while one is still running so a clock on screen can move. Set it
-// before Start.
+// SetChanged 在采样 goroutine 上于会话变化后被调用，会话仍在运行时也会调用，
+// 以便屏幕上的时钟走动。请在 Start 之前设置。
 func (r *Recorder) SetChanged(fn func()) {
 	if r == nil {
 		return
@@ -90,14 +87,14 @@ func (r *Recorder) SetChanged(fn func()) {
 	r.changed = fn
 }
 
-// Available reports whether this system records playtime. macOS does not,
-// so the database is not created and the flyout draws nothing.
+// Available 报告当前系统是否记录游戏时长。macOS 不记录，
+// 所以不创建数据库，浮窗也不绘制任何内容。
 func (r *Recorder) Available() bool {
 	return r != nil && r.store != nil
 }
 
-// StoreName is the simplified-Chinese title cached beside the cover.
-// It is empty until that file exists. Recorded session names are not changed.
+// StoreName 是缓存在封面旁的简体中文标题，文件存在前为空。已记录会话的
+// 名称不会被改动。
 func (r *Recorder) StoreName(appID string) string {
 	if r == nil {
 		return ""
@@ -105,8 +102,8 @@ func (r *Recorder) StoreName(appID string) string {
 	return r.covers.title(appID)
 }
 
-// Cover is the cached image for one app, or nil when it is not here yet.
-// The bytes are already on disk; this does not ask the network.
+// Cover 是某个 app 的缓存图片，尚未就绪时为 nil。
+// 字节已在磁盘上，不会发起网络请求。
 func (r *Recorder) Cover(appID string) []byte {
 	if r == nil {
 		return nil
@@ -114,7 +111,7 @@ func (r *Recorder) Cover(appID string) []byte {
 	return r.covers.bytes(appID)
 }
 
-// Sessions is a copy of the recorded runs, safe to read from the UI thread.
+// Sessions 是已记录运行的副本，可从 UI 线程安全读取。
 func (r *Recorder) Sessions() []Session {
 	if r == nil || r.tracker == nil {
 		return nil
@@ -124,7 +121,7 @@ func (r *Recorder) Sessions() []Session {
 	return append([]Session(nil), r.tracker.Sessions()...)
 }
 
-// Stop ends sampling and writes the open sessions' last look.
+// Stop 停止采样并写入未关闭会话的最后一次观察。
 func (r *Recorder) Stop() {
 	if r == nil {
 		return

@@ -7,38 +7,34 @@ import (
 	"time"
 )
 
-// DefaultMinRefreshSeconds is how rarely a provider is asked again unless it
-// says otherwise. Providers whose endpoints are cheap lower it.
+// DefaultMinRefreshSeconds 是 provider 未另行说明时的默认最小刷新间隔。
+// 接口成本低的 provider 会调低它。
 const DefaultMinRefreshSeconds = 900
 
-// ProviderDescriptor says what a provider is called, what it needs from the
-// user, and where to send them for it.
+// ProviderDescriptor 说明 provider 叫什么、需要用户提供什么、以及去哪里获取。
 type ProviderDescriptor struct {
 	ID          string
 	DisplayName string
-	// CredentialKeys are the secrets the provider needs, without the
-	// provider prefix, such as "apiKey".
+	// CredentialKeys 是 provider 需要的密钥，不带 provider 前缀，例如
+	// "apiKey"。
 	CredentialKeys []string
-	// SettingsSchema describes the provider's non-sensitive settings, as
-	// setting name to type.
+	// SettingsSchema 描述 provider 的非敏感设置，以设置名映射到类型。
 	SettingsSchema map[string]string
-	// DocsURL is where the user gets the credentials.
+	// DocsURL 是用户获取凭据的地方。
 	DocsURL string
-	// UsageURL is the provider's own page for the account a panel reads:
-	// where the numbers a panel summarizes are kept in full. It is the
-	// link a panel's headline opens. A provider that has no such page
-	// leaves it empty, and the interface then draws a number that is only
-	// a number.
+	// UsageURL 是 provider 自己的、面板所读账户的页面：面板汇总的数字在
+	// 那里的完整来源。它是面板标题点击后打开的链接。没有此类页面的
+	// provider 留空，界面随即只画一个纯数字。
 	UsageURL string
-	// Endpoint is the address the provider asks, so that the interface can
-	// show where a credential is going before the user hands it over.
+	// Endpoint 是 provider 请求的地址，界面据此在用户交出凭据前展示凭据
+	// 将被发往何处。
 	Endpoint string
-	// MinRefreshSeconds is the shortest interval this provider's endpoint
-	// tolerates; 0 means DefaultMinRefreshSeconds.
+	// MinRefreshSeconds 是该 provider 接口能容忍的最短间隔；0 表示
+	// DefaultMinRefreshSeconds。
 	MinRefreshSeconds int
 }
 
-// MinRefreshInterval is the shortest interval the provider tolerates.
+// MinRefreshInterval 是 provider 能容忍的最短间隔。
 func (d ProviderDescriptor) MinRefreshInterval() time.Duration {
 	seconds := d.MinRefreshSeconds
 	if seconds <= 0 {
@@ -47,9 +43,8 @@ func (d ProviderDescriptor) MinRefreshInterval() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-// Validate reports what is missing from the descriptor. The application
-// checks it at startup: a provider nobody can configure is a configuration
-// error, not something to discover when a panel fails.
+// Validate 报告描述符缺少什么。应用在启动时校验它：没人能配置的
+// provider 是装配错误，而不是等面板失败时才发现的。
 func (d ProviderDescriptor) Validate() error {
 	if strings.TrimSpace(d.ID) == "" {
 		return fmt.Errorf("%w: a provider has no id", ErrInvalidArgument)
@@ -82,23 +77,21 @@ func (d ProviderDescriptor) Validate() error {
 	return nil
 }
 
-// CredentialKey is the name one credential of a provider is stored under,
-// in the secret store and in the database alike: "deepseek.apiKey".
+// CredentialKey 是 provider 某个凭据的存储名，在 secret store 与数据库中
+// 一致："deepseek.apiKey"。
 func CredentialKey(providerID, credentialKey string) string {
 	return providerID + "." + credentialKey
 }
 
-// Credentials is what a provider is allowed to see: the secrets it asked
-// for, in memory, for one request. It never reaches a provider's caller the
-// other way round: a provider cannot name a secret it did not ask for.
+// Credentials 是 provider 允许看到的东西：它索要的密钥，只在一次请求的内存
+// 里存在。provider 无法命名它未索要的密钥。
 type Credentials struct {
 	ProviderID string
 	Secrets    map[string]string
 	Settings   map[string]string
 }
 
-// Secret returns one of the credentials, or ErrCredentialMissing. The error
-// names the credential and never its value.
+// Secret 返回其中一个凭据，或 ErrCredentialMissing。错误只含凭据名，绝不含值。
 func (c Credentials) Secret(key string) (string, error) {
 	value := strings.TrimSpace(c.Secrets[key])
 	if value == "" {
@@ -107,50 +100,44 @@ func (c Credentials) Secret(key string) (string, error) {
 	return value, nil
 }
 
-// Setting returns a non-sensitive setting, or "".
+// Setting 返回一个非敏感设置，或 ""。
 func (c Credentials) Setting(key string) string { return c.Settings[key] }
 
-// FetchResult is a provider's raw answer, before an adapter interprets it.
+// FetchResult 是 provider 的原始应答，尚未被 adapter 解释。
 type FetchResult struct {
 	ProviderID string
-	// Endpoint is the address actually asked, with anything sensitive in it
-	// already removed, for error messages and audit.
+	// Endpoint 是实际请求的地址，其中任何敏感内容已移除，供错误信息与审计。
 	Endpoint  string
 	FetchedAt time.Time
 	Payload   []byte
-	// Cookies are the Set-Cookie pairs the answer carried, as name=value
-	// without attributes. A service that hands out an anonymous identity
-	// cookie needs them back on the next request; nothing here is a login
-	// credential, and callers must not assume they are.
+	// Cookies 是应答携带的 Set-Cookie 键值对，形如 name=value，不含属性。
+	// 发放匿名身份 cookie 的服务需要在下次请求带回它们；这里没有登录凭据，
+	// 调用方不得当作凭据。
 	Cookies    []string
 	HTTPStatus int
 }
 
-// Provider asks one service for its raw answer. It does HTTP and error
-// translation, and it knows nothing about panels, snapshots or metrics.
+// Provider 向一个服务索取原始应答。它做 HTTP 与错误翻译，不认识面板、
+// 快照或指标。
 type Provider interface {
 	ID() string
 	Descriptor() ProviderDescriptor
 	Fetch(ctx context.Context, creds Credentials) (FetchResult, error)
 }
 
-// Adapter turns one provider's raw answer into the one shape the rest of the
-// application knows. It is a pure mapping: no network, no clock of its own,
-// testable offline from a fixture.
+// Adapter 把一个 provider 的原始应答转换成应用其它部分认识的唯一形状。
+// 它是纯映射：无网络、无自身时钟，可用 fixture 离线测试。
 type Adapter interface {
 	ProviderID() string
 	Normalize(result FetchResult, panel Panel) (Snapshot, error)
 }
 
-// ProviderRegistry is a use case's view of the registered providers: it
-// looks one up by id and never knows which ones exist. The registry that
-// implements it lives in internal/data; a use case depends on this
-// interface, not on that package.
+// ProviderRegistry 是用例视角下已注册 provider 的集合：按 id 查找，且不知道
+// 有哪些 provider 存在。实现该接口的注册表位于 internal/data；用例依赖此接口
+// 而非那个包。
 type ProviderRegistry interface {
-	// Provider returns the provider registered under an id, or
-	// ErrProviderNotFound.
+	// Provider 返回以某个 id 注册的 provider，或 ErrProviderNotFound。
 	Provider(id string) (Provider, error)
-	// Adapter returns the adapter registered under an id, or
-	// ErrProviderNotFound.
+	// Adapter 返回以某个 id 注册的 adapter，或 ErrProviderNotFound。
 	Adapter(id string) (Adapter, error)
 }

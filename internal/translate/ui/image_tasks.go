@@ -13,9 +13,7 @@ import (
 	"boku/internal/translate"
 )
 
-// Image translation is intentionally a small, in-memory queue. It lets a
-// screenshot keep running after its card has been dismissed without turning
-// private screenshots into durable application data.
+// 图片翻译任务只保存在内存里：卡片关闭后任务仍可继续，私密截图不会落盘。
 const (
 	maxRunningImageTasks  = 2
 	maxFinishedImageTasks = 4
@@ -42,9 +40,7 @@ type imageTranslationTask struct {
 	notified  bool
 }
 
-// startImageTranslationTask records the task before starting its request, so
-// closing the card cannot lose the result. It is called only on the main
-// thread; the request returns to that thread through onMain.
+// 先登记任务再发起请求，避免关闭卡片时丢失结果。只在主线程调用，请求通过 onMain 回到主线程。
 func (s *State) startImageTranslationTask(service *translate.Translate, image []byte, preview *ui.Bitmap, pinned bool) (uint64, bool) {
 	if s.runningImageTranslationTasks() >= maxRunningImageTasks {
 		return 0, false
@@ -94,9 +90,7 @@ func (s *State) finishImageTranslationTask(id uint64, result translate.Result, e
 		slog.Info("image translation task completed", "event", "image_translation_completed", "task", id, "provider", result.ProviderID, "duration", time.Since(task.startedAt))
 	}
 	s.noteCompletedImageTranslation(task)
-	// A completed task changes only the card that already belongs to it. A
-	// dismissed card stays dismissed; the result remains available from the
-	// quick window instead of stealing focus back from the user.
+	// 完成的任务只更新它自己的卡片；已关闭的卡片保持关闭，结果从快捷窗口取，不抢焦点。
 	if s.translateWindow != nil && s.translationVisible && s.translation.imageTaskID == id {
 		s.translation = s.imageTranslationState(*task)
 		s.cardChanged()
@@ -105,9 +99,7 @@ func (s *State) finishImageTranslationTask(id uint64, result translate.Result, e
 	s.Refresh()
 }
 
-// noteCompletedImageTranslation sends one privacy-preserving system notice
-// only when the task's card is no longer open. The notification names neither
-// the image nor the recognised text; its action returns to the saved result.
+// 仅当任务的卡片不再打开时发送一次系统通知，通知不包含图片和识别文本，点击回到已保存的结果。
 func (s *State) noteCompletedImageTranslation(task *imageTranslationTask) {
 	if task.status != imageTaskReady || task.notified || (s.translationVisible && s.translation.imageTaskID == task.id) {
 		return
@@ -160,8 +152,6 @@ func (s *State) imageTranslationState(task imageTranslationTask) translationStat
 	return state
 }
 
-// showImageTranslationTask is the one way a task opens its card. Clicking a
-// completed or failed task uses the same card and its current pointer anchor.
 func (s *State) showImageTranslationTask(id uint64, at mygo.Point) {
 	task := s.imageTranslationTask(id)
 	if task == nil {
@@ -175,8 +165,7 @@ func (s *State) openImageTranslationTask(id uint64) {
 	s.showImageTranslationTask(id, s.cursorPoint())
 }
 
-// cancelImageTranslationTask stops only a running task and removes all of its
-// private image bytes at once. There is no cancelled history row to retain.
+// 只取消运行中的任务，并立即丢弃它的私密图片字节，不保留已取消的历史行。
 func (s *State) cancelImageTranslationTask(id uint64) {
 	for index := range s.imageTasks {
 		task := &s.imageTasks[index]
@@ -198,9 +187,7 @@ func (s *State) cancelImageTranslationTask(id uint64) {
 	}
 }
 
-// retryImageTranslationTask is deliberately manual: automatic retries could
-// submit the same image twice to a paid model. The original PNG is retained
-// only while this in-memory failed task exists.
+// 重试是手动的：自动重试会把同一张图重复提交给付费模型。原始 PNG 只在该内存任务存活期间保留。
 func (s *State) retryImageTranslationTask(id uint64) {
 	task := s.imageTranslationTask(id)
 	if task == nil || task.status != imageTaskFailed || s.translate == nil || s.runningImageTranslationTasks() >= maxRunningImageTasks {

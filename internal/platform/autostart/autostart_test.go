@@ -5,13 +5,9 @@ import (
 	"testing"
 )
 
-// These are the tests every platform runs: the parts of a login start that
-// do not belong to one mechanism. The documents each platform writes are
-// tested beside the code that writes them.
+// 这些是每个平台共用的测试：登录启动中与具体机制无关的部分；各平台写出的文档在写它的代码旁测试。
 
-// The command line is what the system runs, so a path with spaces in it has
-// to stay one argument — which is every macOS bundle and half the Windows
-// installs — and the argument has to be after it, outside the quotes.
+// 命令行就是系统实际执行的字符串，含空格的路径必须保持为一个参数（每个 macOS bundle、半数 Windows 安装都如此），且参数要放在引号外、位于路径之后。
 func TestCommandLineQuotesTheProgram(t *testing.T) {
 	l := Launcher{Exe: "/Applications/Boku.app/Contents/MacOS/Boku", Arg: "--mygo-opened-at-login"}
 	if got, want := l.CommandLine(), `"/Applications/Boku.app/Contents/MacOS/Boku" --mygo-opened-at-login`; got != want {
@@ -23,9 +19,7 @@ func TestCommandLineQuotesTheProgram(t *testing.T) {
 	}
 }
 
-// A desktop with no login start answers every question with the same error,
-// and Available reads that error as "do not draw the switch". This is the
-// Linux and BSD path, so it runs on the machine that built the package.
+// 没有登录启动的桌面必须对每个问题返回同一个错误，Available 据此不绘制开关。这是 Linux/BSD 分支，所以能在构建本包的机器上运行。
 func TestUnsupportedHasNoLoginStart(t *testing.T) {
 	var manager Unsupported
 	launcher := Launcher{Label: "com.boku.app", Name: "Boku", Exe: "/usr/local/bin/boku"}
@@ -46,17 +40,14 @@ func TestUnsupportedHasNoLoginStart(t *testing.T) {
 	}
 }
 
-// A manager that cannot answer must not be trusted to be drawn either: nil
-// is what a state built without an assembly has, and it must not panic.
+// 无法回答的 manager 也不能被当作可绘制：未装配的状态里就是 nil，绝不能 panic。
 func TestAvailableNeedsAManager(t *testing.T) {
 	if Available(nil, Launcher{}) {
 		t.Error("Available said a nil manager has a login start")
 	}
 }
 
-// The argument the login start passes is the framework's own marker: the
-// application reads it to know nobody asked for the launch. It is written
-// here once, so this is the only place it can go wrong.
+// 登录启动传给应用的参数是框架自己的标记，应用据此知道这次启动不是用户发起的；它只在这里定义一次。
 func TestOpenedAtLoginArgument(t *testing.T) {
 	if OpenedAtLoginArg != "--mygo-opened-at-login" {
 		t.Errorf("OpenedAtLoginArg = %q, want the framework's own marker", OpenedAtLoginArg)

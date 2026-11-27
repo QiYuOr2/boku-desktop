@@ -7,13 +7,10 @@ import (
 	"testing"
 )
 
-// Both appearances have to choose every color. A palette field left out of
-// one of the two literals is a zero color, which draws as nothing: the page
-// would lose a line, an ink or a face without any compile error. This is the
-// one check the compiler cannot make for a table of colors.
+// 两个外观都必须选齐每一种颜色。某个调色板字段在两个字面量中漏掉就是零色，
+// 绘制出来什么都没有，而且不会编译报错——这是编译器无法为颜色表做的检查。
 //
-// The light tile edge is deliberately absent: the light appearance has no
-// edge around a provider's tile, so ui.Transparent is its value.
+// 浅色外观的 tileEdge 故意缺席：它没有 provider 磁贴的描边，因此值为 ui.Transparent。
 func TestBothPalettesChooseEveryColor(t *testing.T) {
 	for _, test := range []struct {
 		name  string
@@ -32,8 +29,7 @@ func TestBothPalettesChooseEveryColor(t *testing.T) {
 				}
 				return
 			}
-			// ui.Color's fourth byte is its alpha. A color without one draws
-			// as nothing whatever its RGB says.
+			// ui.Color 的第四个字节是 alpha。缺了它的颜色不论 RGB 是什么都画不出来。
 			if alpha := color.Field(3).Uint(); alpha == 0 {
 				t.Errorf("%s palette: %s has no alpha", test.name, field)
 			}
@@ -48,10 +44,8 @@ func TestBothPalettesChooseEveryColor(t *testing.T) {
 	}
 }
 
-// Both appearances have to name the application's font: it is what keeps a
-// Chinese glyph the same shape whatever language the system is in, and a
-// theme that leaves it empty draws in the framework's per-script fallback.
-// The two themes differ in color, not in type.
+// 两个外观都必须指定应用字体：它保证中文字形无论系统语言是什么都形状一致，
+// 留空的主题会回退到框架按脚本的字形。两个主题只在颜色上不同，字体相同。
 func TestBothAppearancesNameTheApplicationFont(t *testing.T) {
 	for _, dark := range []bool{false, true} {
 		if got := Theme(dark).Font; got != UiFontFamily {
@@ -60,10 +54,8 @@ func TestBothAppearancesNameTheApplicationFont(t *testing.T) {
 	}
 }
 
-// The family list ends at sans-serif: on a system with none of the named
-// faces a character is drawn in whatever the platform offers rather than
-// being refused. And the CJK face is named before the list ends, which is the
-// whole point of the task.
+// 字体列表以 sans-serif 结尾：在没有任何具名字体的系统上，字符会用平台提供的
+// 字体绘制而不是被拒绝。CJK 字体必须在列表结束之前命名，这正是本任务的目的。
 func TestUIFontFamilyEndsAtTheSystemFallback(t *testing.T) {
 	families := strings.Split(UiFontFamily, ", ")
 	for i, family := range families {
@@ -72,8 +64,7 @@ func TestUIFontFamilyEndsAtTheSystemFallback(t *testing.T) {
 	if last := families[len(families)-1]; last != "sans-serif" {
 		t.Errorf("the family list ends at %q, want sans-serif", last)
 	}
-	// A CJK face has to be named before the generic fallback: the families
-	// after the generic one are never reached.
+	// CJK 字体必须在通用回退之前命名：排在通用字体之后的字体永远不会被用到。
 	for _, want := range []string{"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC"} {
 		if !slices.Contains(families, want) {
 			t.Errorf("the family list does not name %q: %q", want, families)

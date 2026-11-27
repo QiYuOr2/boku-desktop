@@ -1,15 +1,11 @@
-// This file is the clipboard tool's side of settings.json.
+// 本文件是剪贴板工具在 settings.json 中的那一半。
 //
-// The store that owns that file knows nothing about what is in it: it hands
-// every feature the whole of the file's settings object and takes back the
-// keys each feature says it owns. This file is the clipboard's half of that —
-// which keys are the clipboard's, and how this feature's own Settings type is
-// written down.
+// 持有该文件的存储对其中内容一无所知：它把整份设置对象交给每个功能，并收回
+// 每个功能声明拥有的键。本文件就是剪贴板的那一半——哪些键属于剪贴板，
+// 以及本功能自己的 Settings 类型如何落盘。
 //
-// Keeping it here rather than in internal/settings is what makes the settings
-// belong to the feature: a new switch is a change to this package and to
-// nothing else, and no other feature can reach the clipboard's keys because it
-// never has the type they decode into.
+// 把它放在这里而非 internal/settings，才使设置真正归属该功能：新增开关只改这个包、
+// 不改别处，其它功能也够不到剪贴板的键，因为它从不持有解码这些键的类型。
 package clipboard
 
 import (
@@ -19,9 +15,8 @@ import (
 	"time"
 )
 
-// The keys this feature owns in settings.json. They are the names
-// §8 of the storage design documents and a person may edit, so they are spelled
-// once, here, and never derived from a Go field name.
+// 本功能在 settings.json 中拥有的键。这些是存储设计 §8 记载、用户可能手工编辑的
+// 名字，因此只在此处拼写一次，绝不从 Go 字段名派生。
 const (
 	keyRegionVisible = "clipboardRegionVisible"
 	keyMonitoring    = "clipboardMonitoring"
@@ -29,56 +24,49 @@ const (
 	keyHistorySize   = "clipboardHistorySize"
 )
 
-// sectionName is what errors call this feature's settings.
+// sectionName 是错误信息中称呼本功能设置的名字。
 const sectionName = "clipboard"
 
-// StoreSettings is the part of the settings store this feature needs.
+// StoreSettings 是本功能所需的设置存储部分。
 //
-// It is declared here, and not taken from internal/settings, so that this
-// package does not depend on the storage implementation: the assembly injects
-// one, and a test injects its own. The shape is deliberately the smallest
-// thing that works — load everything, change one section through a function
-// that reads the file again first.
+// 它在此声明而非取自 internal/settings，使本包不依赖存储实现：装配时注入一个，
+// 测试注入自己的。形状刻意取最小可用——全部加载，通过一个先重读文件的函数
+// 修改一个 section。
 type StoreSettings interface {
-	// Load reads the file into every registered section.
+	// Load 把文件读入所有已注册的 section。
 	Load(ctx context.Context) error
-	// Update reads the file, runs change, and writes it back, all without
-	// letting go of the file. change reads the file again first, which is
-	// what keeps one feature's change from putting back another's stale
-	// values.
+	// Update 读取文件、执行 change、写回，全程不释放文件。change 会先重读文件，
+	// 从而避免一个功能的改动把另一个功能的旧值写回。
 	Update(ctx context.Context, section string, change func() error) error
 }
 
-// Section is this feature's settings as the store sees them: a name, a way to
-// read the keys it owns out of the file, and a way to hand them back.
+// Section 是本功能按存储视角的设置：一个名字、一个从文件中读出其所拥有键的方法、
+// 一个交还它们的方法。
 //
-// It holds the current settings, so the service reads its configuration from
-// here after the store has loaded the file, and writes it here before asking
-// the store to save.
+// 它持有当前设置，因此服务在存储加载文件后从这里读取配置，并在请求存储保存前
+// 先写到这里。
 type Section struct {
 	current Settings
 }
 
-// NewSection returns an empty section, holding this feature's defaults.
+// NewSection 返回一个空 section，持有本功能的默认值。
 func NewSection() *Section {
 	return &Section{current: Settings{}.Normalize()}
 }
 
-// Name is what errors call this section.
+// Name 是错误信息中称呼本 section 的名字。
 func (s *Section) Name() string { return sectionName }
 
-// Current is the settings as they stand.
+// Current 是当前设置。
 func (s *Section) Current() Settings { return s.current }
 
-// Set replaces the settings.
+// Set 替换设置。
 func (s *Section) Set(settings Settings) { s.current = settings.Normalize() }
 
-// Decode reads the clipboard's keys out of values, which holds every feature's
-// keys.
+// Decode 从 values（含所有功能的键）中读出剪贴板的键。
 //
-// A key that is not there leaves the setting as it is: the file may have been
-// written before the key existed, and reading an absent key as a zero would
-// turn a switch off for a user who never touched it.
+// 缺失的键会让该设置保持原样：文件可能写于该键存在之前，把缺失键当作零值读取，
+// 会把用户从未碰过的开关关掉。
 func (s *Section) Decode(values map[string]json.RawMessage) error {
 	settings := s.current
 	if err := into(values, keyRegionVisible, &settings.RegionVisible); err != nil {
@@ -101,8 +89,7 @@ func (s *Section) Decode(values map[string]json.RawMessage) error {
 	return nil
 }
 
-// Encode returns the keys the clipboard owns, ready for the store to merge
-// into the file.
+// Encode 返回剪贴板拥有的键，供存储合并进文件。
 func (s *Section) Encode() (map[string]any, error) {
 	settings := s.current.Normalize()
 	return map[string]any{
@@ -113,11 +100,9 @@ func (s *Section) Encode() (map[string]any, error) {
 	}, nil
 }
 
-// into decodes one key of a settings object, leaving out alone when the file
-// does not name it.
+// into 解码设置对象中的一个键，文件未指明它时保持原样。
 //
-// It is the same rule the store documents, kept here so this feature follows
-// it without reaching into the storage package.
+// 它与存储记录的是同一规则，放在此处使本功能无需深入存储包即可遵循。
 func into(values map[string]json.RawMessage, key string, out any) error {
 	raw, present := values[key]
 	if !present {

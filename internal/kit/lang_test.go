@@ -6,9 +6,8 @@ import (
 	"boku/internal/domain"
 )
 
-// The language guess is what lets the window name the source language and
-// pick a target before anything is sent anywhere. It reads scripts, so the
-// cases below are about which script wins when a text has more than one.
+// 语言猜测让窗口在发出任何内容前就能命名源语言并选择目标。
+// 它依据书写系统，故以下用例关注文本含多种书写系统时哪一种胜出。
 func TestDetectLanguage(t *testing.T) {
 	cases := []struct {
 		name string
@@ -18,8 +17,7 @@ func TestDetectLanguage(t *testing.T) {
 		{"english", "A compiler is a software that converts source code.", "en"},
 		{"chinese", "编译器是将源代码转换成机器语言的软件。", "zh"},
 		{"japanese with kana", "コンパイラはソースコードを機械語に変換するソフトです。", "ja"},
-		// The interesting one: a Japanese sentence written mostly in 漢字 is
-		// still Japanese, because no Chinese text has a kana in it.
+		// 关键用例：主要由漢字构成的日语句子仍是日语，因为中文文本不含假名。
 		{"japanese mostly kanji", "機械語に変換するソフト", "ja"},
 		{"japanese with one kana", "日本語の文章です", "ja"},
 		{"korean", "컴파일러는 소스 코드를 기계어로 변환하는 소프트웨어입니다.", "ko"},
@@ -32,8 +30,7 @@ func TestDetectLanguage(t *testing.T) {
 		{"emoji only", "🙂🎉", ""},
 		{"one letter", "A", "en"},
 		{"one kana among kanji", "日本語のテキスト", "ja"},
-		// A URL is Latin even though it is not a word: the badge may call it
-		// English, which is a better answer than naming no language.
+		// URL 虽是拉丁字母却不是单词：徽标称其为英语，比不给出任何语言更好。
 		{"url", "https://example.com/a", "en"},
 	}
 	for _, tc := range cases {
@@ -99,9 +96,7 @@ func TestIsChinese(t *testing.T) {
 	}
 }
 
-// The target direction: everything that is not Chinese becomes Chinese, and
-// Chinese becomes English. The second half is what keeps a Chinese
-// selection from being a dead end.
+// 目标方向：非中文一律变中文，中文变英语。后半段让中文选区不至于成为死胡同。
 func TestTargetLanguage(t *testing.T) {
 	cases := map[string]string{
 		"en": "zh",

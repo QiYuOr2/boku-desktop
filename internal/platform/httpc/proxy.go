@@ -7,52 +7,40 @@ import (
 	"strings"
 )
 
-// A machine can be behind a proxy without saying so in the environment. On
-// Windows the setting lives in the registry, where the system's own network
-// dialog writes it, and nothing in net/http reads it: http.ProxyFromEnvironment
-// looks at HTTPS_PROXY and HTTP_PROXY alone. A window started from the tray or
-// by an installer has neither, so a program that only asks the environment
-// reaches nothing on such a machine — which is what happened to the Codex
-// quota panel on the first machine it ran on.
+// 机器可能处在代理之后，但环境变量里并未体现。Windows 的代理设置存在注册表（系统网络
+// 对话框写入处），net/http 并不读取它：http.ProxyFromEnvironment 只看 HTTPS_PROXY 与
+// HTTP_PROXY。由托盘或安装器启动的窗口两者都没有，只查环境变量的程序在这类机器上啥也访问不到。
 //
-// So the environment is asked first, because it is the setting a developer set
-// on purpose for this program, and the system's own answer is the fallback.
+// 因此先查环境变量（开发者为此程序刻意设置），系统的答案作为兜底。
 
-// proxySettings is what an operating system says about its proxy: whether it is
-// on, what it is, and which hosts go around it.
+// proxySettings 是操作系统给出的代理设置：是否开启、代理是什么、哪些主机绕过。
 type proxySettings struct {
 	Enabled bool
-	// Server is the setting as the system writes it: either one address for
-	// everything, or one per protocol, as "http=127.0.0.1:7897;https=…".
+	// Server 是系统写下的原始设置：要么一个地址适用于全部，要么按协议各一个，
+	// 形如 "http=127.0.0.1:7897;https=…"。
 	Server string
-	// Bypass is the list of hosts that go around the proxy.
+	// Bypass 是绕过代理的主机列表。
 	Bypass []string
 }
 
-// readSystemProxy reads the operating system's own proxy setting. It is a
-// variable rather than a call so that a test can put a setting of its own in
-// front of the rest of the package; the real reader is per platform, and a
-// platform whose setting this does not read answers with nothing.
+// readSystemProxy 读取操作系统自身的代理设置。做成变量是为了让测试能在包的其余部分
+// 之前注入自己的设置；真实读取器按平台实现，不读取该设置的平台返回空。
 var readSystemProxy = platformProxy
 
-// ProxyFunc is how the client decides where a request goes.
+// ProxyFunc 是客户端决定请求去向的方式。
 //
-// Nothing is cached: a user who turns their proxy off while Boku is running
-// gets the next request without one, which is what they just asked for.
+// 不做缓存：用户在 Boku 运行时关掉代理，下一个请求就不走代理，正是他刚要求的。
 func ProxyFunc() func(*http.Request) (*url.URL, error) {
 	return func(request *http.Request) (*url.URL, error) {
 		return proxyFor(http.ProxyFromEnvironment, readSystemProxy, request)
 	}
 }
 
-// proxyFor is the whole of the decision, with both halves passed in: a test can
-// then put an environment and a machine in front of it and see which one wins
-// without setting one on the machine running the test.
+// proxyFor 是完整的决策，两半都由外部传入：测试可以同时放入环境变量与机器设置，
+// 看谁优先，而不必改动运行测试的机器。
 //
-// The environment comes first, because it is the setting somebody made on
-// purpose for this program — and because that keeps the standard library's own
-// rules, NO_PROXY and the CGI guard among them, exactly as they are: they are
-// not reimplemented here.
+// 环境变量优先，因为它是有人为此程序刻意设置的，也因为这样能原样保留标准库自己的
+// 规则（NO_PROXY、CGI 防护等）：这里不重新实现它们。
 func proxyFor(envProxy func(*http.Request) (*url.URL, error), system func() (proxySettings, error), request *http.Request) (*url.URL, error) {
 	if envProxy != nil {
 		if proxy, err := envProxy(request); proxy != nil || err != nil {
@@ -62,12 +50,9 @@ func proxyFor(envProxy func(*http.Request) (*url.URL, error), system func() (pro
 	return systemProxy(request, system)
 }
 
-// systemProxy answers with the operating system's proxy for a request, or with
-// nothing when there is none to use.
+// systemProxy 返回请求对应的操作系统代理，没有可用代理时返回空。
 //
-// A setting that cannot be read is not a request that cannot be made: this
-// answers with no proxy and lets the request fail on its own, where the reason
-// is about the network rather than about a registry key.
+// 读不出的设置不等于发不出的请求：这里返回无代理，让请求自行失败，原因归于网络而非注册表键。
 func systemProxy(request *http.Request, read func() (proxySettings, error)) (*url.URL, error) {
 	if request == nil || request.URL == nil || read == nil {
 		return nil, nil
@@ -82,20 +67,15 @@ func systemProxy(request *http.Request, read func() (proxySettings, error)) (*ur
 	return parseProxyServer(settings.Server, request.URL.Scheme), nil
 }
 
-// parseProxyServer reads a system proxy setting and answers with the address to
-// use for one scheme, or with nothing when the setting says this scheme does
-// not go through one.
+// parseProxyServer 读取系统代理设置，返回某个 scheme 应使用的地址；设置表明该 scheme
+// 不走代理时返回空。
 //
-// The setting is either one address for everything — "127.0.0.1:7897" — or one
-// per protocol with the protocol in front of it, as in
-// "http=127.0.0.1:7897;https=127.0.0.1:7897". A protocol the list leaves out is
-// a protocol the system sends straight out, unless the list names a SOCKS
-// proxy, which is the one it uses for everything it has no proxy of its own
-// for.
+// 设置要么是一个适用全部的地址——"127.0.0.1:7897"——要么按协议分别给出并在前面标协议，
+// 如 "http=127.0.0.1:7897;https=127.0.0.1:7897"。列表未列出的协议直连，除非列表指定了
+// SOCKS 代理，此时它会用于所有没有专属代理的协议。
 //
-// A bare address is an HTTP proxy: that is what the setting means, and it is
-// what a tunnel to an https address is opened on. An entry that is already a
-// URL is taken as it is written.
+// 裸地址即 HTTP 代理：这正是该设置的含义，也是向 https 地址开隧道所用的协议。已是 URL 的
+// 条目则按原样使用。
 func parseProxyServer(server, scheme string) *url.URL {
 	server = strings.TrimSpace(server)
 	if server == "" {
@@ -131,10 +111,8 @@ func parseProxyServer(server, scheme string) *url.URL {
 	return proxyURL(address, kind)
 }
 
-// proxyURL turns one setting value into the address a transport wants. A value
-// with a scheme is taken as it is written; a bare one takes the scheme of the
-// kind of proxy it is, which decides the protocol spoken to it — an HTTP proxy
-// unless the system named it as a SOCKS one.
+// proxyURL 把单个设置值转成 transport 需要的地址。带 scheme 的值按原样使用；裸值按代理由
+// 类型决定的 scheme 补全——默认 HTTP，除非系统将其标为 SOCKS。
 func proxyURL(address, kind string) *url.URL {
 	address = strings.TrimSpace(address)
 	if address == "" {
@@ -155,15 +133,11 @@ func proxyURL(address, kind string) *url.URL {
 	return parsed
 }
 
-// bypassesProxy reports whether a host is one the setting sends around the
-// proxy.
+// bypassesProxy 判断主机是否属于设置要绕过代理的范围。
 //
-// The list is the system's own: names separated by ";" or ",", each either
-// "<local>" — a name with no dot in it, which is a machine on this network
-// rather than one out on the internet — a CIDR block as macOS writes local
-// networks ("192.168.0.0/16"), a domain with a leading dot for itself and its
-// subdomains (".corp.example"), or a pattern in which "*" stands for any run
-// of characters, as in "127.*" or "*.local".
+// 列表是系统自己的格式：名字以 ";" 或 "," 分隔，每个可以是 "<local>"（不含点的主机名，
+// 即局域网内的机器）、macOS 写本地网络所用的 CIDR 段（"192.168.0.0/16"）、前导点的域名
+// （".corp.example"，代表自身及子域），或含 "*" 通配任何字符（如 "127.*"、"*.local"）的模式。
 func bypassesProxy(host string, bypass []string) bool {
 	host = strings.ToLower(strings.TrimSpace(host))
 	if host == "" {
@@ -178,17 +152,16 @@ func bypassesProxy(host string, bypass []string) bool {
 				return true
 			}
 		case strings.Contains(entry, "/"):
-			// macOS writes local networks as CIDR blocks
-			// (192.168.0.0/16, 10.0.0.0/8, 172.16.0.0/12), and a
-			// network whose gateway is the proxy should not be sent
-			// through it.
+			// macOS 把本地网络写成 CIDR 段
+			// （192.168.0.0/16、10.0.0.0/8、172.16.0.0/12），
+			// 网关就是代理的网络不应再走代理。
 			if _, network, err := net.ParseCIDR(entry); err == nil {
 				if ip := net.ParseIP(host); ip != nil && network.Contains(ip) {
 					return true
 				}
 			}
 		case strings.HasPrefix(entry, "."):
-			// A leading dot means the domain and everything under it.
+			// 前导点表示该域名及其下所有子域。
 			if host == strings.TrimPrefix(entry, ".") || strings.HasSuffix(host, entry) {
 				return true
 			}
@@ -205,9 +178,8 @@ func bypassesProxy(host string, bypass []string) bool {
 	return false
 }
 
-// matchesPattern matches a host against a pattern in which "*" stands for any
-// run of characters, including none: "127.*" matches 127.0.0.1, and "*.local"
-// matches printer.local.
+// matchesPattern 用含 "*" 的模式匹配主机，"*" 代表任意长度（包括零）的字符：
+// "127.*" 匹配 127.0.0.1，"*.local" 匹配 printer.local。
 func matchesPattern(host, pattern string) bool {
 	parts := strings.Split(pattern, "*")
 	if !strings.HasPrefix(host, parts[0]) {
@@ -224,8 +196,7 @@ func matchesPattern(host, pattern string) bool {
 	return strings.HasSuffix(rest, parts[len(parts)-1])
 }
 
-// splitBypass reads a system bypass list into its entries. The list is written
-// with ";" between names, and "," is accepted because some tools write it.
+// splitBypass 把系统绕过列表拆成条目。名字间以 ";" 分隔，也接受 ","，因为有些工具这样写。
 func splitBypass(list string) []string {
 	return strings.FieldsFunc(list, func(r rune) bool { return r == ';' || r == ',' })
 }

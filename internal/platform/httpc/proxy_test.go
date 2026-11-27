@@ -11,9 +11,8 @@ import (
 	"testing"
 )
 
-// A request asks the environment first and the machine second: the environment
-// is the setting somebody made on purpose for this program, and the machine's
-// own is what the same user set for everything else.
+// 请求先问环境再问系统：环境是有人专门为这个程序设置的，系统的是同一用户为
+// 其它一切设置的。
 func TestTheEnvironmentComesFirstAndTheMachineIsTheFallback(t *testing.T) {
 	machine := proxySettings{Enabled: true, Server: "127.0.0.1:7897"}
 	fromMachine := func() (proxySettings, error) { return machine, nil }
@@ -30,8 +29,7 @@ func TestTheEnvironmentComesFirstAndTheMachineIsTheFallback(t *testing.T) {
 		t.Errorf("proxy = %v, want the environment's", proxy)
 	}
 
-	// Nothing in the environment: the machine answers, and it answers for the
-	// scheme that was asked for.
+	// 环境没有设置：由系统作答，且是为所请求的协议作答。
 	none := func(*http.Request) (*url.URL, error) { return nil, nil }
 	proxy, err = proxyFor(none, fromMachine, request)
 	if err != nil {
@@ -41,16 +39,14 @@ func TestTheEnvironmentComesFirstAndTheMachineIsTheFallback(t *testing.T) {
 		t.Errorf("proxy = %v, want the machine's own", proxy)
 	}
 
-	// An environment that refuses the request is an answer too: it is not
-	// overruled by the machine's setting.
+	// 环境拒绝请求也是一种答案：不会被系统设置覆盖。
 	refused := errors.New("no proxy for this one")
 	if _, err := proxyFor(func(*http.Request) (*url.URL, error) { return nil, refused }, fromMachine, request); !errors.Is(err, refused) {
 		t.Errorf("proxyFor error = %v, want the environment's refusal", err)
 	}
 }
 
-// The machine's setting is read through one function, and a setting that cannot
-// be read, or is switched off, is no proxy rather than a failed request.
+// 系统设置通过一个函数读取；读不到或已关闭的设置都视为无代理，而不是请求失败。
 func TestAMachineSettingThatIsOffOrUnreadableIsNoProxy(t *testing.T) {
 	request := mustRequest(t, "https://chatgpt.com/backend-api/wham/usage")
 	cases := map[string]func() (proxySettings, error){
@@ -75,8 +71,7 @@ func TestAMachineSettingThatIsOffOrUnreadableIsNoProxy(t *testing.T) {
 	}
 }
 
-// The system's setting is written in two shapes, and either may leave a
-// protocol out.
+// 系统设置有两种写法，都可能缺少某个协议。
 func TestTheSystemProxySettingInBothShapes(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -110,8 +105,7 @@ func TestTheSystemProxySettingInBothShapes(t *testing.T) {
 	}
 }
 
-// The bypass list is the system's own: a machine on this network, an address
-// range, a domain, or one host.
+// 绕过列表用的是系统自己的：本网络内的一台机器、一个地址段、一个域名，或一个主机。
 func TestTheSystemBypassList(t *testing.T) {
 	cases := []struct {
 		host    string
@@ -129,8 +123,7 @@ func TestTheSystemBypassList(t *testing.T) {
 		{"chatgpt.com", []string{""}, false},
 		{"CHATGPT.COM", []string{"chatgpt.com"}, true},
 		{"chatgpt.com", nil, false},
-		// macOS SystemConfiguration writes local networks as CIDR blocks
-		// and domains with a leading dot.
+		// macOS 的 SystemConfiguration 把本地网络写成 CIDR 段，域名带前导点。
 		{"192.168.1.20", []string{"192.168.0.0/16"}, true},
 		{"10.2.3.4", []string{"10.0.0.0/8"}, true},
 		{"172.20.0.1", []string{"172.16.0.0/12"}, true},
@@ -146,8 +139,7 @@ func TestTheSystemBypassList(t *testing.T) {
 	}
 }
 
-// A host on the bypass list goes straight out, and one that is not goes through
-// the proxy the setting names.
+// 在绕过列表上的主机直连出去，不在列表上的走设置指定的代理。
 func TestABypassedHostDoesNotUseTheProxy(t *testing.T) {
 	read := func() (proxySettings, error) {
 		return proxySettings{
@@ -172,9 +164,8 @@ func TestABypassedHostDoesNotUseTheProxy(t *testing.T) {
 	}
 }
 
-// The whole path, with a proxy that is a real HTTP server: the client hands the
-// request to the machine's proxy, and the proxy is asked for the absolute
-// address rather than for a path.
+// 完整路径，代理是一个真实 HTTP 服务器：client 把请求交给系统代理，且代理
+// 收到的是绝对地址而非路径。
 func TestTheClientGoesThroughTheMachineProxy(t *testing.T) {
 	if os.Getenv("HTTP_PROXY") != "" || os.Getenv("http_proxy") != "" || os.Getenv("ALL_PROXY") != "" {
 		t.Skip("this machine has a proxy in its environment, which correctly comes first")

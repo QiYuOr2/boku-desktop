@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// State owns clipboard presentation, including transient row feedback.
-// The Shell owns the native history window and supplies its open action.
+// State 持有剪贴板展示状态（含临时的行内反馈）。原生历史窗口由 Shell 持有，
+// 并通过 openHistory 回调提供打开动作。
 type State struct {
 	clipboard       *clipboard.Clipboard
 	design          presentation.ClipboardDesign

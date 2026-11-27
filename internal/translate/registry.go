@@ -1,14 +1,11 @@
-// Package translate is the translation tool: turning text the user selected
-// into another language, the registry of translators it may ask, and the
-// settings that decide which one and how.
+// Package translate 是划词翻译工具：把用户选中的文本翻成另一种语言，
+// 以及可调用的翻译器注册表和决定用哪个、怎么用的设置。
 //
-// This file is the registry. It is the same idea as the provider registry
-// next door, and deliberately not the same type: a provider and an adapter
-// are registered together because a raw payload needs an interpreter, while a
-// translator answers in the domain's own words and stands alone. Nothing here
-// knows a concrete translator: the assembly in main.go registers them, and
-// each backend lives in a package under this one (translate/deepseek,
-// translate/custom, and translate/openai for the protocol they share).
+// 本文件是注册表。它和隔壁的 provider 注册表思路相同，但刻意不是同一个类型：
+// provider 与 adapter 成对注册，因为原始响应需要解释器；而翻译器直接用领域自己的
+// 语言作答，可以单独存在。这里不认识任何具体翻译器：main.go 里的装配负责注册，
+// 每个后端位于本包下的子包中（translate/deepseek、translate/custom，以及它们共用
+// 的协议 translate/openai）。
 package translate
 
 import (
@@ -20,24 +17,22 @@ import (
 	"boku/internal/domain"
 )
 
-// Registry holds the translators by id.
+// Registry 按 id 持有翻译器。
 type Registry struct {
 	mu    sync.RWMutex
 	byIDs map[string]domain.Translator
 }
 
-// NewRegistry returns an empty registry.
+// NewRegistry 返回一个空注册表。
 func NewRegistry() *Registry {
 	return &Registry{byIDs: make(map[string]domain.Translator)}
 }
 
-// Register adds a translator.
+// Register 添加一个翻译器。
 //
-// It refuses a duplicate rather than overwriting: two translators answering
-// to one id means two answers to the same question, and only the assembly
-// can decide which is right. A descriptor that does not validate is refused
-// too — a translator nobody can configure is a mistake worth failing on at
-// startup, not on the first press of the shortcut.
+// 重复 id 会被拒绝而非覆盖：两个翻译器共用 id 意味着同一个问题有两个答案，
+// 只有装配点能决定哪个正确。无法通过校验的描述符同样被拒绝——没人能配置的
+// 翻译器值得在启动时失败，而不是等到第一次按快捷键。
 func (r *Registry) Register(reply domain.Translator) error {
 	if reply == nil {
 		return fmt.Errorf("%w: a translator is nil", domain.ErrInvalidArgument)
@@ -58,8 +53,7 @@ func (r *Registry) Register(reply domain.Translator) error {
 	return nil
 }
 
-// Translator returns the translator registered under an id, or
-// ErrProviderNotFound.
+// Translator 返回某 id 下注册的翻译器，否则返回 ErrProviderNotFound。
 func (r *Registry) Translator(id string) (domain.Translator, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -70,11 +64,10 @@ func (r *Registry) Translator(id string) (domain.Translator, error) {
 	return reply, nil
 }
 
-// Has reports whether a translator is registered under an id.
+// Has 报告某个 id 下是否注册了翻译器。
 //
-// It is what a caller asks before registering one that may already be there:
-// the user's own services are registered as they are added, and registering the
-// same one twice is not a mistake worth failing on.
+// 调用者在注册一个可能已存在的翻译器前用它来询问：用户自己的服务随添加而注册，
+// 重复注册同一个不算值得失败的错误。
 func (r *Registry) Has(id string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -82,23 +75,19 @@ func (r *Registry) Has(id string) bool {
 	return ok
 }
 
-// Remove takes a translator out of the registry.
+// Remove 从注册表移除一个翻译器。
 //
-// It exists for the services the user runs themselves, which come and go while
-// the application runs: removing one has to take its translator with it, or the
-// window keeps a row for a service that is no longer in the settings — a card
-// with no address, offering to connect to nothing.
+// 它服务于用户自己运行、应用运行期间来去的服务：移除一个必须连带移除它的翻译器，
+// 否则窗口会为一个已不在设置中的服务留下空行——一张没有地址、无从连接的卡片。
 //
-// Removing an id nobody registered is not a mistake: the caller is saying "this
-// one is not here any more", and it already is not.
+// 移除一个没人注册的 id 不是错误：调用者是在说「这个已经不在了」，而它本来就不在。
 func (r *Registry) Remove(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.byIDs, strings.TrimSpace(id))
 }
 
-// TranslatorIDs returns the registered ids, sorted, which is the order the
-// settings window offers them in.
+// TranslatorIDs 返回已注册的 id，排序后即设置窗口提供它们的顺序。
 func (r *Registry) TranslatorIDs() []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -110,13 +99,12 @@ func (r *Registry) TranslatorIDs() []string {
 	return ids
 }
 
-// Len is how many translators are registered.
+// Len 是已注册翻译器的数量。
 func (r *Registry) Len() int {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return len(r.byIDs)
 }
 
-// ensure the interface is satisfied where it is defined, not at the call
-// site.
+// ensure 在接口定义处而非调用处校验接口已被满足。
 var _ domain.TranslatorRegistry = (*Registry)(nil)

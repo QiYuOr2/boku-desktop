@@ -1,11 +1,8 @@
-// Package grok is the Grok subscription quota: the panel it is shown in, the
-// request that reads it, the pure mapping of the answer, and the device-code
-// login Boku keeps for itself.
+// Package grok 提供 Grok 订阅额度：展示它的面板、读取它的请求、回答的纯映射，
+// 以及 Boku 自行保留的设备码登录。
 //
-// The division is the same as the other vendors. spec.go is configuration,
-// client.go reaches the network, adapter.go is a pure function of the
-// response, and login.go keeps the tokens. Nothing in adapter.go may read
-// the clock, open a file or make a request.
+// 分工与其他厂商一致：spec.go 是配置，client.go 出网，adapter.go 是响应的纯函数，
+// login.go 保存 token。adapter.go 不得读时钟、开文件或发请求。
 package grok
 
 import "boku/internal/domain"
@@ -14,12 +11,11 @@ const ProviderID = "grok"
 
 const (
 	PanelID = "0198a1b2-0000-7000-8000-000000000003"
-	// RefreshEverySeconds is how long a reading stays fresh. The panel asks
-	// again after five minutes; the provider's own floor is one minute.
+	// RefreshEverySeconds 是一次读数的新鲜时长：面板每五分钟再问一次，
+	// 而厂商自己的下限是一分钟。
 	RefreshEverySeconds = 300
-	// AccessTokenCredential is the access token the billing request carries.
-	// The refresh token is kept beside it, but the provider itself only asks
-	// for the access token.
+	// AccessTokenCredential 是账单请求携带的 access token。refresh token 存在它旁边，
+	// 但 provider 本身只索要 access token。
 	AccessTokenCredential  = "accessToken"
 	RefreshTokenCredential = "refreshToken"
 )
@@ -31,17 +27,16 @@ const (
 	MetricOnDemandRemainingPercent = "onDemandRemainingPercent"
 )
 
-// UsageURL is the account page a quota panel is a summary of.
+// UsageURL 是额度面板所概括的账号页面。
 const UsageURL = "https://grok.com"
 
-// OptionalMetricKeys names observations the endpoint may omit. The order is
-// the order the quota card reads: a reset, then the period it belongs to,
-// then the on-demand bar.
+// OptionalMetricKeys 列出端点可能省略的观测。顺序即额度卡读取顺序：
+// 先重置，再所属周期，最后按量条。
 func OptionalMetricKeys() []string {
 	return []string{MetricCreditResetsInSeconds, MetricCreditWindowSeconds, MetricOnDemandRemainingPercent}
 }
 
-// Panel returns the quota panel.
+// Panel 返回额度面板。
 func Panel() domain.Panel {
 	return domain.Panel{
 		ID:           PanelID,
@@ -55,7 +50,7 @@ func Panel() domain.Panel {
 	}
 }
 
-// Metrics returns the panel's metrics in the order the card reads them.
+// Metrics 按卡片读取顺序返回面板的指标。
 func Metrics() []domain.Metric {
 	return []domain.Metric{
 		{
@@ -89,7 +84,7 @@ func Metrics() []domain.Metric {
 	}
 }
 
-// Metric returns one metric by key, and whether it is the panel's.
+// Metric 按 key 返回一个指标，以及它是否属于本面板。
 func Metric(key string) (domain.Metric, bool) {
 	for _, metric := range Metrics() {
 		if metric.Key == key {

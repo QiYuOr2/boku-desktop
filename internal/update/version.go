@@ -5,24 +5,17 @@ import (
 	"strings"
 )
 
-// Compare compares two version strings the way semantic versioning does and
-// reports -1, 0 or 1.
+// Compare 按语义化版本比较两个版本字符串，返回 -1、0 或 1。
 //
-// It exists so that "is the release newer than the running version" is
-// answered by one rule and not by a string comparison. A feed may name the
-// version of the build that is asking — the newest published release is
-// exactly the version a current install runs — and comparing that with == or
-// with a plain sort would either offer a reinstall of the same version or
-// rank "v0.1.1" and "0.1.1" as different versions of themselves.
+// 它的存在是为了让「release 是否比运行版本新」由一条规则回答而非字符串比较。
+// 发布源可能给出正在询问的构建的版本——最新发布的就是当前安装所跑的——用 == 或
+// 普通排序比较，要么提供重装同版本，要么把 "v0.1.1" 与 "0.1.1" 判成不同版本。
 //
-// The rules are semantic versioning's: a leading "v" and a "+build" suffix are
-// not part of the number, fields compare numerically where both are numbers, a
-// pre-release sorts before its release, and a version that stops early is
-// smaller than one that continues it ("0.1" < "0.1.0").
+// 规则即语义化版本：前导 "v" 与 "+build" 后缀不属于版本号；两边都是数字时按数值
+// 比较；预发布早于其正式版；提前结束的版本小于继续的版本（"0.1" < "0.1.0"）。
 //
-// It is the comparison MyGo's own updater makes before it offers an update,
-// and the adapter in main.go uses it for that reason: what this package calls
-// newer and what the framework installs have to agree.
+// 它也是 MyGo 自身 updater 在提供更新前所做的比较，main.go 的适配器因此使用它：
+// 本包判决的「更新」与框架安装的必须一致。
 func Compare(a, b string) int {
 	aRelease, aPrerelease := splitVersion(a)
 	bRelease, bPrerelease := splitVersion(b)
@@ -32,10 +25,8 @@ func Compare(a, b string) int {
 	return comparePrerelease(aPrerelease, bPrerelease)
 }
 
-// splitVersion reduces a version to the two parts that order it: the release
-// number and the pre-release tag. A leading "v" is how tags are written and a
-// "+build" suffix says how a build was made; neither changes which version it
-// is.
+// splitVersion 把版本拆成排序用的两部分：发布号与预发布标签。前导 "v" 是标签
+// 的写法，"+build" 后缀说明构建方式；二者都不改变是哪个版本。
 func splitVersion(version string) (release, prerelease string) {
 	version = strings.TrimPrefix(strings.TrimSpace(version), "v")
 	version, _, _ = strings.Cut(version, "+")
@@ -43,8 +34,8 @@ func splitVersion(version string) (release, prerelease string) {
 	return release, prerelease
 }
 
-// comparePrerelease orders two pre-release tags. An absent one sorts after
-// every present one, because a release is newer than its own pre-releases.
+// comparePrerelease 排序两个预发布标签。缺席的排在所有存在的之后，因为正式版
+// 新于它自己的预发布。
 func comparePrerelease(a, b string) int {
 	switch {
 	case a == b:
@@ -57,9 +48,8 @@ func comparePrerelease(a, b string) int {
 	return compareFields(a, b)
 }
 
-// compareFields compares two dot-separated version parts field by field.
-// Numbers compare numerically; a numeric field sorts before a word; two words
-// compare as strings; a field one side does not have makes that side smaller.
+// compareFields 逐字段比较两个点分隔的版本部分。数字按数值比；数字字段排在
+// 单词字段前；两个单词按字符串比；一方缺的字段使该方更小。
 func compareFields(a, b string) int {
 	af, bf := strings.Split(a, "."), strings.Split(b, ".")
 	for i := 0; i < len(af) || i < len(bf); i++ {
@@ -87,7 +77,7 @@ func compareFields(a, b string) int {
 				return 1
 			}
 		case xerr == nil:
-			return -1 // numbers sort before words
+			return -1 // 数字排在单词之前
 		case yerr == nil:
 			return 1
 		default:

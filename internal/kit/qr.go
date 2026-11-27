@@ -1,9 +1,5 @@
-// This file reads the text a QR code holds out of an image. It is a pure
-// function over bytes, kept with the rest of the application's pure
-// functions: no network, no files, no screen. The caller — the application's
-// screenshot entry — owns where the image came from and what happens to it
-// afterwards. Decoding happens locally because the contents of a QR code are
-// often exactly what the user did not want to send anywhere.
+// 本文件从图片中读出二维码承载的文本，是对字节的纯函数，与其它纯函数放在一起：
+// 不涉及网络、文件与屏幕。解码在本地进行，因为二维码内容往往正是用户不希望外发的东西。
 package kit
 
 import (
@@ -18,19 +14,16 @@ import (
 )
 
 var (
-	// ErrInvalidQRImage means the bytes were not an image this package can
-	// read. It is not "no QR code": one is a broken input, the other is a
-	// readable picture without a code in it.
+	// ErrInvalidQRImage 表示字节不是本包可读取的图片。它与「无二维码」不同：
+	// 一个是损坏的输入，另一个是能读但没有码的图片。
 	ErrInvalidQRImage = errors.New("qr: the image cannot be read")
-	// ErrQRCodeNotFound means the image was readable but held no QR code.
+	// ErrQRCodeNotFound 表示图片可读但不含二维码。
 	ErrQRCodeNotFound = errors.New("qr: the image holds no QR code")
 )
 
-// DecodeQRCodePNG returns the text of the first QR code in the PNG.
+// DecodeQRCodePNG 返回 PNG 中第一个二维码的文本。
 //
-// Screenshots arrive as PNG, and the capture device promises exactly that;
-// accepting only PNG keeps the input the same shape as the one the
-// application produces.
+// 截图以 PNG 到达，采集设备也保证如此；只接受 PNG 可让输入与应用产生的一致。
 func DecodeQRCodePNG(data []byte) (string, error) {
 	if len(data) == 0 {
 		return "", fmt.Errorf("%w: empty image", ErrInvalidQRImage)
@@ -42,12 +35,10 @@ func DecodeQRCodePNG(data []byte) (string, error) {
 	return DecodeQRCode(img)
 }
 
-// DecodeQRCode returns the text of the first QR code in the image.
+// DecodeQRCode 返回图片中第一个二维码的文本。
 //
-// A QR code is normally dark on light, but a code drawn in a dark interface
-// is light on dark and is just as readable to a person. Both are tried. The
-// thorough pass is second because most codes on a screen are found on the
-// quick one, and a screenshot with no code should not pay for it first.
+// 二维码通常深色在浅色背景上，但深色界面里绘制的码是浅色在深色背景上，人眼同样可读，因此两种都试。
+// 深度尝试放在后面：屏幕上大多数码在快速扫描时即可找到，没有码的截图不应先付出该开销。
 func DecodeQRCode(img image.Image) (string, error) {
 	if img == nil || img.Bounds().Empty() {
 		return "", ErrInvalidQRImage
@@ -62,10 +53,8 @@ func DecodeQRCode(img image.Image) (string, error) {
 	return "", ErrQRCodeNotFound
 }
 
-// read makes one attempt. Any failure is "this attempt did not find one":
-// the reader's own error types say why an attempt failed (no finder
-// pattern, an unreadable version, a bad checksum), and none of them is a
-// different answer for the user than "no code in this picture".
+// read 执行一次尝试。任何失败都视为「此次未找到」：读取器自身的错误类型说明了失败原因
+// （无定位图案、版本不可读、校验和错误），对用户而言它们都等价于「图片里没有码」。
 func read(img image.Image, inverted, thorough bool) (string, bool) {
 	source := gozxing.NewLuminanceSourceFromImage(img)
 	if inverted {

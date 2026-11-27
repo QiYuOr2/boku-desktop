@@ -1,11 +1,9 @@
-// Package flash stores text flashes in the same JSON document Apple writes.
+// Package flash 把文字闪念存进 Apple 所写的同一份 JSON 文档。
 //
-// The file stays version 1. Apple's decoder ignores a source it has not been
-// taught, then its next save drops unknown keys, so Apple must know source
-// before the two sides write one file. Times are whole UTC seconds: Apple's
-// ISO-8601 decoder rejects a fractional second. Identifiers are kept in the
-// case they were stored in; comparison is case-insensitive, rewriting case
-// would make one note look like two.
+// 文件保持 version 1。Apple 的解码器会忽略它尚不认识的 source，而它下次保存会丢掉未知键，
+// 因此两端共写同一份文件前，Apple 必须先认识 source。时间取整为 UTC 整秒：Apple 的
+// ISO-8601 解码器拒绝小数秒。ID 按存入时的大小写保留；比较时忽略大小写，改动大小写
+// 会让一条笔记看起来像两条。
 package flash
 
 import (
@@ -21,27 +19,27 @@ import (
 )
 
 const (
-	// FileName is the document, beside the application's other user files.
+	// FileName 是文档文件名，与应用的其它用户文件同目录。
 	FileName = "flashes.json"
-	// SourceApple is a flash recorded on Apple. A missing source means the same
-	// thing: files written before the field existed are Apple's.
+	// SourceApple 表示在 Apple 端记录的闪念。缺失 source 含义相同：字段出现之前写下的
+	// 文件都是 Apple 的。
 	SourceApple = "apple"
-	// SourceDesktop is a flash recorded on this desktop.
+	// SourceDesktop 表示在本桌面端记录的闪念。
 	SourceDesktop = "desktop"
 
 	documentVersion = 1
 )
 
 var (
-	// ErrUnreadable means the file is there and must not be overwritten.
+	// ErrUnreadable 表示文件存在，且不得被覆盖。
 	ErrUnreadable = errors.New("unreadable flash file")
-	// ErrEmpty means the text is blank and there is no audio to keep.
+	// ErrEmpty 表示文字为空且没有音频可保留。
 	ErrEmpty = errors.New("empty flash")
-	// ErrMissing means the note being edited is not an active entry.
+	// ErrMissing 表示要编辑的笔记不是活动条目。
 	ErrMissing = errors.New("missing flash")
 )
 
-// Entry is one flash. AudioFileName is the file name only, never a path.
+// Entry 是一条闪念。AudioFileName 仅为文件名，绝不是路径。
 type Entry struct {
 	ID            string
 	Text          string
@@ -52,15 +50,13 @@ type Entry struct {
 	Source        string
 }
 
-// Store is the flashes document. A failed read refuses every later write.
+// Store 是闪念文档。读取失败后拒绝后续所有写入。
 type Store struct {
 	path string
 }
 
-// NewStore reads and writes path.
 func NewStore(path string) *Store { return &Store{path: path} }
 
-// List returns active flashes, newest first.
 func (s *Store) List() ([]Entry, error) {
 	entries, err := s.read()
 	if err != nil {
@@ -75,9 +71,8 @@ func (s *Store) List() ([]Entry, error) {
 	for i, j := 0, len(visible)-1; i < j; i, j = i+1, j-1 {
 		visible[i], visible[j] = visible[j], visible[i]
 	}
-	// read() keeps file order, which is oldest first. Reverse is newest only
-	// when the file itself is in creation order. Sort by the timestamp so a
-	// hand-edited file still lists newest first.
+	// read() 保持文件顺序，即最旧在前。反转后只有在文件本身按创建顺序时才是最新在前，
+	// 因此按时间戳排序，使手工编辑过的文件仍以最新在前列出。
 	for i := 1; i < len(visible); i++ {
 		item := visible[i]
 		j := i
@@ -90,8 +85,7 @@ func (s *Store) List() ([]Entry, error) {
 	return visible, nil
 }
 
-// SaveText creates a desktop flash, or replaces the text of an existing one.
-// An existing source and audio file name are left as they are.
+// SaveText 新建桌面闪念，或替换已有条目的文字；已有的 source 与音频文件名保持不动。
 func (s *Store) SaveText(text, id string, now time.Time) (Entry, error) {
 	text = strings.TrimSpace(text)
 	entries, err := s.read()
@@ -130,7 +124,7 @@ func (s *Store) SaveText(text, id string, now time.Time) (Entry, error) {
 	return saved, nil
 }
 
-// Delete marks an active flash deleted. The row stays in the file.
+// Delete 把活动闪念标记为已删除，条目仍保留在文件中。
 func (s *Store) Delete(id string, now time.Time) error {
 	entries, err := s.read()
 	if err != nil {

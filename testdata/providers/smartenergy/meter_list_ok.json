@@ -1,0 +1,16 @@
+{
+  "code": 200,
+  "msg": "success",
+  "data": {
+    "success": 1,
+    "listitem": [
+      {
+        "metername": "测试801－3",
+        "meterno": "43000000001",
+        "commaddress": "43000000001",
+        "rtuid": "rtu-synthetic-1",
+        "pointid": "point-synthetic-1"
+      }
+    ]
+  }
+}

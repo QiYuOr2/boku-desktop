@@ -123,8 +123,8 @@ func TestDescriptor(t *testing.T) {
 	if descriptor.DocsURL == "" {
 		t.Error("the descriptor does not say where to get a key")
 	}
-	// The page the panel's headline opens is the provider's own account
-	// page, and it is https: the interface hands it to the system to open.
+	// 面板主指标打开的页面是厂商自己的账户页，且必须为 https：界面会把它
+	// 交给系统打开。
 	if descriptor.UsageURL != UsageURL {
 		t.Errorf("UsageURL = %q, want %q", descriptor.UsageURL, UsageURL)
 	}
@@ -137,7 +137,7 @@ func TestDescriptor(t *testing.T) {
 	if got := descriptor.MinRefreshInterval(); got != time.Minute {
 		t.Errorf("MinRefreshInterval() = %s, want 1m", got)
 	}
-	// The default base URL is what a real run talks to.
+	// 默认 base URL 是真实运行时访问的地址。
 	if !strings.HasPrefix(New(httpc.New(httpc.Options{})).baseURL, "https://api.deepseek.com") {
 		t.Errorf("the default base URL is %q", New(httpc.New(httpc.Options{})).baseURL)
 	}

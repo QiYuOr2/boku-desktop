@@ -26,8 +26,7 @@ var (
 	notifyHandle uintptr
 )
 
-// The union is wide enough for a device-instance id, which is what Windows
-// measures cbSize against.
+// 该联合体宽到足以容纳设备实例 id，Windows 以它为准衡量 cbSize。
 type cmNotifyFilter struct {
 	cbSize     uint32
 	flags      uint32

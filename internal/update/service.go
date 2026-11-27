@@ -16,58 +16,43 @@ import (
 )
 
 const (
-	// FirstCheckDelay is how long the application waits after starting
-	// before asking the feed. A launch is already busy — windows, shortcuts,
-	// the clipboard poll — and a launch that is not looked at is the one a
-	// user notices going slow.
+	// FirstCheckDelay 是启动后到首次询问发布源的等待。启动本身已很忙（窗口、
+	// 快捷键、剪贴板轮询），没人盯着的启动最容易被觉得慢。
 	FirstCheckDelay = time.Minute
-	// CheckInterval is how often the feed is asked afterwards. A desktop
-	// application runs for weeks, and a day is often enough for a program
-	// whose releases are not urgent.
+	// CheckInterval 是之后的询问间隔。桌面应用运行数周，对发布不急的程序一天
+	// 一次足够。
 	CheckInterval = 24 * time.Hour
 )
 
-// Options is what the service is assembled from. Updater is required; the
-// rest has a working default.
+// Options 是装配服务所需的配置。Updater 必填，其余有可用默认值。
 type Options struct {
-	// Current is the running version, as the feed compares it: the version
-	// mygo.App.Version reports, or the build-time one when that is empty.
+	// Current 是运行版本，按其与发布源比较：mygo.App.Version 报告的版本，
+	// 为空时用构建期版本。
 	Current string
-	// Dir is the directory the service owns for anything it keeps between
-	// checks. It is required because it is cleaned: an update is installed
-	// by the updater, which downloads into a directory of its own, so what
-	// is found here is a leftover, and it is removed rather than kept.
+	// Dir 是服务在两次检查之间存放东西的目录。必填，因为它会被清理：更新由
+	// updater 下载到自己的目录安装，所以这里留下的都是残留，只删不留。
 	Dir string
-	// Updater is the release feed. It is required: a service with no feed
-	// has nothing to check, and saying so at assembly is better than a
-	// state that never moves.
+	// Updater 是发布源。必填：没有发布源就无从检查，在装配时报错胜过永远不动
+	// 的状态。
 	Updater Updater
-	// Relauncher restarts the application once an update is applied. A nil
-	// relauncher installs the update and does not restart: the next launch
-	// runs it, and the state says so.
+	// Relauncher 在应用更新后重启应用。为 nil 时只安装不重启：下次启动生效，
+	// 状态会如实说明。
 	Relauncher Relauncher
-	// FirstDelay and Interval override the schedule. Zero keeps the
-	// defaults; a negative FirstDelay means the loop makes no check of its
-	// own until the interval has passed, which is what a test that drives
-	// Check itself wants.
+	// FirstDelay 与 Interval 覆盖调度。零值用默认；负的 FirstDelay 表示循环在
+	// 间隔到期前不自行检查，供自己驱动 Check 的测试使用。
 	FirstDelay time.Duration
 	Interval   time.Duration
-	// Clock is where the service reads the time. It only stamps when a
-	// check was made — no behaviour depends on it — and a nil clock is the
-	// system's.
+	// Clock 是服务读时间的地方，仅用于给检查时间打戳（无行为依赖），nil 用系统时钟。
 	Clock domain.Clock
-	// OnChange is called from whatever goroutine changed the state, once
-	// per change, after the state is readable. It is how the views are told
-	// to redraw, so it must not block: it is a repaint request, and the
-	// repaint reads State() itself.
+	// OnChange 由改变状态的 goroutine 在每次变更后、状态可读时调用一次。它是
+	// 让视图重绘的方式，因此不得阻塞——它只是重绘请求，重绘自身会读 State()。
 	OnChange func()
 }
 
-// Service is the update feature: it decides what the interface draws, when
-// the feed is asked, and what installing means.
+// Service 是更新功能：决定界面画什么、何时询问发布源、安装意味着什么。
 //
-// Every method is safe to call from any goroutine, and State is cheap enough
-// to call from the drawing thread: it is one lock and one copy.
+// 每个方法都可在任意 goroutine 调用；State 足够轻，可从绘制线程调用（一次
+// 加锁、一次拷贝）。
 type Service struct {
 	current  string
 	dir      string
@@ -80,23 +65,20 @@ type Service struct {
 	mu       sync.Mutex
 	state    domain.UpdateState
 	onChange func()
-	// running says a Check is in flight. It is the single flight: a check
-	// that arrives while one is running returns at once instead of asking
-	// the feed a second time.
+	// running 表示有 Check 在进行，即单飞：进行中到达的 Check 立即返回，不再
+	// 询问发布源第二次。
 	running bool
-	// release is the release a Ready state is about, kept whole so that
-	// Install knows what to apply.
+	// release 是 Ready 状态对应的 release，整份保留以便 Install 知道安装什么。
 	release *Release
-	// checkedAt is when the last check started, which is what the loop
-	// uses to keep itself to one check per interval.
+	// checkedAt 是上次检查的开始时间，循环据此把自身保持为每间隔一次。
 	checkedAt time.Time
 
-	// cancel and done are the loop, while it runs.
+	// cancel 与 done 是运行中的循环。
 	cancel context.CancelFunc
 	done   chan struct{}
 }
 
-// New returns the service.
+// New 返回服务。
 func New(opts Options) (*Service, error) {
 	if opts.Updater == nil {
 		return nil, fmt.Errorf("%w: the update service has no updater", domain.ErrInvalidArgument)
@@ -130,32 +112,27 @@ func New(opts Options) (*Service, error) {
 	return s, nil
 }
 
-// State is what the interface draws. It is a plain copy, safe to keep for
-// the length of a frame.
+// State 是界面要画的状态，为普通拷贝，可安全保留一帧。
 func (s *Service) State() domain.UpdateState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.state
 }
 
-// SetOnChange replaces the callback. It is what an assembly that builds its
-// windows after the service does, since the windows are what a repaint
-// needs.
+// SetOnChange 替换回调。装配在服务之后才构建窗口、而重绘又需要窗口时用它。
 func (s *Service) SetOnChange(onChange func()) {
 	s.mu.Lock()
 	s.onChange = onChange
 	s.mu.Unlock()
 }
 
-// OnChange installs the callback the same way SetOnChange does. The two names
-// are one method because the presentation declares what it needs from the
-// service — State, Check, Install and OnChange — and this is that
-// declaration, met. It is installed once, before the service is used.
+// OnChange 与 SetOnChange 相同。两个名字合一，是因为展示层声明它需要服务的
+// State、Check、Install 与 OnChange，这里正是该声明的满足。它在服务使用前
+// 安装一次。
 func (s *Service) OnChange(onChange func()) { s.SetOnChange(onChange) }
 
-// set replaces the state and tells the views, unless nothing changed. It is
-// the one place the state moves, so OnChange is called once per change and
-// always after the new state can be read.
+// set 替换状态并通知视图（无变化时除外）。它是状态迁移的唯一入口，故 OnChange
+// 每次变更只调一次，且总在新状态可读之后。
 func (s *Service) set(state domain.UpdateState) {
 	s.mu.Lock()
 	if s.state == state {
@@ -165,19 +142,16 @@ func (s *Service) set(state domain.UpdateState) {
 	s.state = state
 	onChange := s.onChange
 	s.mu.Unlock()
-	// The callback is read under the lock and called outside it: it ends up
-	// on the main thread, and holding this lock while the draw thread waits
-	// for State would be a deadlock waiting for the right moment.
+	// 回调在锁内读取、锁外调用：它最终落在主线程，若持锁等待绘制线程调用
+	// State，就是等待时机的死锁。
 	if onChange != nil {
 		onChange()
 	}
 }
 
-// Start begins the background loop: a check after FirstDelay, then one every
-// Interval. A build that cannot update itself is marked Unsupported here and
-// gets no timer at all: a loop that wakes up to learn the same thing every
-// task it is given is noise. It is safe to call twice; the second call does
-// nothing.
+// Start 启动后台循环：FirstDelay 后检查一次，此后每 Interval 一次。不能自更新
+// 的构建在此标记为 Unsupported 且不建定时器：醒来只为反复学到同一件事只是噪音。
+// 可重复调用，第二次无操作。
 func (s *Service) Start(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -209,10 +183,8 @@ func (s *Service) Start(ctx context.Context) {
 	}()
 }
 
-// loop is the timer: one check after delay, then one every interval, until
-// the context ends. A delay at or below zero means the loop waits out an
-// interval before its first check, which is what a test that drives Check
-// itself wants.
+// loop 是定时器：delay 后检查一次，此后每 interval 一次，直到 context 结束。
+// delay 不高于零表示循环等满一个 interval 才首次检查，供自己驱动 Check 的测试使用。
 func (s *Service) loop(ctx context.Context, delay, interval time.Duration) {
 	timer := time.NewTimer(max(delay, 0))
 	defer timer.Stop()
@@ -222,18 +194,15 @@ func (s *Service) loop(ctx context.Context, delay, interval time.Duration) {
 			return
 		case <-timer.C:
 		}
-		// The check runs here, on the loop's goroutine. One that is already
-		// running — started by a button, say — makes this call return at
-		// once, and the next tick waits the interval: that is the single
-		// flight.
+		// 检查在循环 goroutine 上执行。若已有检查在跑（比如按钮触发的），本次
+		// 调用立即返回，下一轮等满间隔——这就是单飞。
 		_ = s.Check(ctx)
 		timer.Reset(interval)
 	}
 }
 
-// Stop ends the loop and waits for the goroutine. A check in flight is
-// cancelled with the context it was started with, because the loop's context
-// is its parent. main.go calls it as the application quits.
+// Stop 结束循环并等待其 goroutine。进行中的检查随启动它的 context 取消，因为
+// 循环的 context 是它的父。main.go 在应用退出时调用。
 func (s *Service) Stop() {
 	s.mu.Lock()
 	cancel, done := s.cancel, s.done
@@ -249,15 +218,12 @@ func (s *Service) Stop() {
 	slog.Info("the update check stopped")
 }
 
-// Check asks the feed once and, when there is a newer version, downloads it.
-// The status goes Checking, then one of UpToDate, Ready or Failed; a build
-// that cannot update itself goes Unsupported, returns
-// domain.ErrUpdateUnsupported, and is not a failure.
+// Check 询问发布源一次，有新版本时下载。状态依次为 Checking，再到 UpToDate、
+// Ready 或 Failed；不能自更新的构建进入 Unsupported 并返回
+// domain.ErrUpdateUnsupported，不算失败。
 //
-// A Check that arrives while another is running returns immediately with a
-// nil error: the answer the caller wants is the one on its way to the state,
-// and asking the feed twice would spend two requests to learn the same
-// thing.
+// 在另一次检查运行时到达的 Check 立即以空错误返回：调用方要的答案正在写入
+// 状态，询问两次只会浪费两个请求去得知同一件事。
 func (s *Service) Check(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -269,18 +235,15 @@ func (s *Service) Check(ctx context.Context) error {
 	}
 	if !s.updater.Enabled() {
 		s.mu.Unlock()
-		// Nothing at warn level: a development build asks nothing and gets
-		// nothing, and saying so on every launch is the noise this feature
-		// exists to keep out of the log.
+		// 不打 warn：开发构建问了也不会有结果，每次启动都记一条正是本功能
+		// 要从日志里排除的噪音。
 		s.set(domain.UpdateState{Status: domain.UpdateUnsupported})
 		return domain.ErrUpdateUnsupported
 	}
 	s.running = true
 	s.checkedAt = s.now()
-	// The new check answers the question again: a release that was ready is
-	// no longer offered while the answer is unknown. A check that decides
-	// the same version is the newest downloads nothing and is Ready again a
-	// moment later.
+	// 新一次检查重新作答：答案未知期间先前就绪的版本不再提供。若判定当前版本
+	// 已是最新，则不下载任何东西，片刻后再次 Ready。
 	s.release = nil
 	s.mu.Unlock()
 	defer func() {
@@ -305,12 +268,9 @@ func (s *Service) Check(ctx context.Context) error {
 		return s.fail(err)
 	}
 	asset, _ := release.Archive()
-	// The release names an archive this application could install, and the
-	// updater is what installs it: the signature is checked there, against
-	// the key compiled into the build. What is settled here, before the user
-	// is asked to restart, is that the archive can be had at the size the
-	// manifest promised — so that a release that is not really there is a
-	// failure now rather than a restart into nothing.
+	// release 列出了本应用可安装的归档，安装由 updater 完成（在那里按编译进
+	// 构建的公钥校验签名）。此处、在请用户重启之前要确定的是：归档能以清单承诺
+	// 的大小取得——使「并不存在的 release」现在就成为失败，而不是重启进空白。
 	if err := s.verify(ctx, release, asset); err != nil {
 		return s.fail(err)
 	}
@@ -318,8 +278,8 @@ func (s *Service) Check(ctx context.Context) error {
 	s.release = release
 	s.mu.Unlock()
 	s.discard()
-	// The updater fetches, checks the signature and installs the version;
-	// this state says that it may be asked to, and what it will install.
+	// updater 负责取包、校验签名并安装；该状态表明它可以被请求这样做，以及将
+	// 安装哪个版本。
 	s.set(domain.UpdateState{
 		Status:  domain.UpdateReady,
 		Version: release.Version,
@@ -329,14 +289,11 @@ func (s *Service) Check(ctx context.Context) error {
 	return nil
 }
 
-// verify reads the release's archive once, without keeping it, so that a
-// release that cannot be downloaded or is not the size it said is a failure
-// now rather than after the user restarts. It is bounded by MaxArchiveSize:
-// one byte more than the manifest promised is enough to know the answer, and
-// the memory it holds is a buffer, not the archive.
+// verify 完整读一遍 release 的归档但不保留它，使无法下载或大小不符的 release
+// 现在、而非用户重启后成为失败。读取受 MaxArchiveSize 约束：比清单承诺多一个
+// 字节就足够判断，占用的是缓冲区而非整个归档。
 //
-// It is the one place this package touch the network, and it does so through
-// what was injected: the package itself opens nothing.
+// 它是本包唯一触网处，且通过注入实现：包自身不打开任何连接。
 func (s *Service) verify(ctx context.Context, release *Release, asset Asset) error {
 	if asset.Size <= 0 || asset.Size > MaxArchiveSize {
 		return wrapUnavailable(fmt.Sprintf("the release gives the archive %d bytes, which is not a size it can be", asset.Size), nil)
@@ -356,9 +313,8 @@ func (s *Service) verify(ctx context.Context, release *Release, asset Asset) err
 	return nil
 }
 
-// fail puts the state on Failed and returns the error that caused it, in the
-// shape the caller branches on: a release that could not be read stays a bad
-// response, and everything else is an unavailable update.
+// fail 把状态置为 Failed 并返回导致它的错误，保持调用方要分支的形态：无法
+// 读取的 release 仍是坏响应，其余都是不可用的更新。
 func (s *Service) fail(err error) error {
 	detail := detailOf(err)
 	s.set(domain.UpdateState{Status: domain.UpdateFailed, Detail: detail})
@@ -366,12 +322,9 @@ func (s *Service) fail(err error) error {
 	return err
 }
 
-// detailOf is the sentence a Failed state carries, and the one a log record
-// repeats. Every word of it comes from this function: an error the updater
-// injected may quote the URL it was asked for, and a URL or a response body
-// on the settings page — or in the log — is not something the user asked to
-// see. The cause is kept on the error for errors.Is; it is never repeated
-// here.
+// detailOf 是 Failed 状态携带、也是日志记录的那句话。它的每个词都出自本函数：
+// 注入的 updater 的错误可能引用被请求的 URL，而设置页或日志里出现 URL 或响应体
+// 都不是用户想看到的。原因保留在 error 上供 errors.Is 使用，此处绝不重复。
 func detailOf(err error) string {
 	switch {
 	case err == nil:
@@ -383,19 +336,17 @@ func detailOf(err error) string {
 	case errors.Is(err, context.DeadlineExceeded):
 		return "the feed did not answer in time"
 	case errors.Is(err, domain.ErrUpdateUnavailable):
-		// This package's own failures carry a reason of its own — "the
-		// release could not be downloaded" — which says what failed without
-		// saying where it was asked.
+		// 本包自身的失败带有自己的原因——如「release 无法下载」——它说明哪里
+		// 失败而不说明向哪里请求。
 		return reasonOf(err)
 	default:
 		return "the feed could not be read"
 	}
 }
 
-// reasonOf is the reason an error of this package was built with: what
-// follows the wrapped sentinel, without the cause that was appended to it for
-// errors.Is. Everything written here is "<sentinel>: <reason>[: <cause>]",
-// and the cause is the part that may carry the platform's own words.
+// reasonOf 返回本包错误构造时的原因：包装的哨兵之后、为 errors.Is 追加的 cause
+// 之前的部分。此处所有错误都写作「<sentinel>: <reason>[: <cause>]」，只有 cause
+// 可能携带平台自己的话。
 func reasonOf(err error) string {
 	text := err.Error()
 	for _, sentinel := range []error{domain.ErrUpdateUnavailable, domain.ErrProviderBadResponse} {
@@ -407,23 +358,18 @@ func reasonOf(err error) string {
 	if reason, _, ok := strings.Cut(text, ": "); ok {
 		text = reason
 	}
-	// A reason this package wrote itself is a sentence; anything that still
-	// looks like an address is not one, and is replaced rather than shown.
+	// 本包自己写的原因是句子；仍像地址的便不是原因，替换掉而不是显示。
 	if strings.Contains(text, "://") {
 		return "the update could not be completed"
 	}
 	return semantic(text)
 }
 
-// discard removes everything under Dir that an earlier version of this
-// application may have left there.
+// discard 删除 Dir 下早期版本可能遗留的所有内容。
 //
-// The service keeps nothing between runs — the updater downloads into its own
-// temporary directory and replaces the installation from there — so anything
-// under Dir is a leftover, and a leftover of a download is a file of an
-// update nobody is going to install. It is collected rather than kept so that
-// the directory does not grow with every version for the life of the user's
-// account; a failure to remove one is logged and not a failure of the check.
+// 服务不在两次运行之间保留东西——updater 下载到自己的临时目录并从那里替换安装
+// ——所以 Dir 下任何内容都是残留，下载残留就是没人会安装的更新文件。清理而不是
+// 保留，免得目录随每个版本增长；删除失败只记日志，不算检查失败。
 func (s *Service) discard() {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {

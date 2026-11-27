@@ -13,43 +13,28 @@ import (
 	"boku/internal/platform/httpc"
 )
 
-// Microsoft is the Microsoft Edge engine: the endpoint Edge's own translate
-// feature asks.
+// Microsoft 是微软 Edge 引擎：Edge 自带翻译功能所用的端点。
 //
-// Measured (§3.1 of the free-translate research): no key, no token, reachable without a
-// proxy from inside China, and the widest throughput of the candidates — 30
-// requests in a row without a single 429.
+// 每次只答一句，适合普通翻译而非日语读音。请求读音时返回译文与「没有读音」的
+// 提示而非失败。
 //
-// It answers one sentence per text, so it is the engine for a plain
-// translation and not for the Japanese readings. A request that asks for
-// readings is answered with the sentence and a note saying there are no
-// readings, rather than with a failure: the user gets a translation and is told
-// exactly what it does not have.
-//
-// Two things about its protocol are worth writing down here rather than in the
-// design document, because they are the code: the body is a bare JSON array of
-// strings rather than an object, and the answer is an array aligned with the
-// request. The languages are not the tool's two-letter codes either —
-// "zh-Hans" rather than "zh" — which is why the codes are translated below.
+// 其协议有两处不直观：请求体是字符串的裸 JSON 数组而非对象，答复是与请求对齐的
+// 数组；语言码也不是工具用的两字母码（中文用 "zh-Hans" 而非 "zh"），故下面要转换。
 type Microsoft struct {
 	client *httpc.Client
 	now    func() time.Time
-	// endpoint is a format string whose one verb is the target language, so
-	// that a test can point it at an httptest server.
+	// endpoint 是格式字符串，唯一的占位符是目标语言，便于测试指向 httptest 服务。
 	endpoint string
 }
 
-// microsoftEndpoint is where the engine asks. The query string is the one Edge
-// itself sends; the empty `from` is what makes the endpoint detect the source
-// language for us.
+// microsoftEndpoint 是引擎请求的地址。查询串与 Edge 自身发送的一致；空的 `from`
+// 让端点自行检测源语言。
 const microsoftEndpoint = "https://edge.microsoft.com/translate/translatetext?from=&to=%s&isEnterpriseClient=false"
 
-// NewMicrosoft returns the engine over the HTTP client.
 func NewMicrosoft(client *httpc.Client) *Microsoft {
 	return newMicrosoft(client, microsoftEndpoint)
 }
 
-// newMicrosoft returns the engine asking another address.
 func newMicrosoft(client *httpc.Client, endpoint string) *Microsoft {
 	return &Microsoft{
 		client:   client,
@@ -58,12 +43,10 @@ func newMicrosoft(client *httpc.Client, endpoint string) *Microsoft {
 	}
 }
 
-// ID returns the translator's id, which is what the settings file stores.
 func (m *Microsoft) ID() string { return contract.MicrosoftEdge }
 
-// Descriptor says what the engine is called and that it needs no key. The
-// endpoint is the address the text goes to, which the settings window shows
-// because §12 of the product design requires the user to be able to see it.
+// Descriptor 说明引擎名称与无需 key；Endpoint 为文本去向，设置窗口按产品设计
+// §12 要求展示给用户。
 func (m *Microsoft) Descriptor() domain.TranslatorDescriptor {
 	return domain.TranslatorDescriptor{
 		ID:                   contract.MicrosoftEdge,
@@ -75,10 +58,8 @@ func (m *Microsoft) Descriptor() domain.TranslatorDescriptor {
 	}
 }
 
-// Translate asks the endpoint.
-//
-// No credential is read, and none is required: a free engine that asked the
-// user for a key would be the "先填 Key" wall this whole tier exists to remove.
+// Translate 不读取凭据，也不要求凭据：免费引擎若向用户索要 key，就成了整个免费层
+// 旨在消除的「先填 Key」门槛。
 func (m *Microsoft) Translate(ctx context.Context, _ domain.Credentials, req domain.TranslationRequest) (domain.TranslationResult, error) {
 	if err := req.Validate(); err != nil {
 		return domain.TranslationResult{}, err
@@ -110,13 +91,11 @@ func (m *Microsoft) Translate(ctx context.Context, _ domain.Credentials, req dom
 	return answer, nil
 }
 
-// readMicrosoftAnswer pulls the translation out of the endpoint's answer.
+// readMicrosoftAnswer 从端点答复中取出译文。
 //
-// The shape is an array aligned with the request — one object per string that
-// was sent — and each object carries the detected language and a translations
-// array. A response that is not that shape is a bad response rather than an
-// empty translation: the caller must never draw a blank as if it were an
-// answer.
+// 形状是与请求对齐的数组（每个发送的字符串对应一个对象），每个对象带检测语言与
+// translations 数组。不符合此形状的答复视为坏响应而非空译文：调用方绝不能把空白
+// 当作答案画出。
 func readMicrosoftAnswer(result domain.FetchResult) (string, error) {
 	snippet := func() string { return kit.RedactText(domain.Snippet(result.Payload)) }
 	var parsed []struct {
@@ -157,12 +136,10 @@ func readMicrosoftAnswer(result domain.FetchResult) (string, error) {
 	return translated, nil
 }
 
-// microsoftLanguage is the tool's language code as this endpoint spells it.
+// microsoftLanguage 把工具的语言码转成该端点的写法。
 //
-// Chinese is the one that matters: the tool says "zh", Edge says "zh-Hans" for
-// the simplified script and "zh-Hant" for the traditional one, and asking for
-// "zh" is not one of its codes. Everything else passes through, which is what
-// §3.1 measured for "en", "ja", "ko" and "ru".
+// 关键的是中文：工具用 "zh"，Edge 用 "zh-Hans"（简体）与 "zh-Hant"（繁体），
+// "zh" 不是它的合法码。其余语言原样透传。
 func microsoftLanguage(language domain.Language) string {
 	switch language {
 	case domain.LangChinese:
@@ -172,9 +149,8 @@ func microsoftLanguage(language domain.Language) string {
 	}
 }
 
-// firstNote is the first of the notes with anything in it: a result carries one
-// line about what it is missing, and a shortened text is the more important
-// thing to say about it.
+// firstNote 返回第一条非空提示：结果只携带一条缺失说明，而文本被截断是更应优先
+// 告知的。
 func firstNote(notes ...string) string {
 	for _, note := range notes {
 		if strings.TrimSpace(note) != "" {

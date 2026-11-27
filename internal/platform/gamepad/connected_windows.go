@@ -113,9 +113,8 @@ type listed struct {
 	wired  bool
 }
 
-// Connected lists HID gamepads and joysticks. A DualSense or a Switch Pro
-// contributes its charge byte only over Bluetooth. An Xbox-protocol pad
-// contributes an XInput charge only when the report is not the wired one.
+// Connected 列出 HID 游戏手柄与摇杆。DualSense 或 Switch Pro 仅在蓝牙下
+// 才提供电量字节；Xbox 协议手柄仅当报告不是有线报告时才提供 XInput 电量。
 func Connected() []Pad {
 	found := listPads()
 	if found == nil {
@@ -208,7 +207,7 @@ func interfacePath(devs uintptr, data *spDeviceInterfaceData) (string, uint32) {
 		return "", 0
 	}
 	buf := make([]byte, need)
-	// On 64-bit Windows cbSize is 8, but the path begins at byte 4.
+	// 64 位 Windows 上 cbSize 为 8，但路径从第 4 字节开始。
 	cbSize := uint32(8)
 	if unsafe.Sizeof(uintptr(0)) == 4 {
 		cbSize = 6
@@ -296,8 +295,8 @@ func inspect(path string, wired bool) (listed, bool) {
 	return item, true
 }
 
-// assignXInput pairs each XInput interface with a connected user, in index
-// order. A wired report leaves that pad without a charge.
+// assignXInput 按索引顺序把每个 XInput 接口配给一个已连接用户。
+// 有线报告对应的手柄不提供电量。
 func assignXInput(found []listed) {
 	need := false
 	for i := range found {

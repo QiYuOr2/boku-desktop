@@ -19,8 +19,8 @@ import (
 	"boku/internal/platform/httpc"
 )
 
-// covers keeps one image per Steam app next to the session database.
-// The flyout reads the file; it does not ask the network itself.
+// covers 在会话数据库旁为每个 Steam app 保留一张图片。
+// 浮窗读文件，不自己发网络请求。
 type covers struct {
 	dir    string
 	client *httpc.Client
@@ -45,8 +45,8 @@ func newCovers(dir string) *covers {
 	return c
 }
 
-// Want starts a download for each app that does not already have a file.
-// done runs, off the caller, after a new file is written.
+// Want 为每个尚无文件的 app 启动下载。
+// done 在写入新文件后由调用方之外执行。
 func (c *covers) Want(ids []string, done func()) {
 	if c == nil || c.fetch == nil {
 		return
@@ -126,8 +126,7 @@ func (c *covers) titlePath(appID string) string {
 	return filepath.Join(c.dir, appID+".title")
 }
 
-// widePath remembers that the store had no portrait, so a saved header is not
-// fetched again on every open.
+// widePath 记录商店没有竖版图，避免保存的横版头图每次打开都被重复拉取。
 func (c *covers) widePath(appID string) string {
 	return filepath.Join(c.dir, appID+".wide")
 }
@@ -210,14 +209,14 @@ func fetchSteamCover(ctx context.Context, client *httpc.Client, appID string) ([
 	return image, name, nil
 }
 
-// libraryItemsURL asks Steam which portrait file this game actually has.
-// Newer games keep it behind a hash, so a fixed library_600x900.jpg 404s.
+// libraryItemsURL 询问 Steam 该游戏实际拥有的竖版文件。
+// 较新的游戏用哈希存放，固定的 library_600x900.jpg 会 404。
 func libraryItemsURL(appID string) string {
 	query := `{"ids":[{"appid":` + appID + `}],"context":{"language":"schinese","country_code":"CN"},"data_request":{"include_assets":true}}`
 	return "https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json=" + url.QueryEscape(query)
 }
 
-// libraryCapsuleURL builds the 2:3 library image named by a GetItems response.
+// libraryCapsuleURL 根据 GetItems 响应构造 2:3 的库图片地址。
 func libraryCapsuleURL(payload []byte) (string, error) {
 	var body struct {
 		Response struct {
@@ -246,8 +245,8 @@ func libraryCapsuleURL(payload []byte) (string, error) {
 	return raw, nil
 }
 
-// portraitURLs tries a 2:3 library image before the landscape header.
-// The header is only the fallback: a portrait frame crops its sides.
+// portraitURLs 先尝试 2:3 的库图片，再退回头图。
+// 头图只是兜底：竖版画框会裁掉它的两侧。
 func portraitURLs(appID, header string) []string {
 	var urls []string
 	if dir := steamAssetDir(header); dir != "" {
@@ -297,9 +296,8 @@ func uniqueURLs(urls []string) []string {
 	return out
 }
 
-// storeListing reads the simplified-Chinese name and the header image.
-// Newer games do not have a picture at the old fixed address; the store
-// response names the one that exists. The name may be empty.
+// storeListing 读取简体中文名称和头图。
+// 较新的游戏在旧固定地址没有图片，商店响应会给出实际存在的那个；名称可能为空。
 func storeListing(appID string, payload []byte) (name, header string, err error) {
 	var body map[string]struct {
 		Success bool `json:"success"`

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// exists reports whether a path is there, for the assertions below.
+// exists 判断路径是否存在，供下方断言使用。
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -22,15 +22,14 @@ func writeLogFile(t *testing.T, dir, name string) {
 	}
 }
 
-// The window is today and the 29 days before it: 2026-09-16 is the oldest day
-// that stays when today is 2026-10-15, and one day past it is deleted.
+// 窗口为今天加之前 29 天：今天为 2026-10-15 时，2026-09-16 是最早保留的一天，再早一天即删除。
 func TestPruneKeepsTheWindowAndDeletesTheRest(t *testing.T) {
 	dir := t.TempDir()
 	now := localDay(2026, time.October, 15, 12)
-	writeLogFile(t, dir, "boku-2026-10-15.log") // today
-	writeLogFile(t, dir, "boku-2026-09-16.log") // the last day kept
-	writeLogFile(t, dir, "boku-2026-09-15.log") // a day outside the window
-	writeLogFile(t, dir, "boku-2026-08-01.log") // far outside it
+	writeLogFile(t, dir, "boku-2026-10-15.log") // 今天
+	writeLogFile(t, dir, "boku-2026-09-16.log") // 保留的最后一天
+	writeLogFile(t, dir, "boku-2026-09-15.log") // 窗口之外的一天
+	writeLogFile(t, dir, "boku-2026-08-01.log") // 远在窗口之外
 
 	if err := prune(dir, RetentionDays, now); err != nil {
 		t.Fatalf("prune: %v", err)
@@ -47,9 +46,8 @@ func TestPruneKeepsTheWindowAndDeletesTheRest(t *testing.T) {
 	}
 }
 
-// Only the files this package names are candidates: a log directory shared
-// with something else, or holding a file from a build whose naming changed,
-// keeps everything that is not ours.
+// 只有本包命名的文件才是候选：与其它东西共享的日志目录、或来自命名已变的旧构建的文件，
+// 都原样保留。
 func TestPruneLeavesWhatItDidNotWrite(t *testing.T) {
 	dir := t.TempDir()
 	now := localDay(2026, time.October, 15, 12)
@@ -59,8 +57,7 @@ func TestPruneLeavesWhatItDidNotWrite(t *testing.T) {
 		writeLogFile(t, dir, name)
 	}
 	writeLogFile(t, dir, ours)
-	// A directory that happens to be named like one of ours is not a file to
-	// delete either.
+	// 恰好与我们某个文件同名的目录也不是待删除的文件。
 	directory := filepath.Join(dir, "boku-2020-01-01.log")
 	if err := os.Mkdir(directory, dirMode); err != nil {
 		t.Fatalf("create the directory: %v", err)
@@ -79,13 +76,12 @@ func TestPruneLeavesWhatItDidNotWrite(t *testing.T) {
 	}
 }
 
-// A caller that names no retention gets the one the application keeps, not an
-// empty window: "keep nothing" is never what zero means here.
+// 未指定保留天数的调用方得到应用默认值，而非空窗口：这里的零绝不表示「什么都不留」。
 func TestPruneWithoutARetentionKeepsTheDefault(t *testing.T) {
 	dir := t.TempDir()
 	now := localDay(2026, time.October, 15, 12)
-	writeLogFile(t, dir, "boku-2026-09-16.log") // 29 days back
-	writeLogFile(t, dir, "boku-2026-09-15.log") // 30 days back
+	writeLogFile(t, dir, "boku-2026-09-16.log") // 29 天前
+	writeLogFile(t, dir, "boku-2026-09-15.log") // 30 天前
 
 	if err := prune(dir, 0, now); err != nil {
 		t.Fatalf("prune: %v", err)
@@ -105,8 +101,7 @@ func TestPruneReportsADirectoryItCannotRead(t *testing.T) {
 	}
 }
 
-// The window is applied when the log opens, so a directory left alone for two
-// months is brought back to a month of files at the next launch.
+// 窗口在打开日志时套用，因此闲置两个月的目录会在下次启动时被收回到一个月内。
 func TestOpenPrunesTheDaysOutsideTheWindow(t *testing.T) {
 	dir := t.TempDir()
 	old := filepath.Join(dir, "boku-2026-08-01.log")
@@ -152,7 +147,7 @@ func TestFileNameAndDayFromFileName(t *testing.T) {
 	}
 }
 
-// startOfDay is what makes two timestamps on one date compare as the same day.
+// startOfDay 使同一日期的两个时间戳比较为同一天。
 func TestStartOfDay(t *testing.T) {
 	moment := time.Date(2026, time.October, 15, 23, 59, 59, 999, time.Local)
 	start := startOfDay(moment)
@@ -164,8 +159,7 @@ func TestStartOfDay(t *testing.T) {
 	}
 }
 
-// A missing file is not a failure: two runs of prune must not turn into an
-// error the second time around.
+// 文件不存在不算失败：两次 prune 不能在第二轮变成错误。
 func TestPruneToleratesAFileThatIsAlreadyGone(t *testing.T) {
 	dir := t.TempDir()
 	now := localDay(2026, time.October, 15, 12)

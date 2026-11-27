@@ -2,9 +2,6 @@
 
 package autostart
 
-// New returns this desktop's login start. There is none: the desktops that
-// are not Windows or macOS would each have their own (an XDG autostart entry,
-// a session manager's list), and the application does not ship to them. The
-// settings page then says the switch is not available rather than drawing one
-// that could not do anything.
+// New 返回本桌面的登录启动：没有。非 Windows/macOS 的桌面各有自己的机制（XDG 启动项、会话管理器列表），
+// 应用不发布到这些平台。设置页因此说明开关不可用，而不是绘制一个什么也做不了的开关。
 func New() Manager { return Unsupported{} }

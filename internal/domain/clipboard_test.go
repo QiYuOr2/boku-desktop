@@ -4,8 +4,7 @@ import (
 	"testing"
 )
 
-// A kind is written to the history and read back from it, so Valid is what
-// keeps a row from claiming a shape the application cannot draw.
+// 类型会写入历史并再读出，因此 Valid 防止某行声称应用无法绘制的形状。
 func TestClipKindValid(t *testing.T) {
 	for _, kind := range []ClipKind{
 		ClipKindText, ClipKindURL, ClipKindJSON,
@@ -22,9 +21,8 @@ func TestClipKindValid(t *testing.T) {
 	}
 }
 
-// A reading is compared with the one before it to decide whether the user
-// copied something new. Two screenshots of the same size are two pictures: the
-// size alone said they were one, so the second was never recorded.
+// 是否为新内容靠与上一次读取比较判断。两张同尺寸截图是两张不同的图，
+// 只比尺寸会把它们当成同一张，导致第二张不被记录。
 func TestABitmapIsComparedByItsBytesNotItsSize(t *testing.T) {
 	screenshot := ClipContent{
 		Kind: ClipKindImage, HasImage: true, ImageBytes: 4096, ImageRef: "sha256:one",
@@ -42,8 +40,7 @@ func TestABitmapIsComparedByItsBytesNotItsSize(t *testing.T) {
 		t.Error("the same picture read twice is not the same reading")
 	}
 
-	// A reading whose bitmap could not be read carries no hash, and falls back
-	// to the size: there is nothing better to compare it by.
+	// 位图未能读取时没有哈希，只能退回按尺寸比较，因为没有更好的依据。
 	unread := ClipContent{Kind: ClipKindImage, HasImage: true, ImageBytes: 4096}
 	if screenshot.Unchanged(unread) {
 		t.Error("a picture with a hash is the same as one without")

@@ -11,18 +11,15 @@ import (
 )
 
 const (
-	// AppKit's NSWindowStyleMaskTitled. AppKit keeps the title bar of such a
-	// window on screen, which is what shifts a full-screen overlay down by
-	// the menu bar's height.
+	// AppKit 的 NSWindowStyleMaskTitled。AppKit 会保证标题栏留在屏幕内，
+	// 因此会把整屏遮罩向下挤开菜单栏的高度。
 	styleTitled = 1 << 0
-	// AppKit's NSScreenSaverWindowLevel, above the windows of the menu bar
-	// and the Dock, so that a display-sized window covers both.
+	// AppKit 的 NSScreenSaverWindowLevel，高于菜单栏和 Dock 的窗口，
+	// 使整屏窗口能覆盖两者。
 	screenSaverLevel = 1000
-	// AppKit's NSWindowAnimationBehaviorNone. An NSPanel's default behavior
-	// is the utility-window animation: the panel fades out over a fraction of
-	// a second after it closes, which is long enough for the pixel read that
-	// follows the selection to capture Boku's own mask instead of the
-	// desktop. The overlay must be gone the moment it is closed.
+	// AppKit 的 NSWindowAnimationBehaviorNone。NSPanel 默认使用工具窗口动画：
+	// 关闭后会在不到一秒内淡出，期间紧接着的选区像素读取会拍到 Boku 自己的
+	// 遮罩而非桌面。遮罩必须在关闭瞬间就消失。
 	animationBehaviorNone = 2
 )
 
@@ -37,8 +34,8 @@ var (
 	responds             objc.SEL
 )
 
-// bridge resolves AppKit and its selectors once. AppKit is already loaded by
-// MyGo in the running application; Dlopen returns the same image.
+// bridge 只解析一次 AppKit 及其 selector。运行中的应用里 MyGo 已加载 AppKit，
+// Dlopen 返回的是同一个映像。
 func bridge() {
 	if _, err := purego.Dlopen(
 		"/System/Library/Frameworks/AppKit.framework/AppKit",

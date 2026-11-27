@@ -15,11 +15,10 @@ import (
 	"boku/internal/platform/httpc"
 )
 
-// ModelsDirName is the directory under user data that holds the pinned models
-// and the unpacked runtimes. It is not part of the installer.
+// ModelsDirName 是用户数据下存放固定模型与解压后运行时的目录，
+// 不属于安装器。
 const ModelsDirName = "models/live"
 
-// Models is the set of files one listening session runs.
 type Models struct {
 	ASR    string
 	VAD    string
@@ -28,9 +27,8 @@ type Models struct {
 	MTExe  string
 }
 
-// Resolve checks that this platform's runtimes and the selected model files
-// are on disk. A custom path replaces only the model; it is not hashed and
-// the executable is never replaced.
+// Resolve 检查本平台的运行时与所选模型文件是否在磁盘上。
+// 自定义路径只替换模型：不做哈希校验，也不会替换可执行文件。
 func Resolve(root string, settings Settings) (Models, error) {
 	key, ok := runtimeKey()
 	if !ok {
@@ -78,8 +76,8 @@ var (
 	errChecksum     = errString("文件校验失败")
 )
 
-// ValidateModelFile checks a user-selected file before replacing a model.
-// A GGUF header confirms the format, not compatibility with a model backend.
+// ValidateModelFile 在替换模型前检查用户选中的文件。
+// GGUF 头只能确认格式，不保证与模型后端兼容。
 func ValidateModelFile(path string) error {
 	file, err := os.Open(path)
 	if err != nil {
@@ -111,19 +109,17 @@ func artifactNamed(name string) (Artifact, bool) {
 	return Artifact{}, false
 }
 
-// DownloadProgress is how far one download of the whole set has gotten.
-// Done counts finished files in full and the file being written by the
-// bytes already on disk. Total is the sum of the pinned sizes.
+// DownloadProgress 表示整组下载的进度。Done 把已完成文件按整份计入，
+// 正在写入的文件按已落盘字节计入。Total 是各固定大小之和。
 type DownloadProgress struct {
 	Name  string
 	Done  int64
 	Total int64
 }
 
-// DownloadAll fetches the pinned set for this process, checks each SHA256,
-// then unpacks the runtimes. Cancelling leaves the partial file so the next
-// call can continue it. A failed check deletes that partial and does not
-// rename it into place. progress may be nil.
+// DownloadAll 拉取本进程的固定集合，逐个校验 SHA256，再解压运行时。
+// 取消会保留部分文件供下次续传；校验失败则删除该部分文件、不重命名就位。
+// progress 可以为 nil。
 func DownloadAll(ctx context.Context, root string, progress func(DownloadProgress)) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -250,7 +246,6 @@ func installCUDA(ctx context.Context, root string, art Artifact, beside string, 
 	return os.WriteFile(stampPath(beside)+".cuda", []byte(art.SHA256), 0o600)
 }
 
-// fileError names the pinned file a download stopped on.
 type fileError struct {
 	name string
 	err  error
@@ -267,8 +262,8 @@ func stampMatches(path, sum string) bool {
 
 func stampPath(dir string) string { return dir + ".sha" }
 
-// fetch is the download httpc provides. Tests replace it; nothing else does.
-// report sees how many bytes dest holds, including a resumed partial.
+// fetch 是 httpc 提供的下载函数，只有测试会替换它。
+// report 拿到 dest 当前持有的字节数，包括续传的部分文件。
 var fetch = httpc.DownloadProgress
 
 func placeChecked(ctx context.Context, art Artifact, dest string, report func(int64)) error {

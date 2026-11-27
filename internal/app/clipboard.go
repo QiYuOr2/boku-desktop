@@ -45,7 +45,6 @@ func (s *State) openHistory() {
 	}
 	window.Show()
 	window.Focus()
-	// One frame for the list as it stands: the history that was already in
-	// memory is worth showing before any clipboard read answers.
+	// 先把内存里已有的历史渲染一帧，再等剪贴板读取返回。
 	window.Update(func() {})
 }

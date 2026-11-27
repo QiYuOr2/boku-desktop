@@ -1,8 +1,6 @@
-// Package domain is the contract of the application: the entities, the
-// interfaces the layers around it implement, and the errors they return.
+// Package domain 是应用的契约：实体、外围各层实现的接口，以及它们返回的错误。
 //
-// It depends on nothing — no user interface, no SQLite, no HTTP, no MyGo —
-// which is what keeps the other layers replaceable and their tests offline.
-// Vendor names appear nowhere here: a provider's shape is turned into these
-// entities by an adapter.
+// 它不依赖任何东西——没有界面、没有 SQLite、没有 HTTP、没有 MyGo——
+// 这正是其它各层可替换、测试可离线的原因。这里不出现任何厂商名：
+// provider 的形状由 adapter 转换成这些实体。
 package domain

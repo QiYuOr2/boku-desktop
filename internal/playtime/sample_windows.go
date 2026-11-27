@@ -11,11 +11,10 @@ import (
 	"boku/internal/platform/proc"
 )
 
-// steamSampler names the Steam games behind a process list.
+// steamSampler 从进程列表识别 Steam 游戏。
 //
-// A process is asked for its path, and for SteamAppId, only the first time
-// it is seen. Exit times come from a wait on that process, not from the
-// following poll.
+// 进程的路径和 SteamAppId 只在该进程首次出现时读取。退出时间来自对该进程的
+// 等待，而不是下一次轮询。
 type steamSampler struct {
 	mu       sync.Mutex
 	root     string

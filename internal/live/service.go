@@ -15,17 +15,16 @@ import (
 	"boku/internal/platform/screenrecording"
 )
 
-// The UI chooses how many complete pairs fit; this bounds the session buffer.
+// UI 决定一屏能放下多少完整配对，这里界定会话缓冲的上限。
 const captionBufferLimit = 32
 
-// Caption is one finished sentence. The open partial is Draft, not a Caption.
+// Caption 是一个已完结的句子。正在识别中的 partial 是 Draft，不是 Caption。
 type Caption struct {
 	Source string
 	Target string
 	id     uint64
 }
 
-// View is the float window's copy of a listening session.
 type View struct {
 	Settings       Settings
 	Listening      bool
@@ -46,7 +45,6 @@ type View struct {
 	Entries        []Entry
 }
 
-// Service owns the models, the terminology file and one listening session.
 type Service struct {
 	modelsDir string
 	section   *Section
@@ -68,8 +66,7 @@ type Service struct {
 	readySettings  Settings
 }
 
-// Open reads the terminology file. A file that cannot be parsed stays on disk
-// and is an empty table until the user replaces it.
+// Open 读取术语文件。无法解析的文件仍保留在磁盘上，在用户替换它之前表现为空表。
 func Open(modelsDir, glossaryPath string, section *Section, store StoreSettings, clock domain.Clock) (*Service, error) {
 	if section == nil {
 		section = NewSection()
@@ -87,8 +84,7 @@ func Open(modelsDir, glossaryPath string, section *Section, store StoreSettings,
 	}, nil
 }
 
-// SetChanged is told when the window should draw again. It is safe to call
-// from the pipeline's goroutines; the host posts the repaint.
+// SetChanged 用于告知窗口需要重绘。可从管线的 goroutine 调用，重绘由宿主投递。
 func (s *Service) SetChanged(fn func()) {
 	if s == nil {
 		return
@@ -98,7 +94,6 @@ func (s *Service) SetChanged(fn func()) {
 	s.mu.Unlock()
 }
 
-// Snapshot is the window's read of the session.
 func (s *Service) Snapshot() View {
 	if s == nil {
 		return View{}
@@ -131,8 +126,8 @@ func (s *Service) notify() {
 	}
 }
 
-// Toggle starts listening, or stops it. It returns without waiting for a
-// model to load; the caller is the shortcut goroutine, not the main thread.
+// Toggle 开始或停止监听。它不等待模型加载完成就返回；调用方是快捷键 goroutine，
+// 不是主线程。
 func (s *Service) Toggle() {
 	if s == nil {
 		return
@@ -200,9 +195,8 @@ func (s *Service) finish() {
 	s.notify()
 }
 
-// Stop ends the session and waits until both processes have exited. Quit uses
-// the same path. The wait is bounded so a process that ignores the kill cannot
-// hold the application open.
+// Stop 结束会话并等待两个进程都退出。Quit 走同一条路径。等待有上限，避免忽略
+// 终止信号的进程一直拖着应用。
 func (s *Service) Stop() {
 	if s == nil {
 		return
@@ -222,7 +216,6 @@ func (s *Service) Stop() {
 	}
 }
 
-// Close cancels a download and stops listening.
 func (s *Service) Close() {
 	if s == nil {
 		return
@@ -325,7 +318,7 @@ func (s *Service) entries() []Entry {
 	return s.glossary.Entries()
 }
 
-// Download fetches the pinned set. It is cancelled by CancelDownload and by quit.
+// Download 拉取固定的模型集合。由 CancelDownload 和退出流程取消。
 func (s *Service) Download() {
 	if s == nil {
 		return
@@ -359,8 +352,7 @@ func (s *Service) Download() {
 			s.view.DownloadDone = p.Done
 			s.view.DownloadTotal = p.Total
 			s.mu.Unlock()
-			// Refresh redraws the whole window. A report every megabyte
-			// would repaint for the entire multi-gigabyte fetch.
+			// 刷新会重绘整个窗口；每兆字节汇报一次就会让多吉字节的下载全程重绘。
 			now := time.Now()
 			if !noted.IsZero() && now.Sub(noted) < 200*time.Millisecond && (p.Total <= 0 || p.Done < p.Total) {
 				return
@@ -382,7 +374,7 @@ func (s *Service) Download() {
 	}()
 }
 
-// CancelDownload stops the fetch and waits for it to leave the partial file.
+// CancelDownload 停止拉取并等待它释放临时文件。
 func (s *Service) CancelDownload() {
 	if s == nil {
 		return

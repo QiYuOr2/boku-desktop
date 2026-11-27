@@ -6,9 +6,7 @@ import (
 	"log/slog"
 )
 
-// RefreshPanelAsync fetches one panel away from the main thread: the panel
-// whose own refresh action was pressed, and the panel whose block is showing
-// a failure.
+// RefreshPanelAsync 在主线程之外拉取单个面板。
 func (s *State) RefreshPanelAsync(panelID string, force bool) {
 	panels := s.panelService
 	host := s.host
@@ -17,10 +15,7 @@ func (s *State) RefreshPanelAsync(panelID string, force bool) {
 	}
 	go func() {
 		ctx := context.Background()
-		// What a refresh found, and what it failed with, is written down
-		// here: a card can only say a little about a wrong key, a timeout or
-		// a service that answered something else, and it is gone when the
-		// window closes. The log keeps it.
+		// 卡片对错误原因只能简短提示，且窗口关闭后即丢失，因此把结果与失败写进日志。
 		var (
 			snapshot domain.Snapshot
 			asked    = true
@@ -39,8 +34,7 @@ func (s *State) RefreshPanelAsync(panelID string, force bool) {
 		}
 		host.Refresh()
 	}()
-	// The frame the request needs while it is in flight, rather than only the
-	// one its answer lands in: the mark by the title turns for as long as a
-	// fetch runs, and nothing else would ask for the frames that turn it.
+	// 请求进行中就必须持续申请刷新帧：标题旁的标记要在整个拉取期间转动，
+	// 否则没有其它东西会驱动它。
 	host.Refresh()
 }

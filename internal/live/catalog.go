@@ -17,8 +17,8 @@ const (
 	vadFile        = "firered-vad.gguf"
 )
 
-// Artifact is one pinned download. The bytes and hash are the files checked
-// on 2026-11-02. They are not "latest".
+// Artifact 是一个固定版本的下载项；字节数与哈希对应已核验的固定文件，
+// 不是"最新版"。
 type Artifact struct {
 	Name   string
 	URL    string
@@ -34,8 +34,8 @@ const (
 	kindCUDA  = "cuda"
 )
 
-// PlatformArtifacts is the set the current process needs. A universal Mac
-// build still picks the slice for GOARCH, not for the installer.
+// PlatformArtifacts 返回当前进程需要的下载集合。Mac 通用包也按 GOARCH
+// 选择切片，而不是按安装器。
 func PlatformArtifacts() ([]Artifact, error) {
 	common := []Artifact{
 		{Name: recognizerFile, URL: "https://huggingface.co/cstr/parakeet-tdt-0.6b-ja-GGUF/resolve/d9e3ba65a6579796389ea89e5939509ed257f972/" + recognizerFile, Size: 673554880, SHA256: "5a61e6c7d956c3c72a76fafcd798cac0c9ea66d0e29b3910cd04865a1e42cc17", Kind: kindModel},
@@ -68,8 +68,6 @@ func pinned(name, url string, size int64, sum, kind string) Artifact {
 	return Artifact{Name: name, URL: url, Size: size, SHA256: sum, Kind: kind}
 }
 
-// Title is the short name shown next to a download: what the file is for,
-// not the archive it arrives in.
 func (a Artifact) Title() string {
 	switch a.Name {
 	case recognizerFile:
@@ -91,8 +89,6 @@ func (a Artifact) Title() string {
 	}
 }
 
-// FormatSize writes a byte count the way a download list reads it.
-// 1024-based, one decimal, and the trailing ".0" is dropped.
 func FormatSize(n int64) string {
 	const (
 		kb = 1024
@@ -137,8 +133,7 @@ func exeName(name string) string {
 	return name
 }
 
-// RecognizerArgs is the fixed CrispASR invocation. It does not ask the
-// process to capture, translate, or download a model.
+// RecognizerArgs 是固定的 CrispASR 启动参数：不要求它采集、翻译或下载模型。
 func RecognizerArgs(model, vad string) []string {
 	return []string{
 		"--stream", "--stream-json", "--stream-realtime",
@@ -154,8 +149,7 @@ func RecognizerArgs(model, vad string) []string {
 	}
 }
 
-// TranslatorArgs is the fixed llama-server invocation. The port is chosen
-// here rather than assumed to be 8080.
+// TranslatorArgs 是固定的 llama-server 启动参数；端口由调用方指定，不假定为 8080。
 func TranslatorArgs(port int, model string) []string {
 	return []string{
 		"--host", "127.0.0.1",

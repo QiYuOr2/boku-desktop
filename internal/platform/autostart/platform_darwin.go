@@ -2,11 +2,8 @@
 
 package autostart
 
-// New returns this desktop's login start. It is the one place main asks
-// which mechanism the platform has, and the answer is a value rather than a
-// behaviour switch in the assembly.
+// New 返回本桌面的登录启动。这是 main 唯一询问平台使用哪种机制的地方，返回的是值而非装配中的行为分支。
 //
-// It is the application's own login item, not a launch agent: only the login
-// item appears in System Settings > General > Login Items & Extensions, which
-// is where a user looks for what starts at login.
+// 它是应用自己的登录项而非 launch agent：只有登录项会出现在"系统设置 > 通用 > 登录项与扩展"，
+// 用户正是在那里查找开机启动项。
 func New() Manager { return NewSMAppService() }

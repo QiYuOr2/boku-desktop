@@ -8,12 +8,10 @@ import (
 	"path/filepath"
 )
 
-// BinaryPath is the program a login start would run.
+// BinaryPath 返回登录启动会运行的程序。
 //
-// This desktop has no login start Boku can register, so nothing ever runs at
-// login — but the answer is still the running program, because it is the one
-// thing the section can say about where the application is. The package needs
-// it on every platform so that the settings code has one shape.
+// 该桌面没有 Boku 能注册的登录启动，登录时不会运行任何东西——但返回值仍是运行中的程序，
+// 因为这是该 section 唯一能说的"应用在哪"。各平台都需要它，以便设置代码保持同一形状。
 func BinaryPath() (string, error) {
 	exe, err := os.Executable()
 	if err != nil {

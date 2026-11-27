@@ -27,7 +27,6 @@ func sampleRow(uid int64, live bool, at time.Time) domain.FollowedUpdate {
 	}
 }
 
-// What was written is what is read back, field for field.
 func TestCacheRoundTripsTheLastRow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bilibili_followed.json")
 	cache := NewCache(path)
@@ -52,8 +51,7 @@ func TestCacheRoundTripsTheLastRow(t *testing.T) {
 	}
 }
 
-// A row for a creator who is no longer configured is not returned, even when
-// the file still holds it.
+// 不再关注的 UP 即使文件里还有记录也不返回。
 func TestCacheSkipsCreatorsThatAreNotFollowed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bilibili_followed.json")
 	cache := NewCache(path)
@@ -67,7 +65,7 @@ func TestCacheSkipsCreatorsThatAreNotFollowed(t *testing.T) {
 	}
 }
 
-// Removing a creator drops their row from the file and leaves the rest alone.
+// 移除 UP 时删除其记录，其余不动。
 func TestCacheForgetDropsRemovedCreators(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bilibili_followed.json")
 	cache := NewCache(path)
@@ -87,8 +85,7 @@ func TestCacheForgetDropsRemovedCreators(t *testing.T) {
 	}
 }
 
-// Removing the last followed creator removes the file: an empty record is not
-// worth keeping, and nothing should be left behind.
+// 移除最后一个 UP 后删除文件，不保留空记录。
 func TestCacheForgetRemovesTheFileWhenNothingIsLeft(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bilibili_followed.json")
 	cache := NewCache(path)
@@ -104,8 +101,7 @@ func TestCacheForgetRemovesTheFileWhenNothingIsLeft(t *testing.T) {
 	}
 }
 
-// A missing or unreadable file is a cache miss, never an error: the next
-// refresh replaces it.
+// 文件缺失或无法读取都算缓存未命中，绝不报错。
 func TestCacheMissIsNotAnError(t *testing.T) {
 	missing := NewCache(filepath.Join(t.TempDir(), "absent.json"))
 	if rows, _, ok := missing.Load([]int64{1}); ok || len(rows) != 0 {
@@ -123,7 +119,6 @@ func TestCacheMissIsNotAnError(t *testing.T) {
 	if rows, _, ok := cache.Load([]int64{1}); ok || len(rows) != 0 {
 		t.Errorf("a broken file answered with rows")
 	}
-	// Nothing readable means nothing worth preserving: the file is replaced.
 	if err := cache.Forget(nil); err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +127,7 @@ func TestCacheMissIsNotAnError(t *testing.T) {
 	}
 }
 
-// A file written by an older shape is not trusted.
+// 版本号不符的文件不接受。
 func TestCacheRejectsAnUnknownVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bilibili_followed.json")
 	body := `{"version":99,"fetchedAt":"2024-01-01T00:00:00Z","creators":[{"creatorId":1,"creatorName":"UP","summary":"s"}]}`
@@ -144,7 +139,7 @@ func TestCacheRejectsAnUnknownVersion(t *testing.T) {
 	}
 }
 
-// A row without the fields that make it a row is dropped rather than shown.
+// 缺少必要字段的记录直接丢弃，不展示。
 func TestCacheSkipsIncompleteRows(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bilibili_followed.json")
 	body := `{"version":1,"fetchedAt":"2024-01-01T00:00:00Z","creators":[
@@ -165,7 +160,6 @@ func TestCacheSkipsIncompleteRows(t *testing.T) {
 	}
 }
 
-// A cold start shows the creators from the record, before any network answer.
 func TestServiceRestoresFromTheRecord(t *testing.T) {
 	f := newFeedServer(t)
 	_ = f
@@ -189,7 +183,6 @@ func TestServiceRestoresFromTheRecord(t *testing.T) {
 	}
 }
 
-// A refresh writes the record, so the next start has it.
 func TestRefreshWritesTheRecord(t *testing.T) {
 	f := newFeedServer(t)
 	f.feeds = map[string]string{"1": feedJSON(itemJSON("1", "DYNAMIC_TYPE_AV", 1, "UP", "", 1700000000, "", "BV1", "新视频"))}
@@ -214,8 +207,7 @@ func TestRefreshWritesTheRecord(t *testing.T) {
 	}
 }
 
-// Removing a creator from the settings removes their row from the screen and
-// from the record on disk.
+// 从设置中移除 UP 会同时清掉屏幕上的行和磁盘上的记录。
 func TestRemovingACreatorClearsTheirRecord(t *testing.T) {
 	newFeedServer(t)
 	path := filepath.Join(t.TempDir(), "bilibili_followed.json")
@@ -242,7 +234,6 @@ func TestRemovingACreatorClearsTheirRecord(t *testing.T) {
 	}
 }
 
-// Removing every creator leaves no file behind.
 func TestRemovingTheLastCreatorDeletesTheRecord(t *testing.T) {
 	newFeedServer(t)
 	path := filepath.Join(t.TempDir(), "bilibili_followed.json")
@@ -264,7 +255,6 @@ func TestRemovingTheLastCreatorDeletesTheRecord(t *testing.T) {
 	}
 }
 
-// A cache miss at start is not a failure: the service runs without one.
 func TestNewWithCacheToleratesAMissingRecord(t *testing.T) {
 	newFeedServer(t)
 	path := filepath.Join(t.TempDir(), "absent.json")
@@ -279,7 +269,6 @@ func TestNewWithCacheToleratesAMissingRecord(t *testing.T) {
 	}
 }
 
-// One row per creator is written, even when a refresh produced two.
 func TestCacheSaveKeepsOneRowPerCreator(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bilibili_followed.json")
 	cache := NewCache(path)

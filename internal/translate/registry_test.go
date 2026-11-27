@@ -9,8 +9,7 @@ import (
 	"boku/internal/domain"
 )
 
-// A translator with an id and a working descriptor stands alone: there is no
-// adapter to register with it, unlike a provider.
+// 一个带 id 和可用描述符的翻译器可以单独注册：它不像 provider 那样需要配对的 adapter。
 type registryTranslator struct {
 	id         string
 	descriptor domain.TranslatorDescriptor
@@ -65,8 +64,7 @@ func TestRegisterAndLookUp(t *testing.T) {
 	if _, err := registry.Translator("nobody"); !errors.Is(err, domain.ErrProviderNotFound) {
 		t.Errorf("an unknown id = %v, want ErrProviderNotFound", err)
 	}
-	// The empty id names no translator either: a registration that is wrong
-	// must not become a lookup that is lucky.
+	// 空 id 也不指向任何翻译器：错误的注册不能变成一次侥幸的查找。
 	if _, err := registry.Translator(""); !errors.Is(err, domain.ErrProviderNotFound) {
 		t.Errorf("the empty id = %v, want ErrProviderNotFound", err)
 	}
@@ -77,8 +75,7 @@ func TestRegisterRefusesWhatIsWrong(t *testing.T) {
 	if err := registry.Register(nil); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("Register(nil) = %v", err)
 	}
-	// A descriptor nobody can configure is a startup error, not something
-	// to discover when the shortcut is pressed.
+	// 无人可配置的描述符是启动错误，而不是等按下快捷键时才发现。
 	broken := &registryTranslator{id: "broken", descriptor: domain.TranslatorDescriptor{ID: "broken"}}
 	if err := registry.Register(broken); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("Register(broken) = %v, want ErrInvalidArgument", err)
@@ -88,8 +85,7 @@ func TestRegisterRefusesWhatIsWrong(t *testing.T) {
 		t.Errorf("Register(no id) = %v, want ErrInvalidArgument", err)
 	}
 
-	// Two translators answering to one id means two answers to the same
-	// question: the second is refused rather than replacing the first.
+	// 两个翻译器共用一个 id 意味着同一个问题有两个答案：第二个被拒绝，而非替换第一个。
 	if err := registry.Register(&registryTranslator{id: "custom"}); err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
@@ -101,8 +97,7 @@ func TestRegisterRefusesWhatIsWrong(t *testing.T) {
 	}
 }
 
-// A registry with nothing in it is not a failure: the tool says "go and
-// configure one", which is what the use case needs to be able to tell.
+// 空注册表不是失败：工具会说「去配置一个」，这正是用例需要能区分的情况。
 func TestEmptyRegistry(t *testing.T) {
 	registry := NewRegistry()
 	if registry.Len() != 0 {
@@ -117,8 +112,7 @@ func TestEmptyRegistry(t *testing.T) {
 }
 
 func TestFakeTranslatorIsUseful(t *testing.T) {
-	// The fake is used by other tests in this package and by the use case's
-	// tests; this keeps it honest about the interface it stands in for.
+	// 该 fake 被本包其他测试和用例测试使用，这里用它校验其接口实现保持诚实。
 	var reply domain.Translator = &registryTranslator{id: "custom"}
 	_, err := reply.Translate(context.Background(), domain.Credentials{}, domain.TranslationRequest{
 		Text:       "hello",

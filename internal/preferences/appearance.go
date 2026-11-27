@@ -1,5 +1,4 @@
-// Package preferences owns application-wide user preferences that are not a
-// feature's business data, such as the chosen appearance.
+// Package preferences 保存应用级用户偏好（如外观选择），这些不是某个功能的业务数据。
 package preferences
 
 import (
@@ -22,10 +21,9 @@ const (
 	appearanceSectionName = "appearance"
 )
 
-// ThemeKey is the stable on-disk spelling of the appearance preference.
+// ThemeKey 是外观偏好在磁盘上的稳定键名。
 const ThemeKey = appearanceThemeKey
 
-// Appearance is the settings Section for the user's display preference.
 type Appearance struct{ mode AppearanceMode }
 
 func NewAppearanceSection() *Appearance       { return &Appearance{mode: AppearanceSystem} }
@@ -72,8 +70,7 @@ type Store interface {
 	Update(ctx context.Context, section string, change func() error) error
 }
 
-// Save applies the choice for this run even when persistence fails. Update's
-// closure reapplies it after the store has decoded the latest on-disk file.
+// 即使持久化失败，本次运行也保留该选择：Update 的闭包会在存储解码最新的磁盘文件后重新应用它。
 func (a *Appearance) Save(ctx context.Context, store Store, mode AppearanceMode) error {
 	mode = mode.Normalize()
 	a.Set(mode)

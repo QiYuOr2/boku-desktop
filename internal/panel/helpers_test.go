@@ -10,14 +10,11 @@ import (
 	"boku/internal/domain"
 )
 
-// fakeTools is the settings store, in memory: the panel feature reads and
-// writes the switches about the optional panels through it.
+// fakeTools 是内存中的设置存储：面板功能通过它读写可选面板的开关。
 //
-// It is a stand-in for internal/settings rather than the real store because
-// these tests are about the panel feature, and a store that fails on demand is
-// how its error paths are reached. It behaves the way the real one does for
-// the part the feature uses: Update re-reads nothing, because nothing else
-// writes in a test.
+// 它用来代替 internal/settings 的真实存储，因为这些测试针对的是面板功能，
+// 而一个可按需失败的存储是触达其错误路径的方式；对功能用到的部分，行为与真实
+// 存储一致。
 type fakeTools struct {
 	mu      sync.Mutex
 	section *Section
@@ -45,8 +42,8 @@ func (f *fakeTools) Update(_ context.Context, _ string, change func() error) err
 	return change()
 }
 
-// memoryStore is a domain.SecretStore in memory: these tests do not depend on
-// the file store, and a panel that needs a credential is handed one directly.
+// memoryStore 是内存中的 domain.SecretStore：测试不依赖文件存储，
+// 需要凭据的面板直接拿到一份。
 type memoryStore struct {
 	mu     sync.Mutex
 	values map[string]string

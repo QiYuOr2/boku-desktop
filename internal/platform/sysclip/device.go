@@ -1,16 +1,13 @@
-// Package sysclip reads and writes the system clipboard through MyGo.
+// Package sysclip 通过 MyGo 读写系统剪贴板。
 //
-// Every MyGo clipboard call touches the platform, which owns the clipboard
-// from the main thread, and MyGo's own calls wait for that thread. This
-// package therefore runs them through a dispatch function the assembly
-// provides, so a poll running on a goroutine never blocks the event loop and
-// a closed window cannot hang the poll. A dispatch that does not answer in
-// time is dropped: there is another poll in a moment, and one reading is
-// worth less than a stuck application.
+// 每次 MyGo 剪贴板调用都会触碰平台，而剪贴板由主线程拥有，MyGo 自身的调用
+// 会等待该线程。因此本包通过装配层提供的 dispatch 函数来执行这些调用，让在
+// goroutine 上运行的轮询不会阻塞事件循环，窗口关闭时轮询也不会卡死。一次
+// dispatch 若在超时内没有答复就会被丢弃：片刻后还会有下一次轮询，一次读取
+// 抵不过一个卡住的应用。
 //
-// What it does with an answer is a pure function — formats, text, markup and
-// file paths in, a domain.ClipContent out — which is tested on its own, since
-// the platform half cannot run in a test process without a session.
+// 拿到结果后的处理是纯函数——输入格式、文本、标记与文件路径，输出
+// domain.ClipContent——它单独测试，因为平台那部分在没有会话的测试进程里跑不了。
 package sysclip
 
 import (
@@ -26,78 +23,56 @@ import (
 	"boku/internal/kit"
 )
 
-// DefaultTimeout bounds one round trip to the main thread. A clipboard read
-// that has not happened within it is one this application does not need:
-// there will be another poll, and a close should not wait on a clipboard.
+// DefaultTimeout 限制一次主线程往返的时长：超时未完成的剪贴板读取本应用
+// 不需要，片刻后还有下一次轮询，关闭窗口也不该等剪贴板。
 //
-// It is generous because one of those reads is a bitmap: converting a
-// screenshot from a Windows bitmap to PNG costs tens of milliseconds, and a
-// reading dropped for being slow is an image recorded with no bytes in it.
+// 这个值给得宽，是因为其中一种读取是位图：把 Windows 位图截图转成 PNG 要几十
+// 毫秒，一次因太慢被丢弃的读取，就是一张没有字节的图片。
 const DefaultTimeout = 2 * time.Second
 
-// pictureFresh is how long a picture this device read is handed out again
-// rather than read once more.
+// pictureFresh 是本设备读过的图片可以继续交出、而不必重新读取的时长。
 //
-// A clipboard holds one value at a time and a picture does not change while it
-// sits there, so a picture that is still offered a moment after it was read is
-// the picture that was read. The window is what bounds how long that is
-// assumed: it covers several poll intervals, so a screenshot left on the
-// clipboard is read once rather than on every poll, and it is short enough
-// that a picture the user copied in the meantime is never handed out as the
-// old one for long.
+// 剪贴板一次只存一个值，图片留在上面不会变化，所以读过后片刻仍在提供的图片
+// 就是当时读到的图片。窗口只约束这个假设持续多久：它覆盖几个轮询间隔，让留在
+// 剪贴板上的截图只读一次而非每次轮询都读；又足够短，用户在此期间新复制的图片
+// 不会被长时间当作旧图交出。
 const pictureFresh = 5 * time.Second
 
-// Dispatcher runs fn on the thread the platform requires and waits for it,
-// returning false when there is no such thread any more (the application is
-// quitting). It is what makes a poll off the main thread safe.
+// Dispatcher 在平台要求的线程上运行 fn 并等待其完成；没有该线程时（应用正在
+// 退出）返回 false。它正是让非主线程轮询安全的原因。
 type Dispatcher func(fn func()) bool
 
-// Device is the platform clipboard.
+// Device 是平台剪贴板。
 //
-// It is used by one reader at a time, which is what the poll loop is.
+// 同一时刻只有一个读取方（即轮询循环）使用它。
 type Device struct {
-	dispatch Dispatcher
-	timeout  time.Duration
-	// now stamps a reading. It is a field so that a test can pin it.
-	now func() time.Time
-	// changeCount is the platform's clipboard write counter. It is a field
-	// rather than a direct call so that the cache below can be tested
-	// without a platform, and so that everything about "has the clipboard
-	// changed" is asked in one place.
+	dispatch    Dispatcher
+	timeout     time.Duration
+	now         func() time.Time
 	changeCount func() uint32
 
-	// pictureStamp is when the picture below was read, pictureCount is the
-	// clipboard's write counter at that moment, and picture is that picture
-	// as the platform handed it over.
+	// pictureStamp 是 picture 被读取的时刻，pictureCount 是当时的剪贴板写计数，
+	// picture 是平台交出的那张图片。
 	//
-	// Together they keep the poll from re-reading a picture that is still
-	// there. Looking at a picture is the one expensive thing this device does:
-	// the platform offers a bitmap as the device independent bitmap, and MyGo
-	// hands it over as a PNG by decoding every pixel and encoding the whole
-	// image — well over a hundred milliseconds for a screen's worth of pixels,
-	// with the clipboard held shut for all of it, so that another
-	// application's copy fails outright while it runs. Polling every 700ms
-	// would pay that, and hold the clipboard, for as long as a screenshot sat
-	// on the clipboard.
+	// 三者共同避免对仍在剪贴板上的图片重复读取。查看图片是本设备唯一昂贵的工作：
+	// 平台以设备无关位图提供位图，MyGo 逐像素解码再整图编码成 PNG，一屏像素要
+	// 一百多毫秒，期间剪贴板一直锁住，别处应用的复制会直接失败。每 700ms 轮询
+	// 一次就意味着截图留在剪贴板上的整段时间都在付这个代价、并锁住剪贴板。
 	//
-	// The counter is what keeps the cache honest: the time window alone would
-	// hand out a picture that had been replaced a moment ago, because a copy
-	// does not move the clock. On Windows the counter comes from
-	// GetClipboardSequenceNumber and on macOS from NSPasteboard.changeCount;
-	// a platform with no counter reports zero and falls back to the window.
+	// 计数器让缓存保持诚实：仅靠时间窗口会把片刻前已被替换的图片继续交出，因为
+	// 复制不会拨动时钟。Windows 上计数器来自 GetClipboardSequenceNumber，macOS
+	// 上来自 NSPasteboard.changeCount；没有计数器的平台报告 0，退化为时间窗口。
 	//
-	// It is kept rather than measured because a click on a picture in the
-	// history puts it back, and this is the only moment it can be read — and
-	// because the next poll can hand it out again instead of reading it once
-	// more.
+	// 保留而非即时测量，是因为点击历史中的图片会把它放回去，而那是唯一能读到它的
+	// 时刻，也因为下一次轮询可以再次交出它而不必重读。
 	picture       []byte
 	pictureRef    string
 	pictureStamp  time.Time
 	pictureChange uint32
 }
 
-// New returns a device reading through dispatch. A nil dispatcher runs the
-// clipboard calls on the calling goroutine, which is what a test wants.
+// New 返回通过 dispatch 读取的设备。dispatch 为 nil 时在调用方 goroutine 上执行
+// 剪贴板调用，测试所需的正是这种。
 func New(dispatch Dispatcher) *Device {
 	return &Device{
 		dispatch:    dispatch,
@@ -107,16 +82,12 @@ func New(dispatch Dispatcher) *Device {
 	}
 }
 
-// ChangeCount is the clipboard's own write counter: the platform raises it
-// every time the clipboard is written to, whoever wrote it. It is what tells
-// a reading that the clipboard changed from a reading that merely happened
-// later, and the selection tool uses it to tell "nothing is selected" from
-// "the same text was copied again".
+// ChangeCount 是剪贴板自身的写计数器：平台每次写入都会递增，无论谁写。它让
+// 一次读取得知剪贴板确实变了，而不只是读取恰好更晚，划词工具也用它区分
+// 「没有选中」与「同样的文本又被复制了一次」。
 //
-// The platform's pasteboard is read on the main thread, as every MyGo
-// clipboard call is; the call runs inline when the caller is already there.
-// A platform with no counter answers zero. Callers must treat zero as "no
-// answer" rather than as a stable value.
+// 与所有 MyGo 剪贴板调用一样，平台粘贴板在主线程上读取；调用方已在主线程时
+// 内联运行。没有计数器的平台返回 0，调用方必须把 0 当作「无答案」而不是稳定值。
 func (d *Device) ChangeCount() uint32 {
 	if d == nil || d.changeCount == nil {
 		return 0
@@ -126,9 +97,8 @@ func (d *Device) ChangeCount() uint32 {
 	return count
 }
 
-// currentChangeCount reads the counter where the caller already is. It is what
-// the device itself uses: snapshot runs on the main thread, and a test runs
-// without an event loop.
+// currentChangeCount 在调用方当前所在线程读取计数器，供设备自身使用：
+// snapshot 运行在主线程，测试则没有事件循环。
 func (d *Device) currentChangeCount() uint32 {
 	if d == nil || d.changeCount == nil {
 		return 0
@@ -136,9 +106,8 @@ func (d *Device) currentChangeCount() uint32 {
 	return d.changeCount()
 }
 
-// Read returns what the clipboard holds now, or
-// domain.ErrUnsupportedClipboardFormat when it holds nothing this
-// application shows.
+// Read 返回剪贴板当前内容；当它没有本应用展示的内容时返回
+// domain.ErrUnsupportedClipboardFormat。
 func (d *Device) Read(ctx context.Context) (domain.ClipContent, error) {
 	var (
 		content domain.ClipContent
@@ -156,17 +125,15 @@ func (d *Device) Read(ctx context.Context) (domain.ClipContent, error) {
 	return content, nil
 }
 
-// WriteText puts text on the clipboard.
+// WriteText 把文本放到剪贴板。
 func (d *Device) WriteText(ctx context.Context, text string) error {
-	// The platform call reports nothing, and the platform retries a
-	// clipboard another process is holding.
+	// 平台调用不返回结果；被其它进程占用的剪贴板由平台自行重试。
 	d.call(ctx, func() { mygo.Clipboard.WriteText(text) })
 	return nil
 }
 
-// WriteFiles puts a file list on the clipboard, so that a click on a
-// recorded copy of files pastes the files rather than the text of their
-// paths.
+// WriteFiles 把文件列表放到剪贴板，使点击一条已记录的文件副本时粘贴的是文件本身
+// 而不是其路径文本。
 func (d *Device) WriteFiles(ctx context.Context, paths []string) error {
 	cleaned := make([]string, 0, len(paths))
 	for _, path := range paths {
@@ -179,8 +146,7 @@ func (d *Device) WriteFiles(ctx context.Context, paths []string) error {
 	}
 	var err error
 	ran := d.call(ctx, func() {
-		// A path the platform will not take — a relative one, or one that
-		// no longer exists — is the platform's answer to give.
+		// 平台不接受的路径（相对路径，或已不存在的路径）由平台给出答复。
 		err = mygo.Clipboard.WriteFiles(cleaned...)
 	})
 	if !ran {
@@ -192,12 +158,10 @@ func (d *Device) WriteFiles(ctx context.Context, paths []string) error {
 	return nil
 }
 
-// WriteImage puts a picture on the clipboard: a click on an image in the
-// history, and the selection tool putting back what it borrowed while reading
-// a selection.
+// WriteImage 把图片放到剪贴板：点击历史中的图片，以及划词工具在读取选中内容后
+// 归还它借走的剪贴板内容。
 //
-// The bytes are what the platform handed over as PNG, and they go back the way
-// they came.
+// 字节是平台交出的 PNG，原样放回。
 func (d *Device) WriteImage(ctx context.Context, png []byte) error {
 	if len(png) == 0 {
 		return domain.ErrUnsupportedClipboardFormat
@@ -213,10 +177,8 @@ func (d *Device) WriteImage(ctx context.Context, png []byte) error {
 	return nil
 }
 
-// call runs fn through the dispatcher and reports whether it ran. A
-// dispatcher that has not answered within the timeout is left behind: this
-// returns, and the goroutine it was waiting for ends when the main thread
-// gets to it.
+// call 通过 dispatcher 运行 fn，并报告它是否执行。超时仍未答复的 dispatcher 被
+// 抛下：本函数返回，它等待的 goroutine 在主线程最终处理到它时结束。
 func (d *Device) call(ctx context.Context, fn func()) bool {
 	if d.dispatch == nil {
 		fn()
@@ -245,19 +207,16 @@ func (d *Device) call(ctx context.Context, fn func()) bool {
 	}
 }
 
-// snapshot is one reading of the platform clipboard. It runs on the thread
-// that owns the clipboard.
+// snapshot 是对平台剪贴板的一次读取，运行在拥有剪贴板的线程上。
 //
-// It reads what the clipboard advertises, once, and works from that answer.
+// 它只读一次剪贴板公布的格式，然后基于该结果处理。
 //
-// A picture is the one expensive flavour, and a picture that is still the one
-// this device read a moment ago is handed out again rather than read once
-// more; see pictureFresh. Everything else is read as it always was.
+// 图片是唯一昂贵的一类：片刻前本设备读过的同一张图片会直接交出而非重读；
+// 见 pictureFresh。其余内容照旧读取。
 func (d *Device) snapshot() (domain.ClipContent, error) {
 	formats := mygo.Clipboard.Formats()
 	if len(formats) == 0 {
-		// An empty clipboard, or a call the application's shutdown
-		// dropped: either way there is nothing to show.
+		// 剪贴板为空，或调用被应用退出丢弃：两种情况都没有可展示的内容。
 		d.forgetPicture()
 		return domain.ClipContent{}, domain.ErrUnsupportedClipboardFormat
 	}
@@ -269,38 +228,32 @@ func (d *Device) snapshot() (domain.ClipContent, error) {
 	if facts.hasImage {
 		switch {
 		case d.pictureStillThere():
-			// The same picture is still on the clipboard: it is what was read
-			// before, so it is what this reading found, and reading it again
-			// would spend a screen's worth of decoding to learn nothing.
+			// 同一张图片仍在剪贴板上：它就是之前读到的，本次读取直接采用，
+			// 重读只会花掉一屏的解码却一无所获。
 			facts.image = d.picture
 			facts.imageRef = d.pictureRef
 		default:
-			// The counter is taken before the read: if the clipboard is
-			// written to while the bitmap is being decoded, the remembered
-			// picture belongs to the old counter and the next poll reads
-			// again instead of handing it out.
+			// 计数器在读取前取：若解码位图期间剪贴板被写入，记住的图片归属旧
+			// 计数器，下一次轮询会重新读取而不是继续交出。
 			count := d.currentChangeCount()
 			png, err := mygo.Clipboard.ReadFormat(transfer.PNG)
 			facts.image, facts.imageErr = png, err
 			if err == nil && len(png) > 0 {
 				d.rememberPictureAt(png, d.now(), count)
 			} else {
-				// Nothing was read, so there is no picture to hand out again:
-				// the next poll has to try afresh.
+				// 什么都没读到，就没有可再交出的图片：下一次轮询必须重新尝试。
 				d.forgetPicture()
 			}
 		}
 	} else {
 		d.forgetPicture()
 	}
-	// The text and the file list are read one flavour at a time, and a
-	// flavour that is not there is not an error: a clipboard with a picture
-	// on it is still a clipboard with nothing else on it.
+	// 文本与文件列表逐类读取，某类缺失不算错误：上面有图片的剪贴板只是上面
+	// 没有别的东西。
 	//
-	// Text is read by the platform's own helper: Windows and Linux keep the
-	// legacy ReadText, while macOS negotiates the format because some copies
-	// arrive as public.utf16-plain-text. HTML is read separately so that a
-	// malformed HTML flavour cannot take the text down with it.
+	// 文本由平台自身的辅助函数读取：Windows 与 Linux 沿用旧的 ReadText，
+	// macOS 则协商格式，因为有些复制只以 public.utf16-plain-text 到达。HTML
+	// 单独读取，使畸形的 HTML 不会连文本一起拖垮。
 	facts.text = readClipboardText()
 	facts.html = mygo.Clipboard.ReadHTML()
 	if paths, err := mygo.Clipboard.ReadFiles(); err == nil {
@@ -309,7 +262,7 @@ func (d *Device) snapshot() (domain.ClipContent, error) {
 	return Convert(facts), nil
 }
 
-// hasFormat reports whether the clipboard advertises a format.
+// hasFormat 报告剪贴板是否提供某格式。
 func hasFormat(formats []transfer.Format, want transfer.Format) bool {
 	for _, format := range formats {
 		if format == want {
@@ -319,14 +272,11 @@ func hasFormat(formats []transfer.Format, want transfer.Format) bool {
 	return false
 }
 
-// pictureStillThere reports whether the picture this device read is the one the
-// clipboard is still offering.
+// pictureStillThere 报告本设备读过的图片是否仍是剪贴板当前提供的图片。
 //
-// What makes that safe is that a clipboard holds one value at a time: the
-// picture cannot change without the clipboard changing, and this application
-// reads the clipboard more often than a person copies something. The window
-// bounds the assumption, so a picture that somehow stayed past it is read
-// again rather than handed out forever.
+// 之所以安全，是因为剪贴板一次只存一个值：图片不变则剪贴板不变，而本应用读取
+// 剪贴板的频率高于人去复制。时间窗口约束这个假设，万一图片超过窗口还在，就重新
+// 读取而不是永远交出它。
 func (d *Device) pictureStillThere() bool {
 	if len(d.picture) == 0 || d.pictureRef == "" {
 		return false
@@ -335,22 +285,19 @@ func (d *Device) pictureStillThere() bool {
 		return false
 	}
 	if d.pictureChange != 0 && d.pictureChange != d.currentChangeCount() {
-		// The clipboard was written to after this picture was read: whatever
-		// is on it now is not what is remembered, even within the window.
+		// 此图读取后剪贴板又被写入：现在上面无论是什么都不是记住的那张，
 		return false
 	}
 	return d.now().Sub(d.pictureStamp) < pictureFresh
 }
 
-// rememberPicture keeps the picture that was just read, so that the next poll
-// can hand it out instead of reading and encoding it again.
+// rememberPicture 保存刚读到的图片，好让下一次轮询直接交出而不是重新读取编码。
 func (d *Device) rememberPicture(png []byte, at time.Time) {
 	d.rememberPictureAt(png, at, d.currentChangeCount())
 }
 
-// rememberPictureAt is rememberPicture with the clipboard counter the reading
-// started at, which is what keeps a write during the read from being cached
-// as the picture that was read before it.
+// rememberPictureAt 是带读取起始时剪贴板计数器的 rememberPicture，正是它防止读取
+// 期间的写入被当作此前读到的图片缓存下来。
 func (d *Device) rememberPictureAt(png []byte, at time.Time, count uint32) {
 	d.picture = png
 	d.pictureRef = kit.ClipImageRef(png)
@@ -358,43 +305,36 @@ func (d *Device) rememberPictureAt(png []byte, at time.Time, count uint32) {
 	d.pictureChange = count
 }
 
-// forgetPicture drops the picture this device was holding.
+// forgetPicture 丢弃本设备持有的图片。
 //
-// It is what a reading that found no picture, or could not read one, leaves
-// behind: there is nothing to hand out again, and a picture kept from earlier
-// would have the next reading claim to hold a picture that is not there.
+// 一次没找到图片、或没能读出图片的读取就留下这个结果：没有可再交出的内容，而
+// 保留先前的图片会让下一次读取声称持有一张并不存在的图片。
 func (d *Device) forgetPicture() {
 	d.picture, d.pictureRef, d.pictureStamp, d.pictureChange = nil, "", time.Time{}, 0
 }
 
-// platformFacts is what one reading of the platform clipboard found, as
-// plain values: the part of a reading that can be tested without a session.
+// platformFacts 是一次读取平台剪贴板的结果，以纯值表示：即读取中无需会话就能
+// 测试的那部分。
 type platformFacts struct {
 	formats  []transfer.Format
 	text     string
 	html     string
 	files    []string
 	hasImage bool
-	// image is the bitmap on the clipboard as the platform hands it over, when
-	// one was read; imageErr is why it is missing when the formats said there
-	// was one. The bytes are kept because a picture has to be able to go back
-	// — a click on it in the history, or the selection tool giving the
-	// clipboard back — and this is the only moment it can be read.
+	// image 是剪贴板上的位图（平台交出的形式），仅在读到时有值；imageErr 是
+	// 格式表明有位图却没拿到时缺失的原因。保留字节是因为图片必须能放回去——
+	// 点击历史中的它，或划词工具归还剪贴板——而这是唯一能读到它的时刻。
 	image    []byte
 	imageErr error
-	// imageRef is what the picture is called, when it was named by whoever
-	// read it. A reading that carries the picture carries its name with it:
-	// naming it here would hash the bytes a second time, and naming it here
-	// after they were dropped would name it wrongly.
+	// imageRef 是图片的名字，由读取它的那一方命名。携带图片的读取也携带其名字：
+	// 此处再命名会把字节再哈希一次，而在字节被丢弃后命名则会命名错误。
 	imageRef string
 }
 
-// Convert turns one platform reading into what the application records.
+// Convert 把一次平台读取转换成应用记录的内容。
 //
-// The order decides what the user meant: a file list is a file list even
-// though the platform also puts the first path on the clipboard as text, and
-// a bare bitmap is what is left when the platform has no name for what it
-// holds.
+// 顺序决定用户本意：文件列表就是文件列表，尽管平台同时把第一个路径以文本放进
+// 剪贴板；而裸位图是平台对它持有的内容没有名字时剩下的东西。
 func Convert(facts platformFacts) domain.ClipContent {
 	switch {
 	case len(facts.files) > 0:
@@ -434,7 +374,7 @@ func Convert(facts platformFacts) domain.ClipContent {
 	}
 }
 
-// hasImage reports whether the clipboard offers an image.
+// hasImage 报告剪贴板是否提供图片。
 func hasImage(formats []transfer.Format) bool {
 	for _, format := range formats {
 		if format == transfer.PNG {
@@ -444,5 +384,5 @@ func hasImage(formats []transfer.Format) bool {
 	return false
 }
 
-// The device is what the use case asks for.
+// 设备即用例所求的接口实现。
 var _ domain.ClipboardDevice = (*Device)(nil)

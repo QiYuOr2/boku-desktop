@@ -10,21 +10,18 @@ import (
 	"time"
 )
 
-// testClock is a clock a test decides. The day a file is named after is the
-// one thing rotation depends on, and no test waits for midnight.
+// testClock 是测试可控的时钟：轮转只取决于文件名中的日期，测试无需等待午夜。
 type testClock struct{ at time.Time }
 
 func (c *testClock) now() time.Time { return c.at }
 
-// localDay is a moment in the test's own time zone, which is the one log file
-// names are written in.
+// localDay 返回测试所在时区的一个时刻，日志文件名用的就是这个时区。
 func localDay(year int, month time.Month, day, hour int) time.Time {
 	return time.Date(year, month, day, hour, 0, 0, 0, time.Local)
 }
 
-// newTestLog opens a log for a test: a directory of its own unless one is
-// given, and a clock on 2026-10-15 unless the test decides another day. The
-// log is closed when the test ends.
+// newTestLog 为测试打开日志：未指定目录则用独立目录，未指定时钟则固定为 2026-10-15；
+// 测试结束时自动关闭。
 func newTestLog(t *testing.T, opts Options) *Log {
 	t.Helper()
 	if opts.Dir == "" {
@@ -45,7 +42,7 @@ func newTestLog(t *testing.T, opts Options) *Log {
 	return l
 }
 
-// readLog returns a log file as text.
+// readLog 以文本形式返回日志文件内容。
 func readLog(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -69,8 +66,7 @@ func mustNotContain(t *testing.T, text, unwanted string) {
 	}
 }
 
-// keepStandardLoggers puts the process's loggers back the way they were: a
-// test that installs a log owns the whole process while it runs.
+// keepStandardLoggers 在测试结束后还原进程级日志器：安装日志的测试在运行期间独占整个进程。
 func keepStandardLoggers(t *testing.T) {
 	t.Helper()
 	previousLogger := slog.Default()

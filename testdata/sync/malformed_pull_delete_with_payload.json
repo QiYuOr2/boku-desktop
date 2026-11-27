@@ -1,0 +1,30 @@
+{
+  "changes": [
+    {
+      "cursor": "c-43",
+      "entityType": "diary_entry",
+      "entityId": "0198b000-0000-7000-8000-0000000000e3",
+      "version": 5,
+      "operation": "delete",
+      "payload": {
+        "title": "",
+        "markdown": "补记。",
+        "diaryDateKey": "2026-11-19",
+        "createdAt": "2026-11-20T01:00:00Z",
+        "updatedAt": "2026-11-20T02:00:00Z",
+        "tags": [
+          "散步"
+        ],
+        "attachments": [],
+        "linkCards": [],
+        "location": {
+          "place": "宇治",
+          "capturedAt": "2026-11-20T01:00:00Z"
+        },
+        "weather": null
+      }
+    }
+  ],
+  "nextCursor": "c-43",
+  "hasMore": false
+}

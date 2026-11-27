@@ -8,9 +8,8 @@ import (
 	"boku/internal/domain"
 )
 
-// The manifest is the release's own file, and the adapter rules of AGENTS.md
-// apply to it as much as to a provider's answer: a body that is not a
-// manifest is a bad response, never a release with zero values in it.
+// 清单是发布物自己的文件，AGENTS.md 的适配器规则同样适用于它：不是清单的正文
+// 是坏响应，绝不是一个全零的 release。
 func TestDecodeManifestRejectsWhatIsNotARelease(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -43,8 +42,7 @@ func TestDecodeManifestRejectsWhatIsNotARelease(t *testing.T) {
 	}
 }
 
-// A manifest larger than the framework reads is refused rather than partly
-// understood.
+// 大于框架读取上限的清单被拒绝，而不是被部分理解。
 func TestDecodeManifestRefusesAnOversizedBody(t *testing.T) {
 	body := `{"version":"1.0.0","notes":"` + strings.Repeat("x", maxManifestBytes) + `"}`
 	if _, err := DecodeManifest([]byte(body), ""); !errors.Is(err, domain.ErrProviderBadResponse) {
@@ -52,8 +50,7 @@ func TestDecodeManifestRefusesAnOversizedBody(t *testing.T) {
 	}
 }
 
-// The happy path: what `mygo build` writes becomes the release the interface
-// shows, with the digest the caller checked bound into the asset.
+// 正常路径：`mygo build` 写出的内容变成界面展示的 release，并绑入调用方核验过的摘要。
 func TestDecodeManifestReadsARelease(t *testing.T) {
 	body := `{
 		"version": "0.1.0-beta.6",
@@ -86,16 +83,14 @@ func TestDecodeManifestReadsARelease(t *testing.T) {
 	if asset.SHA256 != digest {
 		t.Errorf("digest = %q, want the one the caller checked", asset.SHA256)
 	}
-	// The deltas and the archives of earlier versions are the updater's own
-	// business: they are read without complaint and are not an archive this
-	// application names.
+	// deltas 与旧版本归档是 updater 自己的事务：无报错地读取，且不是本应用
+	// 命名的归档。
 	if len(release.Assets) != 1 {
 		t.Errorf("the release names %d assets, want the one archive: %+v", len(release.Assets), release.Assets)
 	}
 }
 
-// A tag written with its "v" is the same version as one without: tags are
-// how repositories write a version, and a directory is not.
+// 带 "v" 的标签与不带的是同一版本：标签是仓库的写法，目录不是。
 func TestDecodeManifestTrimsTheTagPrefix(t *testing.T) {
 	body := `{"version":"v0.1.0-beta.6","url":"https://example.invalid/a.tar.gz","size":10,"signature":"sig"}`
 	release, err := DecodeManifest([]byte(body), "")
@@ -107,8 +102,7 @@ func TestDecodeManifestTrimsTheTagPrefix(t *testing.T) {
 	}
 }
 
-// A digest that is given must be a SHA-256: anything else is a release whose
-// download cannot be checked.
+// 给出的摘要必须是 SHA-256：否则是无法核验下载的 release。
 func TestDecodeManifestRefusesADigestThatIsNotOne(t *testing.T) {
 	body := `{"version":"1.0.0","url":"https://example.invalid/a.tar.gz","size":10,"signature":"sig"}`
 	if _, err := DecodeManifest([]byte(body), "abc"); !errors.Is(err, domain.ErrProviderBadResponse) {
@@ -116,9 +110,8 @@ func TestDecodeManifestRefusesADigestThatIsNotOne(t *testing.T) {
 	}
 }
 
-// MaxArchiveSize is the ceiling the framework applies; the update feature
-// says the same number so that a release one of them refuses is not offered
-// by the other.
+// MaxArchiveSize 是框架施加的上限；更新功能用同一数值，使一方拒绝的 release
+// 不会被另一方提供。
 func TestMaxArchiveSizeIsAFullGigabyte(t *testing.T) {
 	if MaxArchiveSize != 1<<30 {
 		t.Errorf("MaxArchiveSize = %d, want 1<<30", MaxArchiveSize)
