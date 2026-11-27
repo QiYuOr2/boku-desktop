@@ -26,16 +26,16 @@ func (field ShortcutField) View(c *ui.Context) ui.Element {
 	labelPad := float32(12)
 	showClear := field.ClearMark != nil && field.Accelerator != ""
 	if showClear {
-		labelPad = 24
+		labelPad = 28
 	}
-	control := ui.Box(c).Width(float32(140)).Height(HeightControl - 4)
+	control := ui.Box(c).Width(float32(164)).Height(HeightCardControl)
 	control.Children(func() {
 		button := ui.ButtonBase(c).Label("快捷键 "+FriendlyAccelerator(field.Accelerator)).
 			Absolute().Fill().
 			Padding(0, labelPad, 0, 12).
 			Radius(RadiusField).
 			Border(1, ColorBorder).
-			Background(ColorSurface).
+			Background(ColorField).
 			Focusable().
 			Cursor(ui.CursorPointer)
 		switch {
@@ -46,14 +46,14 @@ func (field ShortcutField) View(c *ui.Context) ui.Element {
 		}
 		button.Children(func() {
 			text := ui.Text(c, label).
-				FontSize(SizeTiny).
+				FontSize(SizeSmall).
 				Font("monospace").
 				LetterSpacing(float32(-0.25)).
 				SingleLine()
 			if field.Recording {
 				text.TextColor(ColorBrand)
 			} else {
-				text.TextColor(ColorTextSoft)
+				text.TextColor(ColorText)
 			}
 		})
 		if field.OnInput != nil {
@@ -66,7 +66,7 @@ func (field ShortcutField) View(c *ui.Context) ui.Element {
 			field.OnPress()
 		}
 		if showClear {
-			if clear := CardIconButton(c, field.ClearMark, field.ClearLabel).Absolute().Right(float32(2)).Top(shortcutClearTop()); clear.Clicked() && field.OnClear != nil {
+			if clear := CardIconButton(c, field.ClearMark, field.ClearLabel).Absolute().Right(float32(4)).Top(shortcutClearTop()); clear.Clicked() && field.OnClear != nil {
 				field.OnClear()
 			}
 		}
@@ -75,7 +75,6 @@ func (field ShortcutField) View(c *ui.Context) ui.Element {
 }
 
 func shortcutClearTop() float32 {
-	fieldHeight := HeightControl - 4
 	iconTarget := SizeCardMark + 2*CardMarkPad
-	return float32((fieldHeight - iconTarget) / 2)
+	return float32((HeightCardControl - iconTarget) / 2)
 }

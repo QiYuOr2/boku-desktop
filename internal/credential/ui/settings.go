@@ -54,17 +54,22 @@ type TranslateCard = presentation.Connection
 func (s *State) ApiKeySection(c *ui.Context, head *ui.Handle) {
 	presentation.Inset(c, func() {
 		presentation.Stacked(c, presentation.GroupGap, func() {
-			presentation.SectionHeadSmall(c, head, s.keyMark, presentation.ColorStoneInk, "API Key", "配置各 AI 服务密钥")
+			presentation.SectionHeadSmall(c, head, s.keyMark, presentation.ColorTextMuted, "API Key", "")
 
-			// 只列出需要密钥的服务：本区是密钥表单，每张卡片是一个待填输入框；无需密钥的服务在翻译区选择。
+			// 只列出需要密钥的服务：本区是密钥表单，每项服务占单层面板内一行；无需密钥的服务在翻译区选择。
 			cards := KeyedTranslateCards(s.TranslateCards())
-			presentation.Stacked(c, presentation.RowGap, func() {
-				for _, card := range cards {
-					s.ApiKeyCard(c, card)
-				}
-				// 空白卡片始终在最后且始终存在：它是添加更多服务的唯一入口。
-				s.NewCustomServiceCard(c)
-			})
+			if len(cards) > 0 {
+				presentation.SettingsPanel(c, func() {
+					for index, card := range cards {
+						if index > 0 {
+							presentation.SettingsDivider(c)
+						}
+						s.ApiKeyCard(c, card)
+					}
+				})
+			}
+			// 空白表单作为独立同级面板置于底部，避免大框套小框。
+			s.NewCustomServiceCard(c)
 		})
 	})
 }
@@ -85,34 +90,37 @@ func KeyedTranslateCards(cards []TranslateCard) []TranslateCard {
 }
 
 func (s *State) ApiKeyCard(c *ui.Context, card TranslateCard) {
-	ui.Column(c).FillWidth().
-		Background(presentation.ColorSurface).
-		Border(1, presentation.ColorBorder).
-		Radius(presentation.RadiusField).
-		Padding(float32(10), float32(12)).
-		Children(func() {
-			presentation.Stacked(c, float32(6), func() {
-				s.ApiKeyCardHead(c, card)
-				s.CredentialRow(c, card)
-				s.CardStatusLine(c, card)
-				s.ApiKeyCardNote(c, card)
-			})
-		})
+	row := ui.Column(c).FillWidth().
+		Padding(presentation.SettingRowPadY, presentation.SettingRowPadX).
+		Gap(presentation.RowGap)
+	hot := row.Hovered() || s.Form.DeleteArmed == card.ID
+	row.Children(func() {
+		s.ApiKeyCardHead(c, card, hot)
+		s.CredentialRow(c, card)
+		s.CardStatusLine(c, card)
+		s.ApiKeyCardNote(c, card)
+	})
 }
 
-func (s *State) ApiKeyCardHead(c *ui.Context, card TranslateCard) {
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
+func (s *State) ApiKeyCardHead(c *ui.Context, card TranslateCard, hot bool) {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(presentation.FieldGap).Children(func() {
 		ui.Text(c, card.DisplayName).
 			FontSize(presentation.SizeCardName).
 			FontWeight(600).
-			TextColor(presentation.ColorTextSoft).
+			TextColor(presentation.ColorText).
 			SingleLine()
 		ConfiguredBadge(c, card.Configured)
 		ui.Spacer(c)
 		if !CardCanBeRemoved(card, s.Form.HasCredential[card.ID]) {
 			return
 		}
-		s.DeleteActions(c, card)
+		actions := ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(4))
+		if !hot {
+			actions = actions.Opacity(0).PassThrough()
+		}
+		actions.Children(func() {
+			s.DeleteActions(c, card)
+		})
 	})
 }
 
@@ -121,33 +129,28 @@ func CardCanBeRemoved(card TranslateCard, HasCredential bool) bool {
 }
 
 func (s *State) NewCustomServiceCard(c *ui.Context) {
-	ui.Column(c).FillWidth().
-		Background(presentation.ColorSurface).
-		Border(1, presentation.ColorBorder).
-		Radius(presentation.RadiusField).
-		Padding(float32(10), float32(12)).
-		Children(func() {
-			presentation.Stacked(c, float32(6), func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
-					ui.Text(c, CustomServiceCardTitle).
-						FontSize(presentation.SizeCardName).
-						FontWeight(600).
-						TextColor(presentation.ColorTextSoft).
-						SingleLine()
-					presentation.KindBadge(c, presentation.ColorStoneTile, presentation.ColorStoneInk, "OpenAI 兼容")
-				})
-				presentation.Stacked(c, float32(6), func() {
-					s.NewServiceNameField(c)
-					s.NewServiceURLField(c)
-					s.NewServiceModelField(c)
-				})
-				s.NewServiceRow(c)
-				s.CardStatusLine(c, TranslateCard{ID: NewCustomServiceID})
+	presentation.SettingsPanel(c, func() {
+		presentation.SettingsRow(c, func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(presentation.FieldGap).Children(func() {
+				ui.Text(c, CustomServiceCardTitle).
+					FontSize(presentation.SizeCardName).
+					FontWeight(600).
+					TextColor(presentation.ColorText).
+					SingleLine()
+				presentation.KindBadge(c, presentation.ColorStoneTile, presentation.ColorStoneInk, "OpenAI 兼容")
 			})
+			presentation.Stacked(c, presentation.FieldGap, func() {
+				s.NewServiceNameField(c)
+				s.NewServiceURLField(c)
+				s.NewServiceModelField(c)
+				s.NewServiceRow(c)
+			})
+			s.CardStatusLine(c, TranslateCard{ID: NewCustomServiceID})
 		})
+	})
 }
 
-const CustomServiceCardTitle = "自定义"
+const CustomServiceCardTitle = "添加自定义服务"
 
 const NewCustomServiceID = "custom-new"
 
@@ -167,7 +170,7 @@ func (s *State) DeleteActions(c *ui.Context, card TranslateCard) {
 }
 
 func (s *State) CredentialRow(c *ui.Context, card TranslateCard) {
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(6)).Children(func() {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(presentation.FieldGap).Children(func() {
 		s.CredentialField(c, card)
 		if button := presentation.CardButton(c, "测试", presentation.ButtonSecondary); button.Clicked() {
 			s.TestCredential(card)
@@ -253,7 +256,7 @@ func (s *State) NewServiceModelField(c *ui.Context) {
 }
 
 func (s *State) NewServiceRow(c *ui.Context) {
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(6)).Children(func() {
+	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(presentation.FieldGap).Children(func() {
 		s.ShowCardInput(NewCustomServiceID)
 		field := ui.TextInput(c, &s.Form.Input)
 		field.Password().Placeholder("API Key（可选）").SingleLine()

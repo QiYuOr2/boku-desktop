@@ -18,13 +18,9 @@ func Inset(c *ui.Context, body func()) {
 	ui.Column(c).FillWidth().PaddingX(PageEdge).Children(body)
 }
 
-// BetweenSections 分隔窗口中相邻的两个 section；分隔线画在页边距之内。
+// BetweenSections 分隔窗口中相邻的两个设置分区，以 32pt 留白区分而不画多余分割线。
 func BetweenSections(c *ui.Context) {
-	Inset(c, func() {
-		ui.Column(c).FillWidth().PaddingY(SectionGap).Children(func() {
-			Hairline(c)
-		})
-	})
+	ui.Spacer(c).Height(SectionGap).Shrink(0)
 }
 
 // QuickWindowFooter 是快速窗口的底栏：版本号与常驻操作；版本与操作都不压缩，

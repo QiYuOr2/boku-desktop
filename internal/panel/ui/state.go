@@ -59,13 +59,26 @@ func (s *State) SettingsView(c *ui.Context) {
 	for _, item := range s.panelService.OptionalPanels() {
 		on := item.On
 		label, note := switchCopy(item)
-		ui.Checkbox(c, &on, label).FontSize(presentation.SizeBody).OnClick(func() { s.setPanelOn(item.Panel.ID, on) })
-		presentation.Notice(c, presentation.NotePlain, note)
-		if item.Panel.ProviderID == "grok" && s.panelService.DeviceLoggedIn(item.Panel.ProviderID) {
-			if button := presentation.DesignButton(c, "退出 Grok 登录", presentation.ButtonSecondary); button.Clicked() {
-				s.logoutDevice(item.Panel.ProviderID, item.Panel.ID)
+		presentation.SettingsDivider(c)
+		presentation.SettingsRow(c, func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(presentation.GroupGap).Children(func() {
+				ui.Column(c).Grow(1).Gap(float32(4)).Children(func() {
+					ui.Text(c, label).FontSize(presentation.SizeBody).FontWeight(500).TextColor(presentation.ColorText).Wrap()
+					if note != "" {
+						ui.Text(c, note).FontSize(presentation.SizeSmall).TextColor(presentation.ColorTextMuted).Wrap().LineHeight(1.5)
+					}
+				})
+				ui.Switch(c, &on).Label(label).Shrink(0).OnClick(func() { s.setPanelOn(item.Panel.ID, on) })
+			})
+			if item.Panel.ProviderID == "grok" && s.panelService.DeviceLoggedIn(item.Panel.ProviderID) {
+				ui.Row(c).FillWidth().Children(func() {
+					if button := presentation.CardButton(c, "退出 Grok 登录", presentation.ButtonSecondary); button.Clicked() {
+						s.logoutDevice(item.Panel.ProviderID, item.Panel.ID)
+					}
+					ui.Spacer(c)
+				})
 			}
-		}
+		})
 	}
 }
 

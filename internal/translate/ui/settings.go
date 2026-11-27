@@ -19,26 +19,27 @@ func (s *State) translateSection(c *ui.Context, head *ui.Handle) {
 	settings := s.translateSettingsOr()
 	presentation.Inset(c, func() {
 		presentation.Stacked(c, presentation.GroupGap, func() {
-			presentation.SectionHead(c, head, s.translationMark, presentation.ColorStoneInk, "划词翻译", "任意语言 → 中文 · 免费基础 + AI 翻译")
+			presentation.SectionHead(c, head, s.translationMark, presentation.ColorTextMuted, "划词翻译", "")
 
-			presentation.Stacked(c, presentation.RowGap, func() {
-				enabled := settings.Enabled
-				ui.Checkbox(c, &enabled, "启用划词翻译").
-					FontSize(presentation.SizeBody).
-					OnClick(func() { s.setTranslationEnabled(enabled) })
-
-				if !showsTranslationControls(settings) {
-					presentation.Notice(c, presentation.NotePlain, "快捷键不再占用。")
-					s.translateNoticeLine(c)
-					return
-				}
-
-				s.providerPicker(c, settings)
-				s.annotationSwitches(c, settings)
-				s.windowSwitches(c, settings)
-				s.shortcutSwitches(c)
-				s.translateNoticeLine(c)
+			enabled := settings.Enabled
+			note := ""
+			if !showsTranslationControls(settings) {
+				note = "快捷键不再占用。"
+			}
+			presentation.SettingsPanel(c, func() {
+				presentation.SettingsSwitchRow(c, "启用划词翻译", note, &enabled, s.setTranslationEnabled)
 			})
+
+			if !showsTranslationControls(settings) {
+				s.translateNoticeLine(c)
+				return
+			}
+
+			s.providerPicker(c, settings)
+			s.annotationSwitches(c, settings)
+			s.windowSwitches(c, settings)
+			s.shortcutSwitches(c)
+			s.translateNoticeLine(c)
 		})
 	})
 }
@@ -57,27 +58,27 @@ func showsTranslationControls(settings translate.Settings) bool {
 // 不是一个背后有池子的选择）；某个失败就如实报错，不悄悄改投另一个端点。
 func (s *State) providerPicker(c *ui.Context, settings translate.Settings) {
 	cards := pickerTranslateCards(s.translateCards())
-	presentation.Stacked(c, presentation.RowGap, func() {
-		presentation.SectionLabel(c, "翻译服务")
-
-		free, keyed := splitTranslateCards(cards)
-		if len(free) > 0 {
-			presentation.Stacked(c, float32(6), func() {
-				pickerGroupLabel(c, "基础翻译（免费 · 无需配置）")
-				for _, card := range free {
-					s.providerOption(c, card, settings)
+	free, keyed := splitTranslateCards(cards)
+	if len(free) > 0 {
+		presentation.SettingsGroup(c, "基础翻译 · 免费", func() {
+			for index, card := range free {
+				if index > 0 {
+					presentation.SettingsDivider(c)
 				}
-			})
-		}
-		if len(keyed) > 0 {
-			presentation.Stacked(c, float32(6), func() {
-				pickerGroupLabel(c, "AI 大模型（需配置 API Key）")
-				for _, card := range keyed {
-					s.providerOption(c, card, settings)
+				s.providerOption(c, card, settings, index == 0, index == len(free)-1)
+			}
+		})
+	}
+	if len(keyed) > 0 {
+		presentation.SettingsGroup(c, "AI 大模型", func() {
+			for index, card := range keyed {
+				if index > 0 {
+					presentation.SettingsDivider(c)
 				}
-			})
-		}
-	})
+				s.providerOption(c, card, settings, index == 0, index == len(keyed)-1)
+			}
+		})
+	}
 }
 
 // pickerTranslateCards 保持注册表给出的顺序，从不重排（包括不把在用服务提到最前）：
@@ -108,39 +109,39 @@ func splitTranslateCards(cards []presentation.Connection) (free, keyed []present
 	return free, keyed
 }
 
-func pickerGroupLabel(c *ui.Context, label string) {
-	ui.Text(c, label).FontSize(presentation.SizeSmall).FontWeight(500).TextColor(presentation.ColorTextMuted)
-}
-
 // providerOption 渲染选择器的一行；整行都是点击目标。未配置的服务会画出但不可选。
 // 免费 一词只用于免费引擎：用户自建服务虽也无需 key，但价格 Boku 无从得知。
-func (s *State) providerOption(c *ui.Context, card presentation.Connection, settings translate.Settings) {
+func (s *State) providerOption(c *ui.Context, card presentation.Connection, settings translate.Settings, first, last bool) {
 	selected := settings.ProviderOr() == card.ID && card.Configured
+	tl, tr, br, bl := presentation.PanelRowRadius(first, last)
 	row := ui.ButtonBase(c).Label("使用 "+card.DisplayName).
 		FillWidth().
-		Padding(float32(8), float32(12)).
-		Radius(presentation.RadiusField).
-		Border(1, presentation.ColorBorder).
+		Padding(presentation.SettingRowPadYCompact, presentation.SettingRowPadX).
+		Radius(tl, tr, br, bl).
 		Disabled(!card.Configured)
+	if card.Configured {
+		row.Cursor(ui.CursorPointer)
+	}
 	switch {
 	case selected:
-		row.Background(presentation.ColorBrandTint).Border(1, presentation.ColorBrand)
+		row.Background(presentation.ColorBrandTint)
 	case row.Hovered() && card.Configured:
 		row.Background(presentation.ColorHover)
 	}
 	row.Children(func() {
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
-			ui.Box(c).Size(float32(12), float32(12)).Radius(999).Shrink(0).
+		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(presentation.RowGap).Children(func() {
+			ui.Box(c).Size(float32(16), float32(16)).Radius(999).Shrink(0).Center().
 				Border(1, chooseColor(selected, presentation.ColorBorder)).
-				Background(chooseColor(selected, presentation.ColorSurface)).
+				Background(presentation.ColorSurface).
 				Children(func() {
 					if selected {
-						ui.Box(c).Size(float32(6), float32(6)).Radius(999).
+						ui.Box(c).Size(float32(8), float32(8)).Radius(999).
 							Background(presentation.ColorBrand)
 					}
 				})
 			ui.Text(c, card.DisplayName).
 				FontSize(presentation.SizeBody).
+				FontWeight(500).
 				TextColor(chooseTextColor(card.Configured)).
 				SingleLine()
 			if card.SupportsImage {
@@ -153,7 +154,7 @@ func (s *State) providerOption(c *ui.Context, card presentation.Connection, sett
 			case card.Configured:
 				presentation.StatusNote(c, "已配置")
 			default:
-				ui.Text(c, "未配置").FontSize(presentation.SizeTiny).TextColor(presentation.ColorTextMuted).SingleLine()
+				ui.Text(c, "未配置").FontSize(presentation.SizeSmall).TextColor(presentation.ColorTextMuted).SingleLine()
 			}
 		})
 	})
@@ -171,65 +172,67 @@ func chooseColor(chosen bool, fallback ui.Color) ui.Color {
 
 func chooseTextColor(configured bool) ui.Color {
 	if configured {
-		return presentation.ColorTextSoft
+		return presentation.ColorText
 	}
 	return presentation.ColorTextMuted
 }
 
 func (s *State) annotationSwitches(c *ui.Context, settings translate.Settings) {
-	presentation.Stacked(c, presentation.RowGap, func() {
-		presentation.SectionLabel(c, "日语增强（仅日语原文）")
+	presentation.SettingsGroup(c, "日语增强", func() {
 		furigana := settings.Furigana
-		ui.Checkbox(c, &furigana, "汉字标注片假名读音").
-			FontSize(presentation.SizeBody).
-			OnClick(func() { s.setTranslationFurigana(furigana) })
+		presentation.SettingsSwitchRow(c, "汉字标注片假名读音", "", &furigana, s.setTranslationFurigana)
+		presentation.SettingsDivider(c)
 		gloss := settings.LoanwordGloss
-		ui.Checkbox(c, &gloss, "片假名标注对应英文原词").
-			FontSize(presentation.SizeBody).
-			OnClick(func() { s.setTranslationLoanwordGloss(gloss) })
+		presentation.SettingsSwitchRow(c, "片假名标注对应英文原词", "", &gloss, s.setTranslationLoanwordGloss)
 	})
 }
 
 func (s *State) windowSwitches(c *ui.Context, settings translate.Settings) {
-	presentation.Stacked(c, presentation.RowGap, func() {
-		presentation.SectionLabel(c, "浮窗行为")
+	presentation.SettingsGroup(c, "浮窗行为", func() {
 		pinned := settings.Pinned
-		ui.Checkbox(c, &pinned, "默认固定（Pin）浮窗").
-			FontSize(presentation.SizeBody).
-			OnClick(func() { s.setTranslationPinned(pinned) })
-
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
-			presentation.SectionLabel(c, "关闭延迟（毫秒）")
-			ui.Spacer(c)
-			s.closeDelayField(c, settings)
+		presentation.SettingsSwitchRow(c, "默认固定浮窗", "固定后不再自动关闭。", &pinned, s.setTranslationPinned)
+		presentation.SettingsDivider(c)
+		presentation.SettingsRow(c, func() {
+			var invalid bool
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(presentation.GroupGap).Children(func() {
+				presentation.SectionLabel(c, "自动关闭延迟（毫秒）")
+				ui.Spacer(c)
+				invalid = s.closeDelayField(c, settings)
+			})
+			if invalid {
+				presentation.Notice(c, presentation.NoteDanger, "关闭延迟需要一个非负的毫秒数。")
+			}
 		})
-		presentation.Notice(c, presentation.NotePlain, "固定后不再自动关闭。")
 	})
 }
 
 // closeDelayField 只在用户点「应用」时写入，而不是每次按键：输入一半的数字不是设置，
 // 写入它会让窗口在用户选中旧值准备替换的瞬间就自行关闭。
-func (s *State) closeDelayField(c *ui.Context, settings translate.Settings) {
-	field := ui.TextInput(c, &s.delayInput)
-	field.Placeholder(strconv.FormatInt(settings.CloseDelayOr().Milliseconds(), 10)).SingleLine()
-	field.Disabled(s.connectionsBusy())
-	presentation.InputFrame(c, field).Width(float32(88)).Font("monospace")
+func (s *State) closeDelayField(c *ui.Context, settings translate.Settings) bool {
+	invalid := false
+	ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(presentation.FieldGap).Children(func() {
+		field := ui.TextInput(c, &s.delayInput)
+		field.Placeholder(strconv.FormatInt(settings.CloseDelayOr().Milliseconds(), 10)).SingleLine()
+		field.Disabled(s.connectionsBusy())
+		presentation.InputFrame(c, field).Width(float32(88)).Font("monospace")
 
-	text := strings.TrimSpace(s.delayInput)
-	milliseconds := settings.CloseDelayOr().Milliseconds()
-	switch {
-	case text == "":
-	case !isDigits(text):
-		presentation.Notice(c, presentation.NoteDanger, "关闭延迟需要一个非负的毫秒数。")
-		return
-	default:
-		if value, err := strconv.ParseInt(text, 10, 64); err == nil {
-			milliseconds = value
+		text := strings.TrimSpace(s.delayInput)
+		milliseconds := settings.CloseDelayOr().Milliseconds()
+		switch {
+		case text == "":
+		case !isDigits(text):
+			invalid = true
+			return
+		default:
+			if value, err := strconv.ParseInt(text, 10, 64); err == nil {
+				milliseconds = value
+			}
 		}
-	}
-	if button := presentation.DesignButton(c, "应用", presentation.ButtonSecondary); button.Clicked() {
-		s.setTranslationCloseDelay(time.Duration(milliseconds) * time.Millisecond)
-	}
+		if button := presentation.DesignButton(c, "应用", presentation.ButtonSecondary); button.Clicked() {
+			s.setTranslationCloseDelay(time.Duration(milliseconds) * time.Millisecond)
+		}
+	})
+	return invalid
 }
 
 func isDigits(text string) bool {
@@ -245,47 +248,42 @@ func isDigits(text string) bool {
 }
 
 func (s *State) shortcutSwitches(c *ui.Context) {
-	presentation.Stacked(c, presentation.RowGap, func() {
-		presentation.SectionLabel(c, "快捷键")
-
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(12)).Children(func() {
-			ui.Text(c, "划词后弹出翻译").FontSize(presentation.SizeBody).TextColor(presentation.ColorTextSoft).SingleLine().Grow(1)
+	presentation.SettingsGroup(c, "快捷键", func() {
+		presentation.SettingsControlRow(c, "划词翻译", "", func() {
 			s.shortcutButton(c, shortcutText)
 		})
-		ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(12)).Children(func() {
-			ui.Column(c).Grow(1).Children(func() {
-				ui.Text(c, "截图翻译").FontSize(presentation.SizeBody).TextColor(presentation.ColorTextSoft).SingleLine()
-				ui.Text(c, "框选后使用 AI 翻译").FontSize(presentation.SizeTiny).TextColor(presentation.ColorTextMuted).SingleLine()
-			})
+		presentation.SettingsDivider(c)
+		presentation.SettingsControlRow(c, "截图翻译", "", func() {
 			s.shortcutButton(c, shortcutScreenshot)
 		})
-
-		// 当前绑定值，或未绑定的原因。注册失败必须可见而非静默，这是工具设计 §6 的要求。
-		text, kind := s.shortcutLine()
-		presentation.Notice(c, kind, text)
-		if note, noteKind := s.shortcutNote(); note != "" {
-			presentation.Notice(c, noteKind, note)
-		}
-		if platform := presentation.ShortcutPlatformNote(); platform != "" {
-			presentation.Notice(c, presentation.NotePlain, platform)
-		}
-		if note := selectionPlatformNote(); note != "" && !s.selectionGranted {
-			presentation.Notice(c, presentation.NotePlain, note)
-			// 只有一个按钮，名字就是用户想要的东西。它请求系统把 Boku 加入辅助功能列表；
-			// 系统弹窗才是显示开关的地方，且它会自己提供「系统设置」入口。正式版直接打开
-			// 面板会盖住该弹窗；开发版是例外，见下。
-			if button := presentation.DesignButton(c, "获取辅助功能权限", presentation.ButtonSecondary); button.Clicked() {
-				if !s.requestSelectionAccess() && os.Getenv("MYGO_DEV") != "" {
-					// mygo dev 把应用作为终端的子进程启动，TCC 会把请求归到终端上：
-					// 系统对开发版会抑制该弹窗。于是改为打开面板，让开发者手动添加 Boku Dev。
-					c.OpenURL(accessibilitySettingsURL)
+		presentation.SettingsDivider(c)
+		presentation.SettingsRowCompact(c, func() {
+			// 当前绑定值，或未绑定的原因。注册失败必须可见而非静默，这是工具设计 §6 的要求。
+			text, kind := s.shortcutLine()
+			presentation.Notice(c, kind, text)
+			if note, noteKind := s.shortcutNote(); note != "" {
+				presentation.Notice(c, noteKind, note)
+			}
+			if platform := presentation.ShortcutPlatformNote(); platform != "" {
+				presentation.Notice(c, presentation.NotePlain, platform)
+			}
+			needsAccess := selectionPlatformNote() != "" && !s.selectionGranted
+			if needsAccess {
+				presentation.Notice(c, presentation.NotePlain, selectionPlatformNote())
+			}
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(presentation.FieldGap).Children(func() {
+				if needsAccess {
+					if button := presentation.DesignButton(c, "获取辅助功能权限", presentation.ButtonSecondary); button.Clicked() {
+						if !s.requestSelectionAccess() && os.Getenv("MYGO_DEV") != "" {
+							c.OpenURL(accessibilitySettingsURL)
+						}
+					}
 				}
-			}
-		}
-		ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-			if button := presentation.DesignButton(c, "恢复默认快捷键", presentation.ButtonWarning).Shrink(0); button.Clicked() {
-				s.resetShortcut()
-			}
+				ui.Spacer(c)
+				if button := presentation.DesignButton(c, "恢复默认快捷键", presentation.ButtonWarning).Shrink(0); button.Clicked() {
+					s.resetShortcut()
+				}
+			})
 		})
 	})
 }

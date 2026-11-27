@@ -12,17 +12,24 @@ func (s *ViewModel) SettingsView(c *ui.Context, head *ui.Handle, design presenta
 	}
 	s.design.Inset(c, func() {
 		s.design.Stacked(c, presentation.GroupGap, func() {
-			s.design.SectionHead(c, head, s.design.Mark, presentation.AnimeAccent.Ink, "动画更新", "Bangumi「在看」今日放送")
-			s.design.Stacked(c, presentation.RowGap, func() {
-				on := s.service.Enabled()
-				ui.Checkbox(c, &on, "在悬浮窗显示今日动画更新").FontSize(s.design.SizeBody).OnClick(func() { s.saveAnime(on) })
-				s.design.Stacked(c, presentation.FieldGap, func() {
+			s.design.SectionHead(c, head, s.design.Mark, presentation.AnimeAccent.Ink, "动画更新", "")
+			on := s.service.Enabled()
+			presentation.SettingsPanel(c, func() {
+				presentation.SettingsSwitchRow(c, "在悬浮窗显示今日动画更新", "", &on, s.saveAnime)
+
+				presentation.SettingsDivider(c)
+
+				presentation.SettingsRow(c, func() {
 					s.design.SectionLabel(c, "Bangumi 用户名")
-					field := ui.TextInput(c, &s.animeUsername).Placeholder("用户名或 UID，如 sai").FillWidth().Height(s.design.HeightControl).FixedLineHeight(presentation.InputLineHeight(presentation.SizeBody))
+					field := ui.TextInput(c, &s.animeUsername).Placeholder("用户名或 UID，如 sai").SingleLine()
 					field.OnSubmit(func() { s.saveAnime(on) })
+					presentation.InputFrame(c, field)
 					s.design.Notice(c, false, "只读公开列表，不保存密码。")
 				})
-				s.design.Stacked(c, presentation.FieldGap, func() {
+
+				presentation.SettingsDivider(c)
+
+				presentation.SettingsRow(c, func() {
 					ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
 						s.design.SectionLabel(c, "Access Token（可选）")
 						ui.Spacer(c)
@@ -30,21 +37,26 @@ func (s *ViewModel) SettingsView(c *ui.Context, head *ui.Handle, design presenta
 							c.OpenURL("https://next.bgm.tv/demo/access-token")
 						}
 					})
-					ui.Row(c).FillWidth().Gap(float32(6)).Children(func() {
-						ui.TextInput(c, &s.animeTokenInput).Placeholder("仅私有收藏或写接口时需要").FillWidth().Grow(1).Height(s.design.HeightControl).FixedLineHeight(presentation.InputLineHeight(presentation.SizeBody))
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(presentation.FieldGap).Children(func() {
+						tokenField := ui.TextInput(c, &s.animeTokenInput).Placeholder("仅私有收藏或写接口时需要").SingleLine()
+						presentation.InputFrame(c, tokenField).Grow(1).Font("monospace")
 						if button := s.design.SecondaryButton(c, "保存"); button.Clicked() {
 							s.saveAnimeToken()
 						}
 					})
 				})
-				s.design.Stacked(c, presentation.FieldGap, func() {
-					s.design.SectionLabel(c, "刷新间隔（分钟）")
-					ui.TextInput(c, &s.animeRefreshInput).FillWidth().Height(s.design.HeightControl)
-				})
-				ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
-					if button := s.design.SecondaryButton(c, "保存").Shrink(0); button.Clicked() {
-						s.saveAnime(on)
-					}
+
+				presentation.SettingsDivider(c)
+
+				presentation.SettingsControlRow(c, "刷新间隔（分钟）", "", func() {
+					ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(presentation.FieldGap).Children(func() {
+						refreshField := ui.TextInput(c, &s.animeRefreshInput).SingleLine()
+						refreshField.OnSubmit(func() { s.saveAnime(on) })
+						presentation.InputFrame(c, refreshField).Width(float32(88)).Font("monospace")
+						if button := s.design.SecondaryButton(c, "保存").Shrink(0); button.Clicked() {
+							s.saveAnime(on)
+						}
+					})
 				})
 			})
 		})
