@@ -14,6 +14,10 @@ func TestSummaryStripsMarkdownCodeAndStyleTags(t *testing.T) {
 	if short != "这是一段很长…" {
 		t.Fatalf("truncated summary mismatch: %q", short)
 	}
+
+	if got := Summary("第一行\r\n第二行\r第三行", 180); got != "第一行 第二行 第三行" {
+		t.Fatalf("Summary CRLF/CR mismatch: %q", got)
+	}
 }
 
 func TestStyleTagsParsingAndLiteralFallback(t *testing.T) {

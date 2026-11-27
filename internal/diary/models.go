@@ -133,6 +133,7 @@ func (e Entry) Normalize(now time.Time) (Entry, error) {
 		return Entry{}, fmt.Errorf("diary: missing diary date key")
 	}
 	out.Title = strings.TrimSpace(out.Title)
+	out.Markdown = NormalizeLineEndings(out.Markdown)
 	out.Tags = UniqueTags(out.Tags)
 	if out.CreatedAt.IsZero() {
 		out.CreatedAt = now.UTC()
@@ -200,6 +201,15 @@ func (e Entry) Normalize(now time.Time) (Entry, error) {
 		out.Weather = &w
 	}
 	return out, nil
+}
+
+// NormalizeLineEndings 把 Windows CRLF 与单独 CR 统一为 LF，保证跨端正文一致。
+func NormalizeLineEndings(s string) string {
+	if !strings.ContainsRune(s, '\r') {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.ReplaceAll(s, "\r", "\n")
 }
 
 func UniqueTags(tags []string) []string {

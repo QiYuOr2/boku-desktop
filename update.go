@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -32,8 +31,10 @@ const (
 	// maxFeedBytes 限定本文件读取的清单大小。它与 MyGo 对该文件的上限一致，因此此处接受的清单框架也接受。
 	maxFeedBytes = 1 << 20
 	// updateUserAgent 是 Boku 向源表明身份的方式。GitHub 是本应用联系的非用户自有服务，它可以知道是谁在询问。
-	updateUserAgent   = "Boku"
-	githubReleasesURL = "https://api.github.com/repos/QiYuOr2/boku-desktop/releases?per_page=100"
+	updateUserAgent = "Boku"
+	// githubLatestManifestBase 直接走 GitHub Release 的 /releases/latest/download 重定向，
+	// 与 MyGo 内置更新器一致，不经过 api.github.com，避免匿名 60 次/小时 IP 限流导致 403。
+	githubLatestManifestBase = "https://github.com/QiYuOr2/boku-desktop/releases/latest/download"
 )
 
 // errFeedMissing 表示源返回 404：本构建还没有发布任何版本。
@@ -51,53 +52,7 @@ func (u *mygoUpdater) Enabled() bool { return true }
 
 // Release 读取本构建的清单，转换成界面展示的发布。它是 update.Updater。
 func (u *mygoUpdater) Release(ctx context.Context, current string) (*update.Release, error) {
-	feed, err := u.latestManifest(ctx, releaseFeed())
-	if err != nil {
-		if errors.Is(err, errFeedMissing) {
-			slog.Info("no release is published for this build yet", "version", current)
-			return nil, nil
-		}
-		return nil, err
-	}
-	return u.release(ctx, feed, current)
-}
-
-// githubRelease 是本应用所需的 GitHub 发布列表字段。选中的 asset 是签名清单；其归档 URL 与签名保留在清单内部，由 MyGo 在安装时校验。
-type githubRelease struct {
-	Draft      bool                 `json:"draft"`
-	Prerelease bool                 `json:"prerelease"`
-	Assets     []githubReleaseAsset `json:"assets"`
-}
-
-type githubReleaseAsset struct {
-	Name        string `json:"name"`
-	DownloadURL string `json:"browser_download_url"`
-}
-
-// latestManifest 选出携带本平台清单的最新已发布稳定版。若本仓库尚未发布稳定版，则以最新已发布的预发布版作为更新通道。GitHub 的 /releases/latest 端点刻意不含预发布版，无法表达这一回退。
-func (u *mygoUpdater) latestManifest(ctx context.Context, endpoint string) (string, error) {
-	payload, err := u.get(ctx, endpoint)
-	if err != nil {
-		return "", err
-	}
-	var releases []githubRelease
-	if err := json.Unmarshal(payload, &releases); err != nil {
-		return "", update.BadRelease("releases", "the release list could not be read")
-	}
-	name := "update-" + updateTarget() + ".json"
-	for _, prerelease := range []bool{false, true} {
-		for _, release := range releases {
-			if release.Draft || release.Prerelease != prerelease {
-				continue
-			}
-			for _, asset := range release.Assets {
-				if asset.Name == name && strings.TrimSpace(asset.DownloadURL) != "" {
-					return asset.DownloadURL, nil
-				}
-			}
-		}
-	}
-	return "", errFeedMissing
+	return u.release(ctx, releaseFeed(), current)
 }
 
 // release 是接受测试指定源 URL 的 Release。404 是尚未发布的版本的答复——首个签名发布尚未上线的仓库的常态——它属于「已是最新」而非失败：在每个足够新的版本启动时都显示「检查更新失败」，是对无事的警告。
@@ -197,9 +152,9 @@ type mygoRelauncher struct{}
 // Relaunch 把退出投递到主线程后返回。
 func (mygoRelauncher) Relaunch() { mygo.App.Relaunch() }
 
-// releaseFeed 是 Boku 发布的公开列表。更新器从中选取发布，而非使用 GitHub 的 /latest 重定向，使只含预发布版的仓库仍是可用的更新通道。
+// releaseFeed 是本平台最新签名更新清单的直链，与 MyGo 内置更新器一致。
 func releaseFeed() string {
-	return githubReleasesURL
+	return githubLatestManifestBase + "/update-" + updateTarget() + ".json"
 }
 
 // updateTarget 命名 `mygo build` 为本平台发布的一对文件：darwin-universal 是两种 Mac 架构共用的一个包，其余平台各成一对。

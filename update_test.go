@@ -36,15 +36,19 @@ func TestNewUpdatesAssemblesTheFeature(t *testing.T) {
 	}
 }
 
-// 清单 URL 由平台构造，名字是 `mygo build` 上传的那个。目标与构建自身不一致，就是永远返回 404 的源，看起来与「已是最新」一模一样。
+// 清单 URL 由平台构造，名字是 `mygo build` 上传的那个。直连 /releases/latest/download 不走 api.github.com，避免匿名 IP 限流 403。
 func TestReleaseFeedNamesThisBuildsManifest(t *testing.T) {
+	target := updateTarget()
+	if target == "" {
+		t.Fatal("updateTarget() is empty")
+	}
 	feed := releaseFeed()
-	want := githubReleasesURL
+	want := githubLatestManifestBase + "/update-" + target + ".json"
 	if feed != want {
 		t.Errorf("releaseFeed() = %q, want %q", feed, want)
 	}
-	if target := updateTarget(); target == "" {
-		t.Error("updateTarget() is empty")
+	if strings.Contains(feed, "api.github.com") {
+		t.Errorf("releaseFeed() must not use api.github.com: %q", feed)
 	}
 }
 
@@ -62,16 +66,14 @@ func TestUpdateServiceIsWhatThePresentationAccepts(t *testing.T) {
 	}
 }
 
-func TestLatestManifestPrefersStableAndFallsBackToPrerelease(t *testing.T) {
-	manifestName := "update-" + updateTarget() + ".json"
+func TestReleaseFollowsLatestRedirectAndHandles404(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/releases":
-			fmt.Fprintf(w, `[
-				{"prerelease":true,"assets":[{"name":%q,"browser_download_url":%q}]},
-				{"prerelease":false,"assets":[{"name":%q,"browser_download_url":%q}]}
-			]`, manifestName, server.URL+"/beta.json", manifestName, server.URL+"/stable.json")
+		case "/releases/latest/download/update.json":
+			http.Redirect(w, r, server.URL+"/releases/download/v0.5.2/update.json", http.StatusFound)
+		case "/releases/download/v0.5.2/update.json":
+			fmt.Fprint(w, `{"version":"0.5.2","notes":"n","url":"https://example.invalid/boku.tar.gz","size":1234,"signature":"c2ln"}`)
 		default:
 			http.NotFound(w, r)
 		}
@@ -79,30 +81,17 @@ func TestLatestManifestPrefersStableAndFallsBackToPrerelease(t *testing.T) {
 	defer server.Close()
 
 	u := &mygoUpdater{client: server.Client()}
-	got, err := u.latestManifest(context.Background(), server.URL+"/releases")
+	got, err := u.release(context.Background(), server.URL+"/releases/latest/download/update.json", "0.5.1")
 	if err != nil {
-		t.Fatalf("latestManifest: %v", err)
+		t.Fatalf("release redirect: %v", err)
 	}
-	if want := server.URL + "/stable.json"; got != want {
-		t.Errorf("latestManifest = %q, want %q", got, want)
+	if got == nil || got.Version != "0.5.2" {
+		t.Fatalf("release redirect = %+v, want 0.5.2", got)
 	}
-}
 
-func TestLatestManifestUsesPrereleaseWhenNoStableReleaseExists(t *testing.T) {
-	manifestName := "update-" + updateTarget() + ".json"
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `[{"prerelease":true,"assets":[{"name":%q,"browser_download_url":%q}]}]`, manifestName, server.URL+"/beta.json")
-	}))
-	defer server.Close()
-
-	u := &mygoUpdater{client: server.Client()}
-	got, err := u.latestManifest(context.Background(), server.URL)
-	if err != nil {
-		t.Fatalf("latestManifest: %v", err)
-	}
-	if want := server.URL + "/beta.json"; got != want {
-		t.Errorf("latestManifest = %q, want %q", got, want)
+	missing, err := u.release(context.Background(), server.URL+"/releases/latest/download/missing.json", "0.5.1")
+	if err != nil || missing != nil {
+		t.Fatalf("404 should mean up to date, got release=%+v err=%v", missing, err)
 	}
 }
 

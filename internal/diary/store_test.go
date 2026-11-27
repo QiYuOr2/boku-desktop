@@ -45,13 +45,16 @@ func TestStoreSaveDeleteSearchAndFutureDateRejected(t *testing.T) {
 	saved, err := store.Save(Entry{
 		ID:           id,
 		Title:        "周日散步",
-		Markdown:     "沿西湖走了五公里",
+		Markdown:     "沿西湖走了五公里\r\n晚风很舒服\r回家了",
 		DiaryDateKey: DateKey{Year: 2026, Month: 4, Day: 19},
 		Tags:         []string{"散步", "杭州"},
 		Attachments:  []Attachment{upload.Attachment()},
 	}, []AttachmentUpload{upload}, nil, now)
 	if err != nil {
 		t.Fatalf("Save: %v", err)
+	}
+	if saved.Markdown != "沿西湖走了五公里\n晚风很舒服\n回家了" {
+		t.Fatalf("line endings not normalized on save: %q", saved.Markdown)
 	}
 	if !store.AttachmentExists(upload.Filename) {
 		t.Fatal("attachment file should exist on disk")

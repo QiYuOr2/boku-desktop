@@ -437,7 +437,7 @@ func DecodeDiaryEntryPayload(data []byte) (DiaryEntryPayload, error) {
 // EntryToPayload 把本地日记条目编码为同步协议完整状态。
 func EntryToPayload(entry Entry) (DiaryEntryPayload, error) {
 	title := entry.Title
-	markdown := entry.Markdown
+	markdown := NormalizeLineEndings(entry.Markdown)
 	tags := entry.Tags
 	if tags == nil {
 		tags = []string{}
@@ -558,7 +558,7 @@ func EntryFromPayload(entityID string, payload DiaryEntryPayload) (Entry, error)
 	return Entry{
 		ID:           strings.ToLower(entityID),
 		Title:        *payload.Title,
-		Markdown:     *payload.Markdown,
+		Markdown:     NormalizeLineEndings(*payload.Markdown),
 		DiaryDateKey: key,
 		CreatedAt:    payload.CreatedAt.UTC(),
 		UpdatedAt:    payload.UpdatedAt.UTC(),
