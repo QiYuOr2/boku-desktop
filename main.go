@@ -237,6 +237,7 @@ func main() {
 			})
 		})
 		bilibiliUpdates.Start(context.Background())
+		state.StartDiaryAutoSync()
 		// 更新检查最后启动：它首次查询源还有一分钟，而托盘才是启动的目的。无法自我更新的构建不会得到定时器——服务自己知道，关于框也不会为它画行。
 		if updates != nil {
 			updates.Start(context.Background())

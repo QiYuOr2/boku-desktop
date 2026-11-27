@@ -2,28 +2,29 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/egoist/mygo"
+
+	"boku/internal/domain"
 )
 
-// 更新装配把源、下载目录与重启串在一起，也是错误的目标名会变成永远找不到的发布的地方。与 services 一样，无需桌面会话即可检查。
 func TestNewUpdatesAssemblesTheFeature(t *testing.T) {
 	previousTransport := http.DefaultTransport
 	t.Cleanup(func() { http.DefaultTransport = previousTransport })
 	userData := t.TempDir()
-	svc, err := newUpdates(userData, "0.1.0-beta.5")
+	svc, err := newUpdates(userData, "0.5.1")
 	if err != nil {
 		t.Fatalf("newUpdates: %v", err)
 	}
 	if svc == nil {
 		t.Fatal("newUpdates returned no service")
 	}
-	// 尚未询问过：状态为 Idle，目录是调用者指定用户数据下的那个。
 	if state := svc.State(); state.Status != 0 {
 		t.Errorf("the fresh state = %v, want idle", state.Status)
 	}
@@ -36,21 +37,8 @@ func TestNewUpdatesAssemblesTheFeature(t *testing.T) {
 	}
 }
 
-// 清单 URL 由平台构造，名字是 `mygo build` 上传的那个。目标与构建自身不一致，就是永远返回 404 的源，看起来与「已是最新」一模一样。
-func TestReleaseFeedNamesThisBuildsManifest(t *testing.T) {
-	feed := releaseFeed()
-	want := githubReleasesURL
-	if feed != want {
-		t.Errorf("releaseFeed() = %q, want %q", feed, want)
-	}
-	if target := updateTarget(); target == "" {
-		t.Error("updateTarget() is empty")
-	}
-}
-
-// 装配出的服务是 presentation 能接受的：*update.Service 满足 app.UpdateService，而 nil 是没有该功能的构建所传的。
 func TestUpdateServiceIsWhatThePresentationAccepts(t *testing.T) {
-	svc, err := newUpdates(t.TempDir(), "0.1.0")
+	svc, err := newUpdates(t.TempDir(), "0.5.1")
 	if err != nil {
 		t.Fatalf("newUpdates: %v", err)
 	}
@@ -62,103 +50,59 @@ func TestUpdateServiceIsWhatThePresentationAccepts(t *testing.T) {
 	}
 }
 
-func TestLatestManifestPrefersStableAndFallsBackToPrerelease(t *testing.T) {
-	manifestName := "update-" + updateTarget() + ".json"
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/releases":
-			fmt.Fprintf(w, `[
-				{"prerelease":true,"assets":[{"name":%q,"browser_download_url":%q}]},
-				{"prerelease":false,"assets":[{"name":%q,"browser_download_url":%q}]}
-			]`, manifestName, server.URL+"/beta.json", manifestName, server.URL+"/stable.json")
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer server.Close()
-
-	u := &mygoUpdater{client: server.Client()}
-	got, err := u.latestManifest(context.Background(), server.URL+"/releases")
-	if err != nil {
-		t.Fatalf("latestManifest: %v", err)
-	}
-	if want := server.URL + "/stable.json"; got != want {
-		t.Errorf("latestManifest = %q, want %q", got, want)
-	}
-}
-
-func TestLatestManifestUsesPrereleaseWhenNoStableReleaseExists(t *testing.T) {
-	manifestName := "update-" + updateTarget() + ".json"
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `[{"prerelease":true,"assets":[{"name":%q,"browser_download_url":%q}]}]`, manifestName, server.URL+"/beta.json")
-	}))
-	defer server.Close()
-
-	u := &mygoUpdater{client: server.Client()}
-	got, err := u.latestManifest(context.Background(), server.URL)
-	if err != nil {
-		t.Fatalf("latestManifest: %v", err)
-	}
-	if want := server.URL + "/beta.json"; got != want {
-		t.Errorf("latestManifest = %q, want %q", got, want)
-	}
-}
-
-// serveManifest 返回一个签名清单，版本名为 version。
-func serveManifest(t *testing.T, version string) *httptest.Server {
-	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, `{"version":%q,"notes":"n","url":%q,"size":1234,"signature":"c2ln"}`,
-			version, "https://example.invalid/boku.tar.gz")
-	}))
-	t.Cleanup(server.Close)
-	return server
-}
-
-// 此用例固化的 bug：最新发布的版本通常就是用户正在跑的版本，读回它的清单曾被报告为「更新就绪」。已经是最新即是最新。
-func TestReleaseOfTheRunningVersionIsUpToDate(t *testing.T) {
-	for _, c := range []struct{ current, feed string }{
-		{"0.1.1", "0.1.1"},
-		{"0.1.1", "v0.1.1"},
-		{"0.1.0-beta.5", "0.1.0-beta.5"},
-		// 领先于源的构建不会收到降级。
-		{"0.1.2", "0.1.1"},
+func TestMyGoUpdaterReleaseVersionComparisonAnd404(t *testing.T) {
+	// 运行版本已最新或领先时返回 nil。
+	for _, c := range []struct{ current, offered string }{
+		{"0.5.2", "0.5.2"},
+		{"0.5.2", "v0.5.2"},
+		{"0.5.3", "0.5.2"},
 	} {
-		server := serveManifest(t, c.feed)
-		u := &mygoUpdater{client: server.Client()}
-		got, err := u.release(context.Background(), server.URL, c.current)
-		if err != nil {
-			t.Fatalf("release(%s, feed %s): %v", c.current, c.feed, err)
+		u := &mygoUpdater{
+			enabledFn: func() bool { return true },
+			checkFn: func(context.Context) (*mygo.Update, error) {
+				return &mygo.Update{Version: c.offered, Notes: "notes"}, nil
+			},
 		}
-		if got != nil {
-			t.Errorf("running %s against feed %s offered %q, want no release", c.current, c.feed, got.Version)
+		got, err := u.Release(context.Background(), c.current)
+		if err != nil || got != nil {
+			t.Errorf("current=%s offered=%s: got=(%v, %v), want (nil, nil)", c.current, c.offered, got, err)
 		}
 	}
-}
 
-// 确实更新的源仍是一个发布：修复不得把每次检查都变成「已是最新」。
-func TestReleaseOfANewerVersionIsOffered(t *testing.T) {
-	for _, c := range []struct{ current, feed string }{
-		{"0.1.0", "0.1.1"},
-		{"0.1.0", "v0.1.1"},
-		{"0.1.1", "0.1.2"},
-		{"0.1.0-beta.5", "0.1.0"},
-		{"0.1.1", "0.1.2-beta.1"},
-	} {
-		server := serveManifest(t, c.feed)
-		u := &mygoUpdater{client: server.Client()}
-		got, err := u.release(context.Background(), server.URL, c.current)
-		if err != nil {
-			t.Fatalf("release(%s, feed %s): %v", c.current, c.feed, err)
-		}
-		if got == nil {
-			t.Fatalf("running %s against feed %s offered no release", c.current, c.feed)
-		}
-		// 发布携带的版本去掉了标签的 "v"，界面写的就是这个。
-		if want := strings.TrimPrefix(c.feed, "v"); got.Version != want {
-			t.Errorf("the offered version = %q, want %q", got.Version, want)
-		}
+	// 新版本去掉 v 前缀并缓存待安装对象。
+	u := &mygoUpdater{
+		enabledFn: func() bool { return true },
+		checkFn: func(context.Context) (*mygo.Update, error) {
+			return &mygo.Update{Version: "v0.5.2", Notes: "  更新说明  "}, nil
+		},
+	}
+	got, err := u.Release(context.Background(), "0.5.1")
+	if err != nil || got == nil || got.Version != "0.5.2" || got.Notes != "更新说明" {
+		t.Fatalf("newer release mismatch: got=%+v err=%v", got, err)
+	}
+	if cached := u.takePending("0.5.2"); cached == nil || strings.TrimPrefix(cached.Version, "v") != "0.5.2" {
+		t.Fatalf("expected pending update cached for 0.5.2, got %+v", cached)
+	}
+
+	// 404 视为尚无发布版本（已是最新）。
+	u404 := &mygoUpdater{
+		enabledFn: func() bool { return true },
+		checkFn: func(context.Context) (*mygo.Update, error) {
+			return nil, errors.New("mygo: checking for updates: GET https://github.com/x/y/releases/latest/download/update.json: 404 Not Found")
+		},
+	}
+	if got, err := u404.Release(context.Background(), "0.5.1"); err != nil || got != nil {
+		t.Fatalf("404 should return (nil, nil), got (%+v, %v)", got, err)
+	}
+
+	// ErrUpdatesDisabled 映射为 domain.ErrUpdateUnsupported。
+	uDisabled := &mygoUpdater{
+		enabledFn: func() bool { return true },
+		checkFn: func(context.Context) (*mygo.Update, error) {
+			return nil, mygo.ErrUpdatesDisabled
+		},
+	}
+	if _, err := uDisabled.Release(context.Background(), "0.5.1"); !errors.Is(err, domain.ErrUpdateUnsupported) {
+		t.Fatalf("ErrUpdatesDisabled should map to ErrUpdateUnsupported, got %v", err)
 	}
 }

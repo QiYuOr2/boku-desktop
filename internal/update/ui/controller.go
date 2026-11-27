@@ -190,7 +190,6 @@ func (s *State) UpdateCheckDialogView(c *ui.Context) {
 			ui.Row(c).FillWidth().Justify(ui.End).Gap(float32(8)).Children(func() {
 				if state.Status == domain.UpdateReady {
 					if button := presentation.DesignButton(c, "重启并更新", presentation.ButtonPrimary); button.Clicked() {
-						s.updateCheckDialog = false
 						s.InstallUpdate()
 					}
 				}
