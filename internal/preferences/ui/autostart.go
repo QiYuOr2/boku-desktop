@@ -121,10 +121,23 @@ const autostartIdentifier = "com.boku.app"
 // 一个点不动的复选框等于声称有东西可点，而实际上没有。
 func (s *State) autostartSwitch(c *ui.Context) {
 	on, enabled, status := s.autostartState()
+	if !enabled && status.text == "" {
+		return
+	}
+	presentation.SettingsDivider(c)
 	if enabled {
-		ui.Checkbox(c, &on, autostartLabel).FontSize(presentation.SizeBody).OnClick(func() { s.setAutostart(on) })
+		presentation.SettingsRow(c, func() {
+			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(presentation.GroupGap).Children(func() {
+				ui.Text(c, autostartLabel).FontSize(presentation.SizeBody).FontWeight(500).TextColor(presentation.ColorText).SingleLine().Grow(1)
+				ui.Switch(c, &on).Label(autostartLabel).Shrink(0).OnClick(func() { s.setAutostart(on) })
+			})
+			if status.text != "" {
+				presentation.Notice(c, status.kind, status.text)
+			}
+		})
+		return
 	}
-	if status.text != "" {
+	presentation.SettingsRow(c, func() {
 		presentation.Notice(c, status.kind, status.text)
-	}
+	})
 }

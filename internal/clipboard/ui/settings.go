@@ -17,23 +17,21 @@ func (s *State) SettingsView(c *ui.Context, head *ui.Handle, design presentation
 	settings := s.clipboard.Settings()
 	s.design.Inset(c, func() {
 		s.design.Stacked(c, presentation.GroupGap, func() {
-			s.design.SectionHead(c, head, s.design.Mark, s.design.ColorStoneInk, "剪贴板", "监听与预览设置")
+			s.design.SectionHead(c, head, s.design.Mark, presentation.ColorTextMuted, "剪贴板", "")
 
-			s.design.Stacked(c, presentation.RowGap, func() {
-				s.design.Notice(c, false, "剪贴板内容可能包含密码、验证码与私人对话；默认不读取。")
-
+			presentation.SettingsPanel(c, func() {
 				monitor := settings.Monitoring
-				ui.Checkbox(c, &monitor, "监听剪贴板（每 "+intervalLabel(settings)+" 读取一次）").
-					FontSize(s.design.SizeBody).
-					OnClick(func() { s.setClipboardMonitoring(monitor) })
+				monitorNote := "每 " + intervalLabel(settings) + " 读取一次；可能包含密码与验证码，默认不读取。"
+				presentation.SettingsSwitchRow(c, "监听剪贴板", monitorNote, &monitor, s.setClipboardMonitoring)
+
+				presentation.SettingsDivider(c)
 
 				visible := settings.RegionVisible
-				ui.Checkbox(c, &visible, "在快捷窗口底部显示剪贴板内容").
-					FontSize(s.design.SizeBody).
-					OnClick(func() { s.setClipboardRegionVisible(visible) })
+				presentation.SettingsSwitchRow(c, "在快捷窗口底部显示剪贴板内容", "", &visible, s.setClipboardRegionVisible)
 
-				// 记录范围是三个选项而非常量，选更短会立刻丢弃装不下的旧记录，
-				// 所以下方说明强调这一点。
+				presentation.SettingsDivider(c)
+
+				// 记录范围是三个选项而非常量，选更短会立刻丢弃装不下的旧记录。
 				sizes := clipboard.HistorySizes()
 				selected := 0
 				for index, size := range sizes {
@@ -41,31 +39,29 @@ func (s *State) SettingsView(c *ui.Context, head *ui.Handle, design presentation
 						selected = index
 					}
 				}
-				s.design.Stacked(c, presentation.FieldGap, func() {
-					ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-						s.design.SectionLabel(c, "记录范围")
-						ui.Spacer(c)
-						picker := s.design.Segmented(c, &selected, historySizeLabels(sizes)...)
-						if picker.Changed() {
-							s.setClipboardHistorySize(sizes[selected])
-						}
-					})
-					s.design.Notice(c, false, "缩短范围会立刻丢弃更早的记录。")
-					if !settings.Monitoring {
-						s.design.Notice(c, false, "已有记录仍然保留。")
+				historyNote := "缩短会立刻丢弃更早的记录。"
+				if !settings.Monitoring {
+					historyNote = "缩短会立刻丢弃更早的记录；关闭监听仍保留历史。"
+				}
+				presentation.SettingsControlRow(c, "记录范围", historyNote, func() {
+					picker := s.design.Segmented(c, &selected, historySizeLabels(sizes)...)
+					if picker.Changed() {
+						s.setClipboardHistorySize(sizes[selected])
 					}
 				})
 
-				ui.Row(c).FillWidth().Justify(ui.End).Children(func() {
+				presentation.SettingsDivider(c)
+
+				presentation.SettingsControlRow(c, "历史记录", "", func() {
 					if button := s.historyButton(c); button.Clicked() {
 						s.openHistory()
 					}
 				})
-
-				if text := s.clipboardStatusLine(); text != "" {
-					s.design.Notice(c, false, text)
-				}
 			})
+
+			if text := s.clipboardStatusLine(); text != "" {
+				s.design.Notice(c, false, text)
+			}
 		})
 	})
 }
@@ -86,12 +82,12 @@ func (s *State) historyButton(c *ui.Context) ui.Element {
 		b = b.Background(s.design.ColorHover)
 	}
 	b.Children(func() {
-		ui.Row(c).AlignItems(ui.Center).Gap(float32(6)).Children(func() {
+		ui.Row(c).AlignItems(ui.Center).Gap(float32(8)).Children(func() {
 			ui.Icon(c, s.design.Mark).
-				Size(float32(14), float32(14)).
+				Size(float32(16), float32(16)).
 				Shrink(0).
 				TextColor(s.design.ColorTextMuted)
-			ui.Text(c, "打开剪贴板历史").FontSize(s.design.SizeFine).FontWeight(500).SingleLine()
+			ui.Text(c, "打开剪贴板历史").FontSize(s.design.SizeFine).FontWeight(500).TextColor(presentation.ColorText).SingleLine()
 		})
 	})
 	return b

@@ -279,24 +279,25 @@ func composerChrome() (inset, radius float32) {
 func (s *State) SettingsView(c *ui.Context, head *ui.Handle) {
 	presentation.Inset(c, func() {
 		presentation.Stacked(c, presentation.GroupGap, func() {
-			presentation.SectionHead(c, head, s.mark, presentation.ColorStoneInk, "闪念", "快捷记录")
-			presentation.Stacked(c, presentation.FieldGap, func() {
-				presentation.SectionLabel(c, "快捷键")
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(12)).Children(func() {
-					ui.Text(c, "记一条闪念").FontSize(presentation.SizeBody).TextColor(presentation.ColorTextSoft).SingleLine().Grow(1)
-					s.shortcutButton(c)
+			presentation.SectionHead(c, head, s.mark, presentation.ColorTextMuted, "闪念", "")
+			presentation.SettingsPanel(c, func() {
+				presentation.SettingsRow(c, func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(presentation.GroupGap).Children(func() {
+						ui.Text(c, "记一条闪念").FontSize(presentation.SizeBody).FontWeight(500).TextColor(presentation.ColorText).SingleLine().Grow(1)
+						s.shortcutButton(c)
+					})
+					if s.recording {
+						presentation.Notice(c, presentation.NotePlain, "正在录制：按下新的组合键，Esc 取消。")
+					}
+					if note := s.shortcutNote; note != "" {
+						presentation.Notice(c, presentation.NoteWarning, note)
+					} else if s.shortcutErr != "" {
+						presentation.Notice(c, presentation.NoteWarning, s.shortcutErr)
+					}
+					if platform := presentation.ShortcutPlatformNote(); platform != "" {
+						presentation.Notice(c, presentation.NotePlain, platform)
+					}
 				})
-				if s.recording {
-					presentation.Notice(c, presentation.NotePlain, "正在录制：按下新的组合键，Esc 取消。")
-				}
-				if note := s.shortcutNote; note != "" {
-					presentation.Notice(c, presentation.NoteWarning, note)
-				} else if s.shortcutErr != "" {
-					presentation.Notice(c, presentation.NoteWarning, s.shortcutErr)
-				}
-				if platform := presentation.ShortcutPlatformNote(); platform != "" {
-					presentation.Notice(c, presentation.NotePlain, platform)
-				}
 			})
 		})
 	})

@@ -1,7 +1,7 @@
 {
   "name": "Boku",
   "identifier": "com.boku.app",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "out": "build",
   "macos": {
     "infoPlist": { "LSUIElement": true }

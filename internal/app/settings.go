@@ -19,14 +19,14 @@ import (
 // 设置窗口只在首次被请求时创建，之后会被真正关闭：
 // 托盘应用在无人配置时应不占资源。
 const (
-	// 页面宽度固定为 560，旁边一列文字不得挤窄下方的表单。
-	settingsSidebarWidth = 132
-	settingsPageWidth    = 560
+	// 侧栏与页面宽均为 4px 整数倍，放大留白后表单与控件仍保持宽裕。
+	settingsSidebarWidth = 156
+	settingsPageWidth    = 584
 	settingsWidth        = settingsPageWidth + settingsSidebarWidth
-	// 页面在目标分区上方保留的空间，让用户看出分区从这里开始，而非贴着窗口边缘。
-	settingsAnchor = 16
-	// 页面期望的高度：五个分区加页脚；内容更多时滚动，而不是把窗口撑出屏幕。
-	settingsHeight = 660
+	// 页面在目标分区上方保留的空间，与 PageEdge 对齐。
+	settingsAnchor = 24
+	// 页面期望的高度；内容更多时滚动，而不是把窗口撑出屏幕。
+	settingsHeight = 680
 )
 
 type settingsSectionKind int
@@ -127,7 +127,7 @@ func (s *State) settingsView(c *ui.Context) {
 	presentation.WindowFrame(c).Children(func() {
 		ui.Row(c).FillWidth().Grow(1).AlignItems(ui.Stretch).Children(func() {
 			s.settingsSidebar(c)
-			ui.Column(c).Fill().Grow(1).Children(func() {
+			ui.Column(c).Fill().Grow(1).Background(presentation.ColorCanvas).Children(func() {
 				// 页面占满列剩余空间并在其中滚动：尺寸由内容决定的滚动容器没有可滚动的余地。
 				body := ui.Scroll(c).FillWidth().Grow(1).TrackScroll(&s.settingsScroll)
 				body.Children(func() {
@@ -280,8 +280,8 @@ func (s *State) settingsSidebar(c *ui.Context) {
 		// 侧栏的边界只在朝向页面的那一侧：那是两块区域相接的地方。
 		BorderWidth(0, 0, 0, 1).
 		BorderColor(presentation.ColorBorder).
-		Padding(float32(12), float32(8)).
-		Gap(float32(2)).
+		Padding(float32(16), float32(12)).
+		Gap(float32(4)).
 		Children(func() {
 			for _, page := range s.settingsPages() {
 				if s.settingsNav(c, page, page.kind == active) {
@@ -291,9 +291,7 @@ func (s *State) settingsSidebar(c *ui.Context) {
 		})
 }
 
-// settingsNav 是侧栏的一个入口：分区的图标记与名称，页面显示该分区时以品牌绿填充。
-//
-// 整行都是点击目标而非其中文字：一行指向一个位置，就应在行内任意处响应。
+// settingsNav 是侧栏的一个入口：24×24 透明框内 18px 图标与名称，选中时以品牌绿填充。
 func (s *State) settingsNav(c *ui.Context, page *settingsPage, open bool) bool {
 	row := ui.ButtonBase(c).Label(page.name).
 		FillWidth().
@@ -301,7 +299,7 @@ func (s *State) settingsNav(c *ui.Context, page *settingsPage, open bool) bool {
 		Role(ui.RoleTab).
 		Selected(open).
 		Cursor(ui.CursorPointer).
-		Padding(float32(6), float32(8)).
+		Padding(float32(8), float32(12)).
 		Radius(presentation.RadiusField).
 		Justify(ui.Start).
 		AlignItems(ui.Center).
@@ -323,10 +321,12 @@ func (s *State) settingsNav(c *ui.Context, page *settingsPage, open bool) bool {
 	}
 	row.Children(func() {
 		if page.mark != nil {
-			ui.Icon(c, page.mark).Size(float32(16), float32(16)).Shrink(0).TextColor(icon)
+			ui.Box(c).Size(presentation.IconBoxSize, presentation.IconBoxSize).Shrink(0).Center().Children(func() {
+				ui.Icon(c, page.mark).Size(presentation.IconGlyphSize, presentation.IconGlyphSize).Shrink(0).TextColor(icon)
+			})
 		}
 		ui.Text(c, page.name).
-			FontSize(presentation.SizeSmall).
+			FontSize(presentation.SizeBody).
 			FontWeight(500).
 			TextColor(ink).
 			SingleLine()
@@ -378,42 +378,28 @@ func (s *State) generalSection(c *ui.Context, head *ui.Handle) {
 func (s *State) aboutSection(c *ui.Context, head *ui.Handle) {
 	presentation.Inset(c, func() {
 		presentation.Stacked(c, presentation.GroupGap, func() {
-			presentation.SectionHead(c, head, s.infoMark, presentation.ColorStoneInk, "关于", "版本与构建")
+			presentation.SectionHead(c, head, s.infoMark, presentation.ColorTextMuted, "关于", "")
 
-			ui.Column(c).FillWidth().
-				Background(presentation.ColorField).
-				Border(1, presentation.ColorBorder).
-				Radius(presentation.RadiusField).
-				Padding(float32(12)).
-				Children(func() {
-					presentation.Stacked(c, float32(6), func() {
-						aboutLine(c, "版本", s.versionLine())
-						aboutLine(c, "平台", runtime.GOOS+" / "+runtime.GOARCH)
-						aboutLine(c, "构建", runtime.Version())
-						aboutLine(c, "凭据", s.credentialUI.CredentialPath())
+			presentation.SettingsPanel(c, func() {
+				presentation.SettingsKVRow(c, "版本", s.versionLine(), true)
+				presentation.SettingsDivider(c)
+				presentation.SettingsKVRow(c, "平台", runtime.GOOS+" / "+runtime.GOARCH, true)
+				presentation.SettingsDivider(c)
+				presentation.SettingsKVRow(c, "构建", runtime.Version(), true)
+				presentation.SettingsDivider(c)
+				presentation.SettingsKVRow(c, "凭据", s.credentialUI.CredentialPath(), true)
+				presentation.SettingsDivider(c)
+				presentation.SettingsRowCompact(c, func() {
+					ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(presentation.FieldGap).Children(func() {
+						if button := presentation.DesignButton(c, "复制版本信息", presentation.ButtonSecondary); button.Clicked() {
+							s.copyVersionInfo()
+						}
+						s.updateCheckButton(c)
+						ui.Spacer(c)
 					})
 				})
-
-			ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
-				if button := presentation.DesignButton(c, "复制版本信息", presentation.ButtonSecondary); button.Clicked() {
-					s.copyVersionInfo()
-				}
-				s.updateCheckButton(c)
-				ui.Spacer(c)
 			})
 		})
-	})
-}
-
-func aboutLine(c *ui.Context, label, value string) {
-	ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Children(func() {
-		ui.Text(c, label).FontSize(presentation.SizeSmall).TextColor(presentation.ColorTextMuted).SingleLine().Shrink(0)
-		ui.Spacer(c)
-		ui.Text(c, value).
-			FontSize(presentation.SizeSmall).
-			TextColor(presentation.ColorText).
-			Font("monospace").
-			SingleLine()
 	})
 }
 

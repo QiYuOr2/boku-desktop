@@ -16,14 +16,14 @@ type quickLayoutEntry struct {
 
 func (s *LayoutState) SettingsView(c *ui.Context, head *ui.Handle) {
 	presentation.Inset(c, func() {
-		presentation.Stacked(c, presentation.GroupGap, func() {
-			presentation.SectionHead(c, head, s.layoutMark, presentation.ColorBrand, "悬浮窗面板", "拖拽排序 · 点击眼睛控制显示")
+		presentation.Stacked(c, presentation.RowGap, func() {
+			presentation.SectionHead(c, head, s.layoutMark, presentation.ColorTextMuted, "面板布局", "")
 			ui.Column(c).FillWidth().Children(func() {
-				for _, entry := range s.entries() {
-					s.quickLayoutDropZone(c, entry.id)
+				for index, entry := range s.entries() {
+					s.quickLayoutDropZone(c, entry.id, index == 0)
 					s.quickLayoutCard(c, entry)
 				}
-				s.quickLayoutDropZone(c, "")
+				s.quickLayoutDropZone(c, "", false)
 			})
 			if s.layoutStatus != "" {
 				presentation.Notice(c, presentation.NotePlain, s.layoutStatus)
@@ -32,13 +32,17 @@ func (s *LayoutState) SettingsView(c *ui.Context, head *ui.Handle) {
 	})
 }
 
-func (s *LayoutState) quickLayoutDropZone(c *ui.Context, before string) {
+func (s *LayoutState) quickLayoutDropZone(c *ui.Context, before string, first bool) {
 	c.Key("layout-drop-" + before)
-	zone := ui.Box(c).FillWidth().Height(float32(6)).Radius(presentation.RadiusField)
+	h := float32(8)
+	if first {
+		h = 4
+	}
+	zone := ui.Box(c).FillWidth().Height(h).Radius(presentation.RadiusField)
 	if _, over := ui.DragOver[string](zone); over {
-		zone = zone.Height(float32(26)).Background(presentation.ColorBrandTint).Border(1, presentation.ColorBrand).Center()
+		zone = zone.Height(float32(28)).Background(presentation.ColorBrandTint).Border(1, presentation.ColorBrand).Center()
 		zone.Children(func() {
-			ui.Text(c, "放置到此处").FontSize(presentation.SizeQuickTiny).TextColor(presentation.ColorBrand)
+			ui.Text(c, "放置到此处").FontSize(presentation.SizeSmall).TextColor(presentation.ColorBrand)
 		})
 	}
 	if moved, dropped := ui.Drop[string](zone); dropped {
@@ -55,23 +59,28 @@ func (s *LayoutState) quickLayoutDropZone(c *ui.Context, before string) {
 func (s *LayoutState) quickLayoutCard(c *ui.Context, entry quickLayoutEntry) {
 	c.Key("layout-card-" + entry.id)
 	visible := s.layout.Visible(entry.id)
-	row := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(float32(8)).Padding(float32(10), float32(10)).Radius(presentation.RadiusField).Background(presentation.ColorSurface).Border(1, presentation.ColorBorder).Drag(entry.id)
+	row := ui.Row(c).FillWidth().AlignItems(ui.Center).
+		Gap(presentation.RowGap).
+		Padding(presentation.SettingRowPadYCompact, presentation.SettingRowPadX).
+		Radius(presentation.RadiusPanel).
+		Background(presentation.ColorSurface).
+		Border(1, presentation.ColorBorder).
+		Drag(entry.id)
 	if !visible {
 		row = row.Opacity(0.55)
 	}
 	row.Children(func() {
-		ui.Icon(c, s.gripMark).Size(float32(16), float32(16)).Shrink(0).TextColor(presentation.ColorTextFaint)
-		ui.Box(c).Size(float32(28), float32(28)).Shrink(0).Radius(float32(6)).Background(entry.mark.Tile).Center().Children(func() {
-			ui.Icon(c, entry.mark.SVG).Size(float32(14)*4/3, float32(14)*4/3).TextColor(entry.mark.Ink)
+		ui.Box(c).Size(presentation.IconBoxSize, presentation.IconBoxSize).Shrink(0).Center().Children(func() {
+			ui.Icon(c, s.gripMark).Size(presentation.IconGlyphSize, presentation.IconGlyphSize).Shrink(0).TextColor(presentation.ColorTextMuted)
 		})
-		ui.Column(c).Grow(1).Gap(float32(1)).Children(func() {
-			ink := presentation.ColorTextSoft
-			if !visible {
-				ink = presentation.ColorTextFaint
-			}
-			ui.Text(c, entry.title).FontSize(presentation.SizeSmall).FontWeight(500).TextColor(ink).SingleLine()
-			ui.Text(c, entry.subtitle).FontSize(presentation.SizeQuickTiny).TextColor(presentation.ColorTextMuted).SingleLine()
+		ui.Box(c).Size(float32(28), float32(28)).Shrink(0).Radius(presentation.RadiusTile).Background(entry.mark.Tile).Center().Children(func() {
+			ui.Icon(c, entry.mark.SVG).Size(float32(16), float32(16)).TextColor(entry.mark.Ink)
 		})
+		ink := presentation.ColorText
+		if !visible {
+			ink = presentation.ColorTextMuted
+		}
+		ui.Text(c, entry.title).FontSize(presentation.SizeBody).FontWeight(500).TextColor(ink).SingleLine().Grow(1)
 		eye, label := s.eyeMark, "隐藏区块"
 		if !visible {
 			eye, label = s.eyeOffMark, "显示区块"

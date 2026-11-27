@@ -33,8 +33,8 @@ type Palette struct {
 	CodexTile, CodexInk ui.Color
 	SteamTile, SteamInk ui.Color
 	// 表面。
-	surface, sidebar, field, muted, hover, active, rowAlt ui.Color
-	border, Hairline                                      ui.Color
+	canvas, surface, sidebar, field, muted, hover, active, rowAlt ui.Color
+	border, Hairline                                              ui.Color
 
 	// 文本。
 	text, textSoft, textBody, textMuted, textFaint, inputValue ui.Color
@@ -89,23 +89,24 @@ var LightPalette = Palette{
 		Hover: ui.Hex("#FFE8EF"), HoverBorder: ui.Hex("#F4B0C5"),
 		Tile: ui.Hex("#FFF0F3"), TileInk: ui.Hex("#BF315C"), BadgeFill: ui.Hex("#C93666"), BadgeInk: ui.Hex("#FFFFFF"),
 	},
+	canvas:  ui.Hex("#F5F5F5"),
 	surface: ui.Hex("#FFFFFF"),
-	sidebar: ui.Hex("#FAFAF9"),
-	field:   ui.Hex("#FAFAF9"),
-	muted:   ui.Hex("#F5F5F4"),
-	hover:   ui.Hex("#F5F5F4"),
-	active:  ui.Hex("#E7E5E4"),
+	sidebar: ui.Hex("#FAFAFA"),
+	field:   ui.Hex("#FAFAFA"),
+	muted:   ui.Hex("#F4F4F5"),
+	hover:   ui.Hex("#F4F4F5"),
+	active:  ui.Hex("#E4E4E7"),
 	rowAlt:  ui.Hex("#F8FAFC"),
 
-	border:   ui.Hex("#E2E8F0"),
-	Hairline: ui.Hex("#F5F5F4"),
+	border:   ui.Hex("#E5E5E5"),
+	Hairline: ui.Hex("#EAEAEA"),
 
-	text:       ui.Hex("#0F172A"),
-	textSoft:   ui.Hex("#1C1917"),
-	textBody:   ui.Hex("#44403C"),
-	textMuted:  ui.Hex("#64748B"),
-	textFaint:  ui.Hex("#78716C"),
-	inputValue: ui.Hex("#57534E"),
+	text:       ui.Hex("#181818"),
+	textSoft:   ui.Hex("#181818"),
+	textBody:   ui.Hex("#3F3F46"),
+	textMuted:  ui.Hex("#6A6A6A"),
+	textFaint:  ui.Hex("#6A6A6A"),
+	inputValue: ui.Hex("#181818"),
 
 	brand:           ui.Hex("#3B693D"),
 	brandHover:      ui.Hex("#2F5631"),
@@ -195,23 +196,24 @@ var DarkPalette = Palette{
 		Hover: ui.Hex("#3B2631"), HoverBorder: ui.Hex("#91516B"),
 		Tile: ui.Hex("#50313F"), TileInk: ui.Hex("#F694B2"), BadgeFill: ui.Hex("#81304D"), BadgeInk: ui.Hex("#FFE4EC"),
 	},
+	canvas:  ui.Hex("#111113"),
 	surface: ui.Hex("#18181B"),
-	sidebar: ui.Hex("#1E1E22"),
+	sidebar: ui.Hex("#141416"),
 	field:   ui.Hex("#202024"),
-	muted:   ui.Hex("#27272A"),
+	muted:   ui.Hex("#232327"),
 	hover:   ui.Hex("#27272A"),
-	active:  ui.Hex("#303035"),
+	active:  ui.Hex("#303036"),
 	rowAlt:  ui.Hex("#1F1F23"),
 
-	border:   ui.Hex("#34343A"),
-	Hairline: ui.Hex("#27272A"),
+	border:   ui.Hex("#2C2C31"),
+	Hairline: ui.Hex("#29292E"),
 
 	text:       ui.Hex("#F4F4F5"),
-	textSoft:   ui.Hex("#FAFAF9"),
+	textSoft:   ui.Hex("#F4F4F5"),
 	textBody:   ui.Hex("#D4D4D8"),
 	textMuted:  ui.Hex("#A1A1AA"),
-	textFaint:  ui.Hex("#A8A29E"),
-	inputValue: ui.Hex("#D6D3D1"),
+	textFaint:  ui.Hex("#A1A1AA"),
+	inputValue: ui.Hex("#F4F4F5"),
 
 	brand:           ui.Hex("#6FA776"),
 	brandHover:      ui.Hex("#84BA8A"),
@@ -289,8 +291,9 @@ var DarkPalette = Palette{
 var (
 	// --- 表面 -----------------------------------------------------------
 
-	// ColorSurface 是窗口自己的底面。每个窗口都画在它上面——内容、页眉线、
-	// 页脚——因此窗口读起来是一个带线条的表面，而不是一叠色带。
+	// ColorCanvas 是设置窗口等分组页面的中性底面画布，用来衬托单层白色/深色分组面板。
+	ColorCanvas = LightPalette.canvas
+	// ColorSurface 是窗口与设置面板自身的底面。
 	ColorSurface = LightPalette.surface
 	// ColorField 是输入框的底面，ColorMuted 是不代表任何具体事物磁贴的底面。
 	ColorField = LightPalette.field
@@ -408,6 +411,7 @@ func ApplyDesign(dark bool) {
 	if dark {
 		p = DarkPalette
 	}
+	ColorCanvas = p.canvas
 	ColorSurface = p.surface
 	AnimeAccent, BilibiliAccent = p.Anime, p.Bilibili
 	CodexTile, CodexInk = p.CodexTile, p.CodexInk
@@ -500,29 +504,37 @@ func HeatColor(level int) ui.Color {
 	}
 }
 
-// 应用的点数度量，取自设计：每个窗口保持 20 点页边距，一节在标题与各组之间留
-// 16 点，行间 12 点，标签与其控件之间 8 点。同一行上的每个控件高 36 点。
+// 应用的点数度量，遵循 4px 间距栅格与 8–40px 圆角阶梯。
 const (
-	// PageEdge 是窗口自身的边距：页面四周留的空，以及页脚版本号在其内留的空。
-	PageEdge = 20.0
-	// SectionGap 是一节上下留的空，使分隔两节的线与两者都不相贴。
-	SectionGap = 16.0
-	// GroupGap 分隔节标题与其主体，以及一组控件与下一组。
+	// PageEdge 是设置与列表窗口的四周留白。
+	PageEdge = 24.0
+	// SectionGap 是设置页相邻大分区之间的留白（取代多余的节间分割线）。
+	SectionGap = 32.0
+	// GroupGap 分隔节标题与其主体，以及同一节内相邻分组面板。
 	GroupGap = 16.0
 	// RowGap 是一组内相邻行之间的空。
 	RowGap = 12.0
 	// FieldGap 是标签与其所指控件之间的空。
 	FieldGap = 8.0
 
-	RadiusCard = 12.0
-	// RadiusTile 圆角处理列表行首的小方块。
-	RadiusTile  = 6.0
-	RadiusField = 6.0
+	// 设置面板与设置行内边距（严格 4px 倍数）。
+	SettingRowPadX        = 16.0
+	SettingRowPadY        = 16.0
+	SettingRowPadYCompact = 12.0
 
-	// HeightControl 是每个控件共用的高度：输入框、按钮与分段控件在同一行排成一行。
+	// RadiusPanel 是单层设置分组面板圆角；RadiusCard 是浮窗卡片圆角；
+	// RadiusTile 与 RadiusField 均为 8px（位于 8–40px 阶梯内）。
+	RadiusPanel = 12.0
+	RadiusCard  = 12.0
+	RadiusTile  = 8.0
+	RadiusField = 8.0
+
+	// HeightControl 是每个标准控件共用的高度：输入框、按钮与分段控件在同一行排成一行。
 	HeightControl = 36.0
-	// SizeTile 是节标题的图形：32 点，圆角。
-	SizeTile = 32.0
+	// SizeTile 保留给图标底块；通用 UI 图标本体 18px 置入 24×24 透明外框内。
+	SizeTile      = 32.0
+	IconBoxSize   = 24.0
+	IconGlyphSize = 18.0
 
 	// 快捷窗口的区块按设计绘制：两侧 16，上 14 下 12，头部 20 点图形。
 	QuickEdge     = 16.0
@@ -536,19 +548,17 @@ const (
 	SizeQuickNumber = 22.0
 	SizeQuickTiny   = 10.0
 
-	// API key 节是页面的密集区：设计把一项服务压进两行，因此其标题和每张卡片内的
-	// 行都比页面其余部分小一号。下面每个数字都是该设计的。
-	SizeTileCompact     = 28.0 // 其图形：w-7
-	SizeTitleCompact    = 14.0 // 标题名
-	SizeSubtitleCompact = 11.0 // 标题那一行说明
-	SizeCardName        = 13.0 // 卡片头部的名字
-	SizeFine            = 11.0 // 卡片操作及其上方的警告
-	HeightCardControl   = 32.0 // h-8：卡片字段及其旁的操作
-	CardActionPad       = 10.0 // px-2.5：操作标签旁的空
+	// API key 与密集设置行度量。
+	SizeTileCompact     = 24.0
+	SizeTitleCompact    = 18.0
+	SizeSubtitleCompact = 12.0
+	SizeCardName        = 14.0
+	SizeFine            = 12.0
+	HeightCardControl   = 32.0
+	CardActionPad       = 12.0
 
-	// 排版：节的名称、一行说明及其下正文。它们取设计自己的字号而非主题的倍数，
-	// 因为两个窗口都很密集。
-	SizeTitle    = 15.0
+	// 排版：标题 18px 加粗、正文与控件标签 14px、次要元信息 12px。
+	SizeTitle    = 18.0
 	SizeSection  = 14.0
 	SizeSubtitle = 12.0
 	SizeBody     = 14.0
@@ -635,7 +645,7 @@ func Theme(dark bool) *ui.Theme {
 // 拥有该字符的字体族绘制每个字符，因此下面的顺序也是回退顺序。
 //
 // 该栈的来源是 docs/ui.md §7；那里改了这里就要改。
-const UiFontFamily = "-apple-system, BlinkMacSystemFont, \"Segoe UI\", " +
+const UiFontFamily = "\"Geist\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", " +
 	"\"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei UI\", \"Microsoft YaHei\", " +
 	"\"Noto Sans CJK JP\", \"Noto Sans CJK SC\", \"Yu Gothic\", sans-serif"
 
@@ -659,8 +669,8 @@ func WindowFrame(c *ui.Context) ui.Element {
 func Footer(c *ui.Context, version string) {
 	Hairline(c)
 	ui.Row(c).FillWidth().Shrink(0).Font("monospace").
-		PaddingX(float32(12)).
-		PaddingY(PageEdge / 2).
+		Background(ColorSidebar).
+		Padding(float32(12), float32(16)).
 		AlignItems(ui.Center).
 		Children(func() { VersionLine(c, version) })
 }
@@ -687,54 +697,44 @@ type HeadSize struct {
 // 小标题的图形是 28 而设计的是 32，其后留的空是 14 而那种是 10：较小的图形不能
 // 移动名字，因为各节的名字排成页面上一列（由 TestDesignSectionsArePeers 保证）。
 var (
-	HeadRegular = HeadSize{Tile: SizeTile, padX: 6, padY: 4, gap: 10, title: SizeTitle, subtitle: SizeSubtitle}
-	HeadSmall   = HeadSize{Tile: SizeTileCompact, padX: 5, padY: 3.5, gap: 14, title: SizeTitleCompact, subtitle: SizeSubtitleCompact}
+	HeadRegular = HeadSize{Tile: IconBoxSize, padX: 3, padY: 3, gap: 8, title: SizeTitle, subtitle: SizeSubtitle}
+	HeadSmall   = HeadSize{Tile: IconBoxSize, padX: 3, padY: 3, gap: 8, title: SizeTitleCompact, subtitle: SizeSubtitleCompact}
 )
 
-// SectionHead 是设置窗口一节如何介绍自己：它关于之物的图形、名称，以及一行说明
-// 这节是做什么的。它把 head 绑定到它所画的盒子上，从而告诉侧栏这节的标题在哪里。
-//
-// 一节的图形用其所属事物自己的颜色绘制、不做装饰：它无论出现在哪里都保持自己的
-// 形状和比例。没有自己事物的节——剪贴板、尚未到来的组——用淡 stone 绘制的应用图形。
+// SectionHead 是设置窗口一节的标题：24×24 透明框内 18px 图标与 18px 加粗标题，
+// 不渲染装饰性副标题。head 绑定到标题行以便侧栏滚动跟随。
 func SectionHead(c *ui.Context, head *ui.Handle, mark *ui.SVG, Ink ui.Color, title, subtitle string) {
 	SectionHeadSized(c, head, mark, Ink, title, subtitle, HeadRegular)
 }
 
-// SectionHeadSmall 是同样的标题小一号：28 点磁贴与设计的 14/11 字号对。API key
-// 节用它，因为其卡片密集，比它们大一号的标题会成为页面上最大的东西。
+// SectionHeadSmall 与 SectionHead 同级，保持全部设置分区的视觉权重一致。
 func SectionHeadSmall(c *ui.Context, head *ui.Handle, mark *ui.SVG, Ink ui.Color, title, subtitle string) {
 	SectionHeadSized(c, head, mark, Ink, title, subtitle, HeadSmall)
 }
 
-// SectionHeadSized 以两种尺寸之一绘制标题本身。
+// SectionHeadSized 绘制设置分区标题行。subtitle 参数保留签名为兼容既有调用方，按高优先级设计规范不渲染。
 func SectionHeadSized(c *ui.Context, head *ui.Handle, mark *ui.SVG, Ink ui.Color, title, subtitle string, size HeadSize) {
+	_ = subtitle
 	row := ui.Row(c).FillWidth().AlignItems(ui.Center).Gap(size.gap)
 	if head != nil {
 		row.Bind(head)
 	}
 	row.Children(func() {
 		if mark != nil {
-			ui.Box(c).Children(func() {
+			ui.Box(c).Size(IconBoxSize, IconBoxSize).Shrink(0).Center().Children(func() {
 				ui.Icon(c, mark).
-					Height(size.Tile).
-					Width(size.Tile).
-					Padding(size.padY, size.padX).
+					Size(IconGlyphSize, IconGlyphSize).
 					Shrink(0).
 					TextColor(Ink)
-			}).Background(ColorMuted).Radius(RadiusTile)
+			})
 		}
-		ui.Column(c).Fill().Children(func() {
-			ui.Text(c, title).FontSize(size.title).FontWeight(600).TextColor(ColorTextSoft).SingleLine()
-			if subtitle != "" {
-				ui.Text(c, subtitle).FontSize(size.subtitle).TextColor(ColorTextMuted).SingleLine()
-			}
-		})
+		ui.Text(c, title).FontSize(size.title).FontWeight(600).TextColor(ColorText).SingleLine()
 	})
 }
 
-// SectionLabel 是控件上方的标签：它下面的值是什么。
+// SectionLabel 是控件或设置项的标签。
 func SectionLabel(c *ui.Context, label string) {
-	ui.Text(c, label).FontSize(SizeSection).FontWeight(500).TextColor(ColorTextBody).SingleLine()
+	ui.Text(c, label).FontSize(SizeSection).FontWeight(500).TextColor(ColorText).SingleLine()
 }
 
 // InputFrame 给文本输入框以字段的外观：字段自身底面、一条细线、每个控件共用的
@@ -766,7 +766,7 @@ func InputLineHeight(fontSize float32) float32 {
 func FieldFrame(c *ui.Context, input ui.Element) ui.Element {
 	return input.
 		Height(HeightCardControl).
-		Padding(0, float32(10)).
+		Padding(0, float32(12)).
 		Radius(RadiusField).
 		Background(ColorField).
 		Border(1, ColorBorder).
@@ -885,8 +885,8 @@ func ButtonSized(c *ui.Context, label string, tone ButtonTone, size ButtonSize) 
 // 它的墨色说明它做什么。它像这里每个动作一样响应自己范围内的指针。
 func TextAction(c *ui.Context, label string, Ink ui.Color) ui.Element {
 	b := ui.ButtonBase(c).Label(label).
-		Radius(float32(4)).
-		Padding(float32(2), float32(6)).
+		Radius(RadiusField).
+		Padding(float32(4), float32(8)).
 		Cursor(ui.CursorPointer)
 	switch {
 	case b.Pressed():
@@ -1139,21 +1139,21 @@ func SkeletonBar(c *ui.Context, width, fraction float32) {
 func Segmented(c *ui.Context, selected *int, labels ...string) ui.Element {
 	parts := ui.SegmentedBase(c, selected, len(labels))
 	parts.Track.
-		Padding(float32(2)).
-		Radius(RadiusField).
-		Background(ColorSurface).
+		Padding(float32(4)).
+		Radius(RadiusPanel).
+		Background(ColorMuted).
 		Border(1, ColorBorder)
 	parts.Track.Children(func() {
 		for index := range labels {
 			segment := parts.Segment(index).
-				Padding(float32(4), float32(10)).
-				Radius(float32(5)).
+				Padding(float32(4), float32(12)).
+				Radius(RadiusField).
 				FontSize(SizeSmall).
 				FontWeight(500)
 			if index == *selected {
 				segment.Background(ColorBrand).TextColor(ColorOnBrand)
 			} else {
-				segment.TextColor(ColorTextFaint)
+				segment.TextColor(ColorTextMuted)
 				if segment.Hovered() {
 					segment.Background(ColorHover)
 				}
@@ -1327,7 +1327,7 @@ func QuickTile(c *ui.Context, mark PanelMark) {
 func StatusNote(c *ui.Context, text string) {
 	ui.Row(c).Shrink(0).AlignItems(ui.Center).Gap(float32(6)).Children(func() {
 		ui.Box(c).Size(float32(6), float32(6)).Radius(999).Shrink(0).Background(ColorSuccess)
-		ui.Text(c, text).FontSize(SizeBody).TextColor(ColorSuccess).SingleLine()
+		ui.Text(c, text).FontSize(SizeSmall).FontWeight(500).TextColor(ColorSuccess).SingleLine()
 	})
 }
 
