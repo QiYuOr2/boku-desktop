@@ -48,7 +48,14 @@ const (
 	panelStyle
 )
 
-const defaultPageSize = 30
+const (
+	defaultPageSize = 30
+
+	defaultAutoSyncCooldown     = 30 * time.Second
+	defaultAutoSyncPollInterval = 3 * time.Minute
+	defaultAutoSyncStartupDelay = 3 * time.Second
+	defaultAutoSyncQuitTimeout  = 4 * time.Second
+)
 
 // State 持有桌面端日记窗口与设置页日记区的全部交互状态。
 // 所有字段仅在主 UI 线程上读写，后台 I/O 与网络结果都经 host.OnMain 回到主线程。
@@ -104,13 +111,14 @@ type editorState struct {
 	location           *diary.LocationSnapshot
 	weather            *diary.WeatherSnapshot
 
-	tab           int // 0: 编辑, 1: 分栏, 2: 预览
-	dirty         bool
-	saveState     saveState
-	saveErr       string
-	metaNotice    string
-	autoSaveGen   uint64
-	autoSaveTimer *time.Timer
+	tab            int // 0: 编辑, 1: 分栏, 2: 预览
+	dirty          bool
+	savedInSession bool
+	saveState      saveState
+	saveErr        string
+	metaNotice     string
+	autoSaveGen    uint64
+	autoSaveTimer  *time.Timer
 
 	panel            inlinePanel
 	dateInput        string
@@ -154,6 +162,17 @@ type syncUIState struct {
 	confirmRevokeID    string
 	confirmKeepCloudID string
 	confirmKeepLocalID string
+
+	lastSyncAt      time.Time
+	pendingFollowUp bool
+	windowOpen      bool
+	stopped         bool
+	pollTimer       *time.Timer
+	startupTimer    *time.Timer
+	cooldown        time.Duration
+	pollInterval    time.Duration
+	startupDelay    time.Duration
+	quitTimeout     time.Duration
 }
 
 // New 构造日记 UI 状态。svc 可为空（例如启动初始化失败时），界面会安静降级。
@@ -180,6 +199,10 @@ func New(svc *diary.Service, host presentation.Host, mark *ui.SVG, openSettings 
 		sync: syncUIState{
 			draftSettings:   settings,
 			deviceNameInput: diary.DefaultDeviceName(),
+			cooldown:        defaultAutoSyncCooldown,
+			pollInterval:    defaultAutoSyncPollInterval,
+			startupDelay:    defaultAutoSyncStartupDelay,
+			quitTimeout:     defaultAutoSyncQuitTimeout,
 		},
 	}
 	s.mdOpts = markdown.Options{
@@ -321,6 +344,102 @@ func (s *State) ReloadSyncSettings() {
 	}()
 }
 
+// StartAutoSync 在应用就绪后延迟触发一次自动同步，不阻塞托盘启动。
+func (s *State) StartAutoSync() {
+	if s.svc == nil || s.sync.stopped {
+		return
+	}
+	if s.sync.startupTimer != nil {
+		s.sync.startupTimer.Stop()
+	}
+	s.sync.startupTimer = time.AfterFunc(s.sync.startupDelay, func() {
+		s.host.OnMain(func() {
+			if s.sync.stopped {
+				return
+			}
+			s.sync.startupTimer = nil
+			s.ReloadSyncStatusLocal()
+			s.TriggerAutoSync(false)
+		})
+	})
+}
+
+// OnWindowOpen 在日记窗口打开时刷新列表、触发冷却保护的自动拉取，并开启低频兜底轮询。
+func (s *State) OnWindowOpen() {
+	s.sync.windowOpen = true
+	s.Reload()
+	s.TriggerAutoSync(false)
+	s.scheduleSyncPoll()
+}
+
+// OnWindowFocus 在日记窗口重新聚焦时触发冷却保护的自动拉取（编辑态跳过）。
+func (s *State) OnWindowFocus() {
+	if !s.sync.windowOpen {
+		return
+	}
+	s.TriggerAutoSync(false)
+}
+
+// OnWindowClose 在日记窗口关闭时停止前台轮询、落盘未保存草稿，若有待同步改动则后台推送一次。
+func (s *State) OnWindowClose() {
+	s.sync.windowOpen = false
+	s.stopSyncPoll()
+	s.FlushOnClose()
+	s.ReloadSyncStatusLocal()
+	if s.sync.status.PendingCount > 0 {
+		s.TriggerAutoSync(true)
+	}
+}
+
+// ShutdownBeforeQuit 在应用退出前停掉定时器、落盘草稿，并在短超时内尽力推送未同步改动。
+func (s *State) ShutdownBeforeQuit() {
+	s.sync.stopped = true
+	s.sync.windowOpen = false
+	s.stopSyncPoll()
+	if s.sync.startupTimer != nil {
+		s.sync.startupTimer.Stop()
+		s.sync.startupTimer = nil
+	}
+	s.FlushOnClose()
+	if s.svc == nil {
+		return
+	}
+	status, err := s.svc.SyncStatus(context.Background())
+	if err != nil || !status.LoggedIn || !status.Configured || status.PendingCount == 0 {
+		return
+	}
+	timeout := s.sync.quitTimeout
+	if timeout <= 0 {
+		timeout = defaultAutoSyncQuitTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_, _ = s.svc.SyncNow(ctx)
+}
+
+func (s *State) scheduleSyncPoll() {
+	s.stopSyncPoll()
+	if s.svc == nil || s.sync.stopped || !s.sync.windowOpen || s.sync.pollInterval <= 0 {
+		return
+	}
+	s.sync.pollTimer = time.AfterFunc(s.sync.pollInterval, func() {
+		s.host.OnMain(func() {
+			if s.sync.stopped || !s.sync.windowOpen {
+				return
+			}
+			s.TriggerAutoSync(false)
+			s.scheduleSyncPoll()
+		})
+	})
+}
+
+func (s *State) stopSyncPoll() {
+	if s.sync.pollTimer != nil {
+		s.sync.pollTimer.Stop()
+		s.sync.pollTimer = nil
+	}
+}
+
 // FlushOnClose 在窗口关闭或应用退出前落盘未保存的编辑草稿，避免丢失内容。
 func (s *State) FlushOnClose() {
 	if s.mode != modeEditor || s.svc == nil {
@@ -413,9 +532,11 @@ func (s *State) LoadMore() {
 // --- 详情与删除 ---
 
 func (s *State) OpenEntry(entry diary.Entry) {
-	if s.mode == modeEditor && s.ed.dirty && !s.editorDraftBlank() {
+	wasEditing := s.mode == modeEditor
+	if wasEditing && s.ed.dirty && !s.editorDraftBlank() {
 		_ = s.SaveNow()
 	}
+	shouldSync := wasEditing && s.ed.savedInSession
 	s.stopAutoSave()
 	copied := entry
 	s.currentEntry = &copied
@@ -423,6 +544,9 @@ func (s *State) OpenEntry(entry diary.Entry) {
 	s.lightboxFilename = ""
 	s.mode = modeDetail
 	s.host.Refresh()
+	if shouldSync {
+		s.TriggerAutoSync(true)
+	}
 }
 
 func (s *State) BackToTimeline() {
@@ -453,6 +577,7 @@ func (s *State) RequestDelete(id string) {
 		s.mode = modeTimeline
 	}
 	s.Reload()
+	s.TriggerAutoSync(true)
 }
 
 func (s *State) OpenLightbox(filename string) {
@@ -660,6 +785,7 @@ func (s *State) SaveNow() error {
 	s.ed.uploads = map[string]diary.AttachmentUpload{}
 	s.ed.removedAttachments = map[string]bool{}
 	s.ed.dirty = false
+	s.ed.savedInSession = true
 	s.ed.saveState = saveSaved
 	s.ed.saveErr = ""
 	s.currentEntry = &saved
@@ -680,12 +806,16 @@ func (s *State) DoneEditing() {
 			return
 		}
 	}
+	shouldSync := s.ed.savedInSession
 	if s.currentEntry != nil {
 		s.mode = modeDetail
 	} else {
 		s.mode = modeTimeline
 	}
 	s.Reload()
+	if shouldSync {
+		s.TriggerAutoSync(true)
+	}
 }
 
 func (s *State) CancelEditing() {
@@ -699,12 +829,16 @@ func (s *State) CancelEditing() {
 	if s.ed.dirty && !s.editorDraftBlank() {
 		_ = s.SaveNow()
 	}
+	shouldSync := s.ed.savedInSession
 	if s.currentEntry != nil {
 		s.mode = modeDetail
 	} else {
 		s.mode = modeTimeline
 	}
 	s.Reload()
+	if shouldSync {
+		s.TriggerAutoSync(true)
+	}
 }
 
 func (s *State) ApplyFormat(cmd diary.FormatCommand) {
@@ -1117,6 +1251,7 @@ func (s *State) CompleteLogin() {
 				s.sync.message = "登录成功。"
 				s.sync.messageWarn = false
 				s.ReloadSyncSettings()
+				s.TriggerAutoSync(true)
 			}
 			s.host.Refresh()
 		})
@@ -1131,30 +1266,77 @@ func (s *State) CancelLogin() {
 }
 
 func (s *State) SyncNow() {
-	if s.svc == nil || s.sync.syncing {
+	s.runSync(true, true)
+}
+
+// TriggerAutoSync 发起一次静默自动同步；窗口处于编辑态时跳过，避免写作期间高频同步。
+func (s *State) TriggerAutoSync(force bool) {
+	s.runSync(false, force)
+}
+
+func (s *State) runSync(manual, force bool) {
+	if s.svc == nil || s.sync.stopped {
+		return
+	}
+	if !manual {
+		if s.mode == modeEditor && s.sync.windowOpen {
+			return
+		}
+		if !s.sync.status.LoggedIn || !s.sync.status.Configured {
+			s.ReloadSyncStatusLocal()
+			if !s.sync.status.LoggedIn || !s.sync.status.Configured {
+				return
+			}
+		}
+		if !force && !s.sync.lastSyncAt.IsZero() && s.now().Sub(s.sync.lastSyncAt) < s.sync.cooldown {
+			return
+		}
+	}
+	if s.sync.syncing {
+		if force || manual {
+			s.sync.pendingFollowUp = true
+		}
 		return
 	}
 	s.sync.syncing = true
-	s.sync.message = ""
-	s.sync.messageWarn = false
+	if manual {
+		s.sync.message = ""
+		s.sync.messageWarn = false
+	}
 	s.host.Refresh()
 
 	go func() {
 		summary, err := s.svc.SyncNow(context.Background())
 		s.host.OnMain(func() {
 			s.sync.syncing = false
-			if err != nil {
-				s.sync.message = diary.SyncUserMessage(err)
-				s.sync.messageWarn = true
-			} else if summary.Conflicts > 0 {
-				s.sync.message = "同步完成，有冲突待处理。"
-				s.sync.messageWarn = true
-			} else {
-				s.sync.message = "同步完成。"
-				s.sync.messageWarn = false
+			s.sync.lastSyncAt = s.now()
+			if manual {
+				if err != nil {
+					s.sync.message = diary.SyncUserMessage(err)
+					s.sync.messageWarn = true
+				} else if summary.Conflicts > 0 {
+					s.sync.message = "同步完成，有冲突待处理。"
+					s.sync.messageWarn = true
+				} else {
+					s.sync.message = "同步完成。"
+					s.sync.messageWarn = false
+				}
 			}
-			s.Reload()
-			s.ReloadSyncSettings()
+			if manual || summary.Pulled > 0 || summary.DownloadedAttachments > 0 || summary.Pushed > 0 || summary.Conflicts > 0 {
+				s.Reload()
+			} else {
+				s.ReloadSyncStatusLocal()
+				s.host.Refresh()
+			}
+			if manual {
+				s.ReloadSyncSettings()
+			}
+			if s.sync.pendingFollowUp {
+				s.sync.pendingFollowUp = false
+				if !s.sync.stopped && !(s.mode == modeEditor && s.sync.windowOpen) {
+					s.TriggerAutoSync(true)
+				}
+			}
 		})
 	}()
 }
@@ -1247,6 +1429,9 @@ func (s *State) RequestResolveKeepCloud(entityID string) {
 			}
 			s.Reload()
 			s.ReloadSyncSettings()
+			if err == nil {
+				s.TriggerAutoSync(true)
+			}
 		})
 	}()
 }
@@ -1278,6 +1463,9 @@ func (s *State) RequestResolveKeepLocalAsNew(entityID string) {
 			}
 			s.Reload()
 			s.ReloadSyncSettings()
+			if err == nil {
+				s.TriggerAutoSync(true)
+			}
 		})
 	}()
 }

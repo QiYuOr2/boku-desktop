@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -67,7 +66,8 @@ type Service struct {
 	onChange func()
 	// running 表示有 Check 在进行，即单飞：进行中到达的 Check 立即返回，不再
 	// 询问发布源第二次。
-	running bool
+	running    bool
+	installing bool
 	// release 是 Ready 状态对应的 release，整份保留以便 Install 知道安装什么。
 	release *Release
 	// checkedAt 是上次检查的开始时间，循环据此把自身保持为每间隔一次。
@@ -256,6 +256,10 @@ func (s *Service) Check(ctx context.Context) error {
 
 	release, err := s.updater.Release(ctx, s.current)
 	if err != nil {
+		if errors.Is(err, domain.ErrUpdateUnsupported) {
+			s.set(domain.UpdateState{Status: domain.UpdateUnsupported})
+			return domain.ErrUpdateUnsupported
+		}
 		return s.fail(err)
 	}
 	if release == nil {
@@ -267,49 +271,18 @@ func (s *Service) Check(ctx context.Context) error {
 	if err := release.Validate(); err != nil {
 		return s.fail(err)
 	}
-	asset, _ := release.Archive()
-	// release 列出了本应用可安装的归档，安装由 updater 完成（在那里按编译进
-	// 构建的公钥校验签名）。此处、在请用户重启之前要确定的是：归档能以清单承诺
-	// 的大小取得——使「并不存在的 release」现在就成为失败，而不是重启进空白。
-	if err := s.verify(ctx, release, asset); err != nil {
-		return s.fail(err)
-	}
 	s.mu.Lock()
 	s.release = release
 	s.mu.Unlock()
 	s.discard()
-	// updater 负责取包、校验签名并安装；该状态表明它可以被请求这样做，以及将
-	// 安装哪个版本。
+	// 下载（含增量包）、Ed25519 签名校验与原地替换统一交由底层 updater 在 Install 时执行，
+	// 避免检查阶段白下整包。
 	s.set(domain.UpdateState{
 		Status:  domain.UpdateReady,
 		Version: release.Version,
 		Notes:   release.Notes,
 	})
-	slog.Info("an update is ready", "version", release.Version, "bytes", asset.Size)
-	return nil
-}
-
-// verify 完整读一遍 release 的归档但不保留它，使无法下载或大小不符的 release
-// 现在、而非用户重启后成为失败。读取受 MaxArchiveSize 约束：比清单承诺多一个
-// 字节就足够判断，占用的是缓冲区而非整个归档。
-//
-// 它是本包唯一触网处，且通过注入实现：包自身不打开任何连接。
-func (s *Service) verify(ctx context.Context, release *Release, asset Asset) error {
-	if asset.Size <= 0 || asset.Size > MaxArchiveSize {
-		return wrapUnavailable(fmt.Sprintf("the release gives the archive %d bytes, which is not a size it can be", asset.Size), nil)
-	}
-	body, err := s.updater.Fetch(ctx, asset.URL)
-	if err != nil {
-		return unavailableFrom("the release could not be downloaded", err)
-	}
-	defer body.Close()
-	read, err := io.CopyN(io.Discard, body, asset.Size+1)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return unavailableFrom("the release could not be downloaded", err)
-	}
-	if read != asset.Size {
-		return wrapUnavailable(fmt.Sprintf("the release promises %d bytes and served %d", asset.Size, read), nil)
-	}
+	slog.Info("an update is ready", "version", release.Version)
 	return nil
 }
 

@@ -199,4 +199,23 @@ func TestEntryPayloadRoundTrip(t *testing.T) {
 	if round.Weather == nil || round.Weather.Description != "晴" || round.Weather.TemperatureCelsius != 22.5 {
 		t.Fatalf("weather mismatch: %+v", round.Weather)
 	}
+
+	crlfEntry := entry
+	crlfEntry.Markdown = "第一行\r\n第二行\r第三行\n第四行"
+	crlfPayload, err := EntryToPayload(crlfEntry)
+	if err != nil {
+		t.Fatalf("EntryToPayload crlf: %v", err)
+	}
+	if crlfPayload.Markdown == nil || *crlfPayload.Markdown != "第一行\n第二行\n第三行\n第四行" {
+		t.Fatalf("EntryToPayload did not normalize line endings: %v", crlfPayload.Markdown)
+	}
+	rawCRLF := "云端第一行\r\n云端第二行\r云端第三行"
+	crlfPayload.Markdown = &rawCRLF
+	pulled, err := EntryFromPayload(entryID, crlfPayload)
+	if err != nil {
+		t.Fatalf("EntryFromPayload crlf: %v", err)
+	}
+	if pulled.Markdown != "云端第一行\n云端第二行\n云端第三行" {
+		t.Fatalf("EntryFromPayload did not normalize line endings: %q", pulled.Markdown)
+	}
 }

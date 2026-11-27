@@ -2,7 +2,12 @@ package ui
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,9 +18,62 @@ import (
 	"boku/internal/settings"
 )
 
+type stepClock struct {
+	mu sync.Mutex
+	at time.Time
+}
+
+func (c *stepClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.at
+}
+
+func (c *stepClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.at = c.at.Add(d)
+}
+
 type fixedClock struct{ at time.Time }
 
 func (c fixedClock) Now() time.Time { return c.at }
+
+type memSecrets struct {
+	mu    sync.Mutex
+	items map[string][]byte
+}
+
+func newMemSecrets() *memSecrets { return &memSecrets{items: map[string][]byte{}} }
+
+func (m *memSecrets) Unlock(context.Context, string) error { return nil }
+func (m *memSecrets) Lock()                                {}
+func (m *memSecrets) Unlocked() bool                       { return true }
+func (m *memSecrets) Put(_ context.Context, key string, value []byte, _ domain.SecretMeta) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.items[key] = append([]byte(nil), value...)
+	return nil
+}
+func (m *memSecrets) Get(_ context.Context, key string) (domain.Secret, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	v, ok := m.items[key]
+	if !ok {
+		return domain.Secret{}, domain.ErrSecretNotFound
+	}
+	return domain.Secret{Name: key, Value: append([]byte(nil), v...)}, nil
+}
+func (m *memSecrets) Delete(_ context.Context, key string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.items, key)
+	return nil
+}
+func (m *memSecrets) List(context.Context) ([]string, error) { return nil, nil }
+func (m *memSecrets) Meta(context.Context, string) (domain.SecretMeta, error) {
+	return domain.SecretMeta{}, domain.ErrSecretNotFound
+}
 
 type noopSecrets struct{}
 
@@ -159,5 +217,157 @@ func TestStateDiarySettingsValidation(t *testing.T) {
 	s.SaveDiarySettings()
 	if s.sync.settingsWarn || !s.sync.status.Configured {
 		t.Fatalf("valid settings should persist and mark sync configured: warn=%v status=%+v", s.sync.settingsWarn, s.sync.status)
+	}
+}
+
+func TestStateAutoSyncSkipsEditingAndRespectsCooldown(t *testing.T) {
+	var pushCalls atomic.Int32
+	var pullCalls atomic.Int32
+	var version atomic.Int64
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/sync/push":
+			pushCalls.Add(1)
+			var req diary.PushRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			results := make([]diary.PushResult, 0, len(req.Mutations))
+			for _, m := range req.Mutations {
+				v := version.Add(1)
+				cur := "1"
+				results = append(results, diary.PushResult{
+					MutationID: m.MutationID,
+					Status:     diary.StatusApplied,
+					Version:    &v,
+					Cursor:     &cur,
+				})
+			}
+			_ = json.NewEncoder(w).Encode(diary.PushResponse{Results: results})
+		case "/v1/sync/pull":
+			pullCalls.Add(1)
+			hasMore := false
+			cur := "1"
+			_ = json.NewEncoder(w).Encode(diary.PullResponse{
+				Changes:    []diary.Change{},
+				NextCursor: &cur,
+				HasMore:    &hasMore,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	dir := t.TempDir()
+	sec := diary.NewSection()
+	prefs, err := settings.New(filepath.Join(dir, "settings.json"), sec)
+	if err != nil {
+		t.Fatalf("settings.New: %v", err)
+	}
+	if err := prefs.Update(context.Background(), "diary", func() error {
+		sec.Set(diary.Settings{SyncEndpoint: srv.URL})
+		return nil
+	}); err != nil {
+		t.Fatalf("update settings: %v", err)
+	}
+
+	secrets := newMemSecrets()
+	_ = secrets.Put(context.Background(), diary.DeviceCredentialKey, []byte("bkd_test_token"), domain.SecretMeta{})
+	_ = secrets.Put(context.Background(), diary.DeviceIDKey, []byte("019655c0-0000-7000-8000-000000000010"), domain.SecretMeta{})
+	_ = secrets.Put(context.Background(), diary.AccountEmailKey, []byte("qiyu@example.com"), domain.SecretMeta{})
+
+	clk := &stepClock{at: time.Date(2026, 4, 20, 12, 0, 0, 0, time.Local)}
+	svc, err := diary.OpenService(dir, sec, prefs, secrets, httpc.New(httpc.Options{}), clk)
+	if err != nil {
+		t.Fatalf("OpenService: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
+
+	mainCh := make(chan func(), 16)
+	host := presentation.Host{
+		RunOnMain: func(fn func()) {
+			mainCh <- fn
+		},
+	}
+	s := New(svc, host, nil, nil)
+	s.sync.pollInterval = time.Hour // 测试里不靠后台轮询，显式触发路径。
+
+	drainOne := func() {
+		t.Helper()
+		select {
+		case fn := <-mainCh:
+			fn()
+		case <-time.After(3 * time.Second):
+			t.Fatal("timed out waiting for main-thread sync callback")
+		}
+	}
+
+	// 打开窗口触发首次拉取。
+	s.OnWindowOpen()
+	drainOne()
+	if pullCalls.Load() != 1 || pushCalls.Load() != 0 {
+		t.Fatalf("OnWindowOpen expected 1 pull / 0 push, got pull=%d push=%d", pullCalls.Load(), pushCalls.Load())
+	}
+
+	// 冷却期内再次聚焦不应触发同步。
+	clk.Advance(10 * time.Second)
+	s.OnWindowFocus()
+	if s.sync.syncing || pullCalls.Load() != 1 {
+		t.Fatalf("OnWindowFocus within cooldown must not sync, syncing=%v pull=%d", s.sync.syncing, pullCalls.Load())
+	}
+
+	// 进入编辑态：即使过了冷却期，编辑期间保存（含自动保存）和窗口聚焦都不得触发同步。
+	clk.Advance(60 * time.Second)
+	s.NewEntry(diary.DateKey{Year: 2026, Month: 4, Day: 20})
+	s.ed.title = "写作中"
+	s.ed.markdown = "第一段"
+	if err := s.SaveNow(); err != nil {
+		t.Fatalf("SaveNow: %v", err)
+	}
+	s.OnWindowFocus()
+	s.TriggerAutoSync(false)
+	s.TriggerAutoSync(true)
+	if s.sync.syncing || pushCalls.Load() != 0 || pullCalls.Load() != 1 {
+		t.Fatalf("editing must not trigger sync, syncing=%v push=%d pull=%d", s.sync.syncing, pushCalls.Load(), pullCalls.Load())
+	}
+
+	// 退出编辑后立刻触发一次推送。
+	s.DoneEditing()
+	drainOne()
+	if pushCalls.Load() != 1 || pullCalls.Load() != 2 {
+		t.Fatalf("DoneEditing expected push=1 pull=2, got push=%d pull=%d", pushCalls.Load(), pullCalls.Load())
+	}
+	if s.sync.status.PendingCount != 0 {
+		t.Fatalf("expected PendingCount=0 after sync, got %d", s.sync.status.PendingCount)
+	}
+
+	// 超过冷却期后重新聚焦触发拉取。
+	clk.Advance(35 * time.Second)
+	s.OnWindowFocus()
+	drainOne()
+	if pullCalls.Load() != 3 {
+		t.Fatalf("OnWindowFocus after cooldown expected pull=3, got %d", pullCalls.Load())
+	}
+
+	// 删除日记立即推送墓碑（忽略冷却）。
+	id := s.entries[0].ID
+	s.RequestDelete(id)
+	s.RequestDelete(id)
+	drainOne()
+	if pushCalls.Load() != 2 {
+		t.Fatalf("RequestDelete expected push=2, got %d", pushCalls.Load())
+	}
+
+	// 编辑态直接退出应用：ShutdownBeforeQuit 应落盘并同步推送一次。
+	s.NewEntry(diary.DateKey{Year: 2026, Month: 4, Day: 20})
+	s.ed.title = "退出前草稿"
+	s.ed.markdown = "尚未退出编辑"
+	s.ed.dirty = true
+	s.ShutdownBeforeQuit()
+	if pushCalls.Load() != 3 {
+		t.Fatalf("ShutdownBeforeQuit expected push=3, got %d", pushCalls.Load())
 	}
 }

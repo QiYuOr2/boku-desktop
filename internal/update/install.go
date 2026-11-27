@@ -35,15 +35,40 @@ func (s *Service) Install(ctx context.Context) error {
 	s.mu.Lock()
 	state := s.state
 	release := s.release
-	s.mu.Unlock()
+	if s.installing {
+		s.mu.Unlock()
+		return nil
+	}
 	if state.Status != domain.UpdateReady || release == nil {
+		s.mu.Unlock()
 		return fmt.Errorf("%w: there is no downloaded update to install", domain.ErrUpdateUnavailable)
 	}
+	s.installing = true
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.installing = false
+		s.mu.Unlock()
+	}()
 	version := release.Version
+	notes := release.Notes
 
 	slog.Info("installing the update", "version", version)
+	s.set(domain.UpdateState{
+		Status:  domain.UpdateDownloading,
+		Version: version,
+		Notes:   notes,
+	})
 	installCtx, cancel := context.WithTimeout(ctx, installTimeout)
-	err := s.updater.Install(installCtx, version)
+	err := s.updater.Install(installCtx, version, func(downloaded, total int64) {
+		s.set(domain.UpdateState{
+			Status:     domain.UpdateDownloading,
+			Version:    version,
+			Notes:      notes,
+			Downloaded: downloaded,
+			Total:      total,
+		})
+	})
 	cancel()
 
 	// 无论如何，这个 release 都不再提供：要么已应用，要么已无法从这里安装。
@@ -70,7 +95,6 @@ func (s *Service) Install(ctx context.Context) error {
 		})
 		return nil
 	}
-	// 归档是唯一能还原被替换安装的东西，因此留在磁盘上直到下次启动清理。
 	s.set(domain.UpdateState{
 		Status:  domain.UpdateUpToDate,
 		Version: version,

@@ -1,16 +1,12 @@
 package update
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"io"
 	"sync"
 	"testing"
 )
 
-// fakeUpdater 把发布源与传输合为一体，测试可让它回答任何内容：发布源说什么、
-// 归档是什么、是否被要求安装。
+// fakeUpdater 模拟底层更新器：发布源说什么、安装是否回报下载进度与成功/失败。
 type fakeUpdater struct {
 	enabled bool
 
@@ -19,22 +15,19 @@ type fakeUpdater struct {
 	release *Release
 	// releaseErr 是无法读取的发布源。
 	releaseErr error
-	// archive 是 Fetch 按 URL 提供的归档；不在其中的 URL 即无法下载的文件。
-	archive map[string][]byte
-	// fetchErr 为指定 URL 让 Fetch 失败。
-	fetchErr map[string]error
 
-	// releases 与 fetches 记录被请求了什么，用于核对单飞。
+	// releases 记录 Release 被调用次数，用于核对单飞。
 	releases int
-	fetches  []string
 	// installed 是 Install 被要求的版本，installs 记录调用次数，使第二次安装可见。
-	installed  string
-	installs   int
-	installErr error
+	installed     string
+	installs      int
+	installErr    error
+	installSteps  [][2]int64
+	installBefore func()
 }
 
 func newFakeUpdater() *fakeUpdater {
-	return &fakeUpdater{enabled: true, archive: map[string][]byte{}, fetchErr: map[string]error{}}
+	return &fakeUpdater{enabled: true}
 }
 
 func (f *fakeUpdater) Enabled() bool { return f.enabled }
@@ -49,33 +42,31 @@ func (f *fakeUpdater) Release(context.Context, string) (*Release, error) {
 	return f.release, nil
 }
 
-func (f *fakeUpdater) Fetch(_ context.Context, url string) (io.ReadCloser, error) {
+func (f *fakeUpdater) Install(_ context.Context, version string, progress func(downloaded, total int64)) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.fetches = append(f.fetches, url)
-	if err := f.fetchErr[url]; err != nil {
-		return nil, err
-	}
-	body, ok := f.archive[url]
-	if !ok {
-		return nil, errors.New("no such file")
-	}
-	return io.NopCloser(bytes.NewReader(body)), nil
-}
-
-func (f *fakeUpdater) Install(_ context.Context, version string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.installs++
 	f.installed = version
-	return f.installErr
+	steps := append([][2]int64(nil), f.installSteps...)
+	before := f.installBefore
+	err := f.installErr
+	f.mu.Unlock()
+
+	if before != nil {
+		before()
+	}
+	if progress != nil {
+		for _, step := range steps {
+			progress(step[0], step[1])
+		}
+	}
+	return err
 }
 
-// counts 在锁下返回发布源与传输被请求的次数：检查可能在独立 goroutine 上运行。
-func (f *fakeUpdater) counts() (releases int, fetches []string, installs int) {
+// counts 在锁下返回检查与安装调用次数：检查可能在独立 goroutine 上运行。
+func (f *fakeUpdater) counts() (releases, installs int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.releases, append([]string(nil), f.fetches...), f.installs
+	return f.releases, f.installs
 }
 
 // fakeRelauncher 记录应用是否被要求重启。
@@ -96,26 +87,14 @@ func (r *fakeRelauncher) count() int {
 	return r.relaunch
 }
 
-// aRelease 是命名一个归档的 release。
-func aRelease(t *testing.T, version string, payload []byte) *Release {
+func aRelease(t *testing.T, version string) *Release {
 	t.Helper()
 	release := &Release{
 		Version: version,
 		Notes:   "the notes of " + version,
-		Assets: []Asset{{
-			Name: version + ".tar.gz",
-			URL:  "https://example.invalid/" + version + ".tar.gz",
-			Size: int64(len(payload)),
-		}},
 	}
 	if err := release.Validate(); err != nil {
 		t.Fatalf("the fixture release is not one: %v", err)
 	}
 	return release
-}
-
-// serve 把 payload 放到 release 的归档位置。
-func serve(f *fakeUpdater, release *Release, payload []byte) {
-	asset, _ := release.Archive()
-	f.archive[asset.URL] = payload
 }

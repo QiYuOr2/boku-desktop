@@ -42,7 +42,7 @@ func Summary(markdown string, limit int) string {
 	}
 	var visible []string
 	inFence := false
-	for _, raw := range strings.Split(strings.ReplaceAll(markdown, "\r\n", "\n"), "\n") {
+	for _, raw := range strings.Split(NormalizeLineEndings(markdown), "\n") {
 		trimmed := strings.TrimSpace(raw)
 		if isFence(trimmed) {
 			inFence = !inFence

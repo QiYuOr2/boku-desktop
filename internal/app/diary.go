@@ -33,7 +33,7 @@ func (s *State) openDiary() {
 	if s.panel != nil {
 		s.panel.Close()
 	}
-	s.diaryUI.Reload()
+	s.diaryUI.OnWindowOpen()
 	s.syncActivationPolicy()
 	if s.diaryWindow == nil {
 		window := mygo.NewWindow(mygo.WindowOptions{
@@ -46,8 +46,15 @@ func (s *State) openDiary() {
 		})
 		s.diaryWindow = window
 		s.syncActivationPolicy()
+		window.OnFocus(func() {
+			if s.diaryUI != nil {
+				s.diaryUI.OnWindowFocus()
+			}
+		})
 		window.OnClose(func(*mygo.CloseEvent) {
-			s.FlushDiary()
+			if s.diaryUI != nil {
+				s.diaryUI.OnWindowClose()
+			}
 		})
 		window.OnClosed(func() {
 			if s.diaryWindow == window {
@@ -68,9 +75,16 @@ func (s *State) openDiarySettings() {
 	s.openSettingsSection(sectionDiary)
 }
 
-// FlushDiary 在关闭日记窗口或退出应用前保存编辑器中未落盘的修改。
+// StartDiaryAutoSync 在应用就绪后安排日记云同步的初始自动拉取。
+func (s *State) StartDiaryAutoSync() {
+	if s.diaryUI != nil {
+		s.diaryUI.StartAutoSync()
+	}
+}
+
+// FlushDiary 在退出应用前落盘未保存修改并尽力推送待同步日记。
 func (s *State) FlushDiary() {
 	if s.diaryUI != nil {
-		s.diaryUI.FlushOnClose()
+		s.diaryUI.ShutdownBeforeQuit()
 	}
 }
